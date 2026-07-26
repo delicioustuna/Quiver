@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Api;
 
 /// <summary>
-/// 重み付き最短経路 (<see cref="GraphTraversalSource.WeightedShortestPath(NodeId, NodeId, string, Quiver.Storage.Records.Direction, string?, double)"/> /
+/// 重み付き最短経路 (<see cref="GraphTraversalSource.WeightedShortestPath(VertexId, VertexId, string, Quiver.Storage.Records.Direction, string?, double)"/> /
 /// <see cref="GraphTraversalSource.WeightedShortestPathAStar"/>) の結果。
 /// </summary>
 /// <param name="Found">経路が見つかったか。</param>
@@ -11,15 +11,15 @@ namespace Quiver.Api;
 /// 経路上のエッジ重みの合計。<see cref="Found"/> が <c>false</c> のときは
 /// <see cref="double.PositiveInfinity"/>。
 /// </param>
-/// <param name="Nodes">始点から終点までのノード列 (始点・終点を含む)。</param>
-/// <param name="Relationships">
-/// 経路上を順に辿るリレーションシップ列。要素数は <see cref="Nodes"/> の数 - 1。
+/// <param name="Vertices">始点から終点までのVertex列 (始点・終点を含む)。</param>
+/// <param name="Edges">
+/// 経路上を順に辿るEdge列。要素数は <see cref="Vertices"/> の数 - 1。
 /// </param>
 public sealed record WeightedPathResult(
     bool Found,
     double Distance,
-    IReadOnlyList<NodeId> Nodes,
-    IReadOnlyList<RelationshipId> Relationships)
+    IReadOnlyList<VertexId> Vertices,
+    IReadOnlyList<EdgeId> Edges)
 {
     /// <summary>経路が存在しないことを表す共有インスタンス。</summary>
     public static readonly WeightedPathResult NotFound =

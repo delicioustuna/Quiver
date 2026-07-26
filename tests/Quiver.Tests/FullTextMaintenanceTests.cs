@@ -1,15 +1,13 @@
 using FluentAssertions;
+using Quiver.Api;
 using Quiver.Core;
-using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;
 
 /// <summary>
-/// SetProperty / DeleteNode の書き込み経路に統合された全文インデックス保守を検証する。
-/// 挿入、更新時の更新前イメージ削除、削除、ロールバックのすべてで、
-/// 同一トランザクション内の Postings と Norms が整合することを確認する。
+/// property mutation がimmutable全文segmentへ反映されることを検証する。
 /// </summary>
 public sealed class FullTextMaintenanceTests : IDisposable
 {
@@ -28,131 +26,122 @@ public sealed class FullTextMaintenanceTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static FullTextIndex Ft(GraphDatabase db, string name)
+    private static List<VertexId> Search(
+        IReadTransaction transaction,
+        string query)
     {
-        ((SchemaApi)db.Schema).IndexManager.TryGetFullTextIndex(name, out var ft).Should().BeTrue();
-        return ft;
+        return transaction.Query.Search("idx_body", query, 10).ToList();
     }
 
     [Fact]
-    public void SetProperty_on_indexed_label_writes_postings()
+    public void Committed_text_is_searchable()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        NodeId node;
-        using (var tx = db.BeginTransaction())
+        VertexId vertex;
+        using (var tx = db.BeginWriteTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
 
-        var ft = Ft(db, "idx_body");
-        ft.DocumentCount.Should().Be(1);
-        var hello = ft.GetPostings("hello");
-        hello.Should().ContainSingle();
-        EntityRef.Sequence(hello[0].EntityId).Should().Be(node.Sequence);
+        using var read = db.BeginReadTransaction();
+        Search(read, "hello").Should().ContainSingle().Which.Should().Be(vertex);
     }
 
     [Fact]
     public void Read_your_own_writes_within_the_same_transaction()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
-        var ft = Ft(db, "idx_body");
-
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("inflight content"));
-        // Postings are visible before commit (same-Tx read-your-own-writes).
-        ft.GetPostings("inflight").Should().ContainSingle();
+        Search(tx, "inflight").Should().ContainSingle().Which.Should().Be(n);
         tx.Commit();
     }
 
     [Fact]
-    public void Updating_property_removes_old_terms_via_before_image()
+    public void Updating_text_replaces_visible_terms()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        NodeId node;
-        using (var tx = db.BeginTransaction())
+        VertexId vertex;
+        using (var tx = db.BeginWriteTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            tx.SetProperty(node, "body", PropertyValue.FromString("goodbye world"));
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("goodbye world"));
             tx.Commit();
         }
 
-        var ft = Ft(db, "idx_body");
-        ft.GetPostings("hello").Should().BeEmpty();
-        ft.GetPostings("goodbye").Should().ContainSingle();
-        ft.GetPostings("world").Should().ContainSingle();
-        ft.DocumentCount.Should().Be(1); // norm replaced, not duplicated
+        using var read = db.BeginReadTransaction();
+        Search(read, "hello").Should().BeEmpty();
+        Search(read, "goodbye").Should().ContainSingle().Which.Should().Be(vertex);
+        Search(read, "world").Should().ContainSingle().Which.Should().Be(vertex);
     }
 
     [Fact]
     public void Rollback_leaves_no_postings()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var n = tx.CreateNode("Doc");
+            var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "body", PropertyValue.FromString("transient text"));
             tx.Rollback();
         }
 
-        var ft = Ft(db, "idx_body");
-        ft.GetPostings("transient").Should().BeEmpty();
-        ft.DocumentCount.Should().Be(0);
+        using var read = db.BeginReadTransaction();
+        Search(read, "transient").Should().BeEmpty();
     }
 
     [Fact]
-    public void DeleteNode_removes_postings()
+    public void DeleteVertex_removes_postings()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        NodeId node;
-        using (var tx = db.BeginTransaction())
+        VertexId vertex;
+        using (var tx = db.BeginWriteTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            tx.DeleteNode(node);
+            tx.DeleteVertex(vertex);
             tx.Commit();
         }
 
-        var ft = Ft(db, "idx_body");
-        ft.GetPostings("hello").Should().BeEmpty();
-        ft.DocumentCount.Should().Be(0);
+        using var read = db.BeginReadTransaction();
+        Search(read, "hello").Should().BeEmpty();
     }
 
     [Fact]
     public void Writes_to_unbound_keys_are_not_indexed()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        using var db = QuiverDatabase.Open(_path);
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition("idx_body", new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var n = tx.CreateNode("Doc");
+            var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "title", PropertyValue.FromString("not indexed")); // 'title' is unbound
             tx.Commit();
         }
 
-        var ft = Ft(db, "idx_body");
-        ft.GetPostings("not").Should().BeEmpty();
-        ft.DocumentCount.Should().Be(0);
+        using var read = db.BeginReadTransaction();
+        Search(read, "not").Should().BeEmpty();
     }
 }

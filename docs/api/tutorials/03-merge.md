@@ -3,15 +3,22 @@
 Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON MATCH の分岐を書く。完全コードは [`samples/Quiver.Samples.Match`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Match)。
 
 ```csharp
-using var db = GraphDatabase.Open("./mygraph");
+using var db = QuiverDatabase.Open("./mygraph");
 
-// MergeNode を高速化するため、起動時に一度だけインデックスを作成する。
+// MergeVertex を高速化するため、起動時に一度だけインデックスを作成する。
 // 未作成の場合はフルスキャン経路に落ち、初回呼び出しで Trace 警告が出る。
-db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 
-using var tx = db.BeginTransaction();
+using var tx = db.BeginWriteTransaction();
 
-var (id, created) = tx.MergeNode(
+var (id, created) = tx.MergeVertex(
     "Person",
     "email",
     PropertyValue.FromString("alice@example.com"));
@@ -31,10 +38,11 @@ tx.Commit();
 ## Match DSL によるパターンマッチ
 
 ```csharp
-var g = tx.G(db.Schema);
+using var tx = db.BeginReadTransaction();
+var g = tx.Query;
 var pairs = g.Match(
-    GraphPattern.Node("n", "Person")
-                .Out("KNOWS", GraphPattern.Node("m", "Person"))
+    GraphPattern.Vertex("n", "Person")
+                .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
 )
 .Where("n", "age", P.Gt(25L))
 .Return(v => new

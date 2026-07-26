@@ -38,11 +38,11 @@ public sealed class FullTextScanOperatorTests
     }
 
     [Fact]
-    public void Schema_has_single_NodeId_column()
+    public void Schema_has_single_VertexId_column()
     {
         var op = new FullTextScanOperator(IndexName, "hello", k: 3);
         op.Schema.Columns.Should().HaveCount(1);
-        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.NodeId);
+        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.VertexId);
         op.Dispose();
     }
 
@@ -50,10 +50,10 @@ public sealed class FullTextScanOperatorTests
     public void Open_on_missing_index_throws_ConstraintException()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_missing");
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var op = new FullTextScanOperator("no_such_index", "hello", k: 3);
 
-        Action act = () => op.Open(((GraphTransaction)tx).Inner);
+        Action act = () => op.Open(tx.AsInternal().Inner);
         act.Should().Throw<ConstraintException>();
         op.Dispose();
         tx.Rollback();
@@ -63,9 +63,9 @@ public sealed class FullTextScanOperatorTests
     public void Empty_index_returns_no_results()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_empty");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "hello", k: 10));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -75,15 +75,15 @@ public sealed class FullTextScanOperatorTests
     public void No_hit_query_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_nohit");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
-            var n = seed.CreateNode("Doc");
+            var n = seed.CreateVertex("Doc");
             seed.SetProperty(n, "body", PropertyValue.FromString("alpha beta gamma"));
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "zzzzz", k: 10));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -92,17 +92,17 @@ public sealed class FullTextScanOperatorTests
     [Fact]
     public void Single_match_returns_one_row()
     {
-        NodeId docId = default;
+        VertexId docId = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_single");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
-            docId = seed.CreateNode("Doc");
+            docId = seed.CreateVertex("Doc");
             seed.SetProperty(docId, "body", PropertyValue.FromString("hello world"));
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "hello", k: 10));
         var rows = result.Rows().ToList();
         rows.Should().HaveCount(1);
@@ -113,17 +113,17 @@ public sealed class FullTextScanOperatorTests
     public void Multiple_hits_ordered_by_relevance()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_rank");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
-            var d1 = seed.CreateNode("Doc");
+            var d1 = seed.CreateVertex("Doc");
             seed.SetProperty(d1, "body", PropertyValue.FromString("foo bar"));
-            var d2 = seed.CreateNode("Doc");
+            var d2 = seed.CreateVertex("Doc");
             seed.SetProperty(d2, "body", PropertyValue.FromString("foo foo"));
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "foo", k: 10));
         var rows = result.Rows().ToList();
         rows.Should().HaveCount(2);
@@ -135,18 +135,18 @@ public sealed class FullTextScanOperatorTests
     public void K_limits_result_count()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_klimit");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
             {
-                var n = seed.CreateNode("Doc");
+                var n = seed.CreateVertex("Doc");
                 seed.SetProperty(n, "body", PropertyValue.FromString("common term here"));
             }
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "common", k: 2));
         result.Rows().Should().HaveCount(2);
         tx.Rollback();
@@ -156,19 +156,19 @@ public sealed class FullTextScanOperatorTests
     public void Statistics_tracks_rows_produced()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_stats");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
-            var n1 = seed.CreateNode("Doc");
+            var n1 = seed.CreateVertex("Doc");
             seed.SetProperty(n1, "body", PropertyValue.FromString("alpha"));
-            var n2 = seed.CreateNode("Doc");
+            var n2 = seed.CreateVertex("Doc");
             seed.SetProperty(n2, "body", PropertyValue.FromString("alpha beta"));
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var op = new FullTextScanOperator(IndexName, "alpha", k: 10);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         var count = 0;
         while (op.MoveNext()) count++;
         op.Statistics.RowsProduced.Should().Be(count);

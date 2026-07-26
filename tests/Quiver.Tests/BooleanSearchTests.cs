@@ -15,13 +15,13 @@ public sealed class BooleanSearchTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public BooleanSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_bool_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -30,19 +30,19 @@ public sealed class BooleanSearchTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body)
+    private VertexId AddDoc(string body)
     {
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
         return n;
     }
 
-    private List<NodeId> Search(string query, int k = 10)
+    private List<VertexId> Search(string query, int k = 10)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     // ── AND ──
@@ -214,11 +214,11 @@ public sealed class BooleanSearchTests : IDisposable
         AddDoc("graph visualization tool");
         AddDoc("database only");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var textFirst = g.Search(Index, "graph AND database", k: 10).ToList();
-        var graphFirst = g.Nodes().HasLabel("Doc")
+        var graphFirst = g.Vertices().HasLabel("Doc")
             .FilterByText(Index, "graph AND database", k: 10).ToList();
 
         graphFirst.Should().Equal(textFirst);
@@ -231,11 +231,11 @@ public sealed class BooleanSearchTests : IDisposable
         AddDoc("graph engine");
         AddDoc("unrelated");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var textFirst = g.Search(Index, "graph NOT database", k: 10).ToList();
-        var graphFirst = g.Nodes().HasLabel("Doc")
+        var graphFirst = g.Vertices().HasLabel("Doc")
             .FilterByText(Index, "graph NOT database", k: 10).ToList();
 
         graphFirst.Should().Equal(textFirst);
@@ -251,8 +251,8 @@ public sealed class BooleanSearchTests : IDisposable
         AddDoc("database only");
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         var results = g.Search(Index, "graph AND database", k: 10).ToList();
 
@@ -297,14 +297,14 @@ public sealed class BooleanSearchTests : IDisposable
     }
 
     [Fact]
-    public void Deleted_node_is_not_returned_with_boolean()
+    public void Deleted_vertex_is_not_returned_with_boolean()
     {
         var d1 = AddDoc("graph database engine");
         AddDoc("graph visualization");
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            tx.DeleteNode(d1);
+            tx.DeleteVertex(d1);
             tx.Commit();
         }
 
@@ -315,11 +315,11 @@ public sealed class BooleanSearchTests : IDisposable
     [Fact]
     public void Read_your_own_writes_with_boolean()
     {
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("graph database engine"));
 
-        var hits = tx.G(_db.Schema).Search(Index, "graph AND database", k: 10).ToList();
+        var hits = tx.Query.Search(Index, "graph AND database", k: 10).ToList();
         hits.Should().ContainSingle().Which.Should().Be(n);
 
         tx.Commit();

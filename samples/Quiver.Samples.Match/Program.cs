@@ -10,29 +10,29 @@ using Quiver.Storage.Records;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_match_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     // ── データ投入 ──
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var g = tx.G(db.Schema);
-        var alice = g.AddNode("Person").P("name", "Alice").P("age", 30).Next();
-        var bob   = g.AddNode("Person").P("name", "Bob").P("age", 25).Next();
-        var carol = g.AddNode("Person").P("name", "Carol").P("age", 35).Next();
-        g.AddRelationship("KNOWS").From(alice).To(bob).Next();
-        g.AddRelationship("KNOWS").From(alice).To(carol).Next();
-        g.AddRelationship("KNOWS").From(bob).To(carol).Next();
+        var g = tx.Query;
+        var alice = tx.Mutate.AddVertex("Person").P("name", "Alice").P("age", 30).Next();
+        var bob   = tx.Mutate.AddVertex("Person").P("name", "Bob").P("age", 25).Next();
+        var carol = tx.Mutate.AddVertex("Person").P("name", "Carol").P("age", 35).Next();
+        tx.Mutate.AddEdge("KNOWS").From(alice).To(bob).Next();
+        tx.Mutate.AddEdge("KNOWS").From(alice).To(carol).Next();
+        tx.Mutate.AddEdge("KNOWS").From(bob).To(carol).Next();
         tx.Commit();
     }
 
     // ── パターン照合を記述する Match DSL ──
     Console.WriteLine("── 1. Match DSL: (n:Person)-[:KNOWS]->(m:Person) WHERE n.age > 25 ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var pairs = g.Match(
-            GraphPattern.Node("n", "Person")
-                        .Out("KNOWS", GraphPattern.Node("m", "Person"))
+            GraphPattern.Vertex("n", "Person")
+                        .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
         )
         .Where("n", "age", P.Gt(25L))
         .Return(v => new
@@ -48,16 +48,16 @@ try
 
     // ── MERGE: 重複なし upsert ──
     Console.WriteLine();
-    Console.WriteLine("── 2. MERGE で同じメアドのノードを重複作成しない ──");
-    using (var tx = db.BeginTransaction())
+    Console.WriteLine("── 2. MERGE で同じメアドのVertexを重複作成しない ──");
+    using (var tx = db.BeginWriteTransaction())
     {
-        var (id1, created1) = tx.MergeNode(
+        var (id1, created1) = tx.MergeVertex(
             "Person", "email", PropertyValue.FromString("dave@example.com"));
-        Console.WriteLine($"  1 回目 MergeNode: created={created1}, id={id1.Value}");
+        Console.WriteLine($"  1 回目 MergeVertex: created={created1}, id={id1.Value}");
 
-        var (id2, created2) = tx.MergeNode(
+        var (id2, created2) = tx.MergeVertex(
             "Person", "email", PropertyValue.FromString("dave@example.com"));
-        Console.WriteLine($"  2 回目 MergeNode: created={created2}, id={id2.Value}");
+        Console.WriteLine($"  2 回目 MergeVertex: created={created2}, id={id2.Value}");
 
         tx.Commit();
     }

@@ -14,14 +14,17 @@ public sealed class LogicalOptimizerTests
 {
     private readonly StubSchemaApi _schema = new();
 
+    private static LabelId ResolveLabel(ISchemaCatalog schema, string name)
+        => schema.TryGetLabelId(name, out var id) ? id : LabelId.Invalid;
+
     // ── LabelScanRewrite ────────────────────────────────────────────────────────
 
     [Fact]
     public void LabelScanRewrite_folds_label_filter_into_ScanOp()
     {
         var labelId = _schema.GetOrCreateLabel("Person");
-        var scan = new ScanOp(EntityKind.Node, null);
-        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Person")));
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Person")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -33,8 +36,8 @@ public sealed class LogicalOptimizerTests
     public void LabelScanRewrite_does_not_fold_when_scan_already_has_label()
     {
         var existingLabel = new LabelId(99);
-        var scan = new ScanOp(EntityKind.Node, existingLabel);
-        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Other")));
+        var scan = new ScanOp(EntityKind.Vertex, existingLabel);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Other")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -42,10 +45,10 @@ public sealed class LogicalOptimizerTests
     }
 
     [Fact]
-    public void LabelScanRewrite_does_not_fold_relationship_scan()
+    public void LabelScanRewrite_does_not_fold_edge_scan()
     {
-        var scan = new ScanOp(EntityKind.Relationship, null);
-        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("TYPE")));
+        var scan = new ScanOp(EntityKind.Edge, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "TYPE")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -55,8 +58,8 @@ public sealed class LogicalOptimizerTests
     [Fact]
     public void LabelScanRewrite_does_not_fold_non_col0_label_predicate()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
-        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Person"), column: 1));
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Person"), column: 1));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -69,7 +72,7 @@ public sealed class LogicalOptimizerTests
     public void KnnPushdown_with_label_filter_and_no_stats_produces_graph_first()
     {
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Doc")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Doc")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -81,7 +84,7 @@ public sealed class LogicalOptimizerTests
     public void KnnPushdown_graph_first_candidate_gets_LabelScanRewrite()
     {
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Doc")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Doc")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -109,7 +112,7 @@ public sealed class LogicalOptimizerTests
             new Dictionary<LabelId, long> { [labelId] = 500 });
 
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Common")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Common")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -128,7 +131,7 @@ public sealed class LogicalOptimizerTests
             new Dictionary<LabelId, long> { [labelId] = 100 });
 
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Rare")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Rare")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -180,7 +183,7 @@ public sealed class LogicalOptimizerTests
     public void FullTextPushdown_with_label_filter_and_no_stats_produces_graph_first()
     {
         var ft = new FullTextScanOp(null, "ft_idx", "hello", 10);
-        var filter = new FilterOp(ft, s => new LabelPredicate(s.GetOrCreateLabel("Article")));
+        var filter = new FilterOp(ft, s => new LabelPredicate(ResolveLabel(s, "Article")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
@@ -207,7 +210,7 @@ public sealed class LogicalOptimizerTests
             new Dictionary<LabelId, long> { [labelId] = 400 });
 
         var ft = new FullTextScanOp(null, "ft_idx", "hello", 10);
-        var filter = new FilterOp(ft, s => new LabelPredicate(s.GetOrCreateLabel("Bulk")));
+        var filter = new FilterOp(ft, s => new LabelPredicate(ResolveLabel(s, "Bulk")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -223,7 +226,7 @@ public sealed class LogicalOptimizerTests
             new Dictionary<LabelId, long> { [labelId] = 50 });
 
         var ft = new FullTextScanOp(null, "ft_idx", "hello", 10);
-        var filter = new FilterOp(ft, s => new LabelPredicate(s.GetOrCreateLabel("Sparse")));
+        var filter = new FilterOp(ft, s => new LabelPredicate(ResolveLabel(s, "Sparse")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -269,7 +272,7 @@ public sealed class LogicalOptimizerTests
             hasFastLabelIndex: true);
 
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 512);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Medium")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Medium")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -287,7 +290,7 @@ public sealed class LogicalOptimizerTests
             hasFastLabelIndex: true);
 
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 2048);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("HiDim")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "HiDim")));
 
         var result = LogicalOptimizer.Optimize(filter, stats, _schema);
 
@@ -324,13 +327,13 @@ public sealed class LogicalOptimizerTests
     public void KnnPushdown_graph_first_rewrites_label_filter_into_label_scan()
     {
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 5, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("Target")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "Target")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
         var knnResult = result.Should().BeOfType<KnnOp>().Subject;
         var candidate = knnResult.Candidate.Should().BeOfType<ScanOp>().Subject;
-        candidate.Kind.Should().Be(EntityKind.Node);
+        candidate.Kind.Should().Be(EntityKind.Vertex);
         candidate.Label.Should().NotBeNull();
     }
 
@@ -340,13 +343,13 @@ public sealed class LogicalOptimizerTests
     public void FullTextPushdown_graph_first_rewrites_label_filter_into_label_scan()
     {
         var ft = new FullTextScanOp(null, "ft_idx", "query", 10);
-        var filter = new FilterOp(ft, s => new LabelPredicate(s.GetOrCreateLabel("Page")));
+        var filter = new FilterOp(ft, s => new LabelPredicate(ResolveLabel(s, "Page")));
 
         var result = LogicalOptimizer.Optimize(filter, null, _schema);
 
         var ftResult = result.Should().BeOfType<FullTextScanOp>().Subject;
         var candidate = ftResult.Candidate.Should().BeOfType<ScanOp>().Subject;
-        candidate.Kind.Should().Be(EntityKind.Node);
+        candidate.Kind.Should().Be(EntityKind.Vertex);
         candidate.Label.Should().NotBeNull();
     }
 
@@ -355,8 +358,8 @@ public sealed class LogicalOptimizerTests
     [Fact]
     public void LabelScanRewrite_applies_recursively_to_nested_children()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
-        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Inner")));
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Inner")));
         var expand = new ExpandOp(filter, 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly, null);
 
         var result = LogicalOptimizer.Optimize(expand, null, _schema);
@@ -366,14 +369,34 @@ public sealed class LogicalOptimizerTests
             .Which.Label.Should().NotBeNull();
     }
 
+    [Fact]
+    public void Optimizer_rewrites_children_inside_nexus_expansions_without_losing_shape()
+    {
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Inner")));
+        var toNexus = new ExpandToNexusOp(filter, 0, null, null, [0]);
+        var members = new ExpandMembersOp(toNexus, 1, null, 0, [1]);
+
+        var result = LogicalOptimizer.Optimize(members, null, _schema);
+
+        var memberResult = result.Should().BeOfType<ExpandMembersOp>().Subject;
+        memberResult.CurrentEntityColumn.Should().Be(1);
+        memberResult.PredictedOutputColumnCount.Should().Be(3);
+        var nexusResult = memberResult.Source.Should().BeOfType<ExpandToNexusOp>().Subject;
+        nexusResult.CurrentEntityColumn.Should().Be(1);
+        nexusResult.PredictedOutputColumnCount.Should().Be(3);
+        nexusResult.Source.Should().BeOfType<ScanOp>()
+            .Which.Label.Should().NotBeNull();
+    }
+
     // ── SIG: ApplyDyadicOp child rewrite ────────────────────────────────────────
 
     [Fact]
     public void Optimizer_rewrites_children_inside_ApplyDyadicOp()
     {
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
-        var scan = new ScanOp(EntityKind.Node, null);
-        var labelFilter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Signal")));
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var labelFilter = new FilterOp(scan, s => new LabelPredicate(ResolveLabel(s, "Signal")));
         var ad = new ApplyDyadicOp(
             labelFilter, typeof(IDyadicOperator<float>), "emb", "vec_idx",
             new float[] { 1 }, null, null, 5, scorer);
@@ -389,9 +412,9 @@ public sealed class LogicalOptimizerTests
     public void Optimizer_rewrites_BPlan_inside_ApplyDyadicOp()
     {
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
-        var source = new ScanOp(EntityKind.Node, new LabelId(1));
-        var bScan = new ScanOp(EntityKind.Node, null);
-        var bFilter = new FilterOp(bScan, s => new LabelPredicate(s.GetOrCreateLabel("Ref")));
+        var source = new ScanOp(EntityKind.Vertex, new LabelId(1));
+        var bScan = new ScanOp(EntityKind.Vertex, null);
+        var bFilter = new FilterOp(bScan, s => new LabelPredicate(ResolveLabel(s, "Ref")));
         var ad = new ApplyDyadicOp(
             source, typeof(IDyadicOperator<float>), "emb", "vec_idx",
             null, bFilter, null, 5, scorer);
@@ -409,7 +432,7 @@ public sealed class LogicalOptimizerTests
     public void KnnLimitPushdown_through_filters_shrinks_K_then_pushes_down()
     {
         var knn = new KnnOp(null, "idx", new float[] { 1 }, 50, 128);
-        var filter = new FilterOp(knn, s => new LabelPredicate(s.GetOrCreateLabel("X")));
+        var filter = new FilterOp(knn, s => new LabelPredicate(ResolveLabel(s, "X")));
         var limit = new LimitOp(filter, 3, 0);
 
         var result = LogicalOptimizer.Optimize(limit, null, _schema);

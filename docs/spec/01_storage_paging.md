@@ -1,11 +1,11 @@
 # ストレージ & ページング
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## ページフォーマット {#page-format}
 
 - **ページサイズ**: 8,192 バイト (`PagedFile.PageSizeConst`)
-- **ページヘッダ**: オフセット 0 から `PageHeader.Size` バイト（PageId, PageKind, LSN, CRC32C チェックサム）
+- **ページヘッダ**: 40 バイト（`QUIVER-SW` magic、family version、PageId、PageKind、LSN、CRC32 checksum）
 - **ボディ**: `BodySize = PageSize - HeaderSize` バイト
 
 ## PagedFile {#paged-file}
@@ -17,37 +17,62 @@
 
 - デフォルト容量: 256 フレーム (`DefaultPoolCapacity`)
 - 退避: `_clockHand` でフレームを走査する **Clock (second-chance)** アルゴリズム
-- **STEAL ポリシー**: dirty（未コミット）ページもデータファイルへ退避できる（`EvictFrame` が
-  フレームを MMF に書き出す）。WAL がクラッシュリカバリ時の undo 用に before-image (CLR) を
-  ログするため、これは安全である。
+- active writer が所有する dirty frame は退避せず、データファイルにも書かない。
+- committed dirty frame は checkpoint または退避時にデータファイルへ書ける。
+- pin できる退避候補が尽きると、書き込みトランザクションを `TransactionTooLargeException` で中止する。
+  transaction-owned before-image を適用してから writer lease を解放するため、chunk commit で再試行できる。
 
 ### Pin / Unpin プロトコル {#pin-unpin}
 
 | 操作 | ロック | 効果 |
 |---|---|---|
 | `PinForRead(PageId)` | フレーム read ロック | `ReadOnlySpan<byte>` を返し、pin カウントを増やす |
-| `PinForWrite(PageId)` | フレーム write ロック | `PageWriteHandle` を返し、WAL 有効時は CLR before-image を取得する |
+| `PinForWrite(PageId)` | フレーム write ロック | `PageWriteHandle` を返し、write set に before-image を取得する |
 | `Unpin(PageId)` | read ロックを解放 | pin カウントを減らす |
-| `UnpinDirty(PageId, lsn)` | write ロックを解放 | ヘッダの LSN+チェックサムを更新し、PageImage を WAL にログ、dirty マーク |
+| `UnpinDirty(PageId, lsn)` | write ロックを解放 | transaction-owned write set へ最終 after-image を登録し、dirty owner を記録する |
+
+`UnpinDirty` の時点では page LSN を確定しない。
+commit が `PageImage` を追記するときに割り当てた LSN を WAL payload とフレームの両方へ刻み、`Commit` の fsync 後に dirty owner を解除する。
 
 ### ページアロケーション {#page-allocation}
 
 - **Meta ページ** (PageId 0): フリーリストのヘッド (int64) と論理ページ数 (int64) を格納
 - 空きページは連結リストを形成する（body[0..7] に next ポインタ）
 - アロケーションはフリーリストの再利用を優先し、なければファイル末尾を拡張する
-- ファイルは 64 MB 単位で拡張する (`GrowthBytes`)
-- アロケーションは WAL をバイパスする（`MmfWritePageAndSync` で LSN=0 として直接書き込む）
+- 新規ファイルの既定物理確保量は 1 MiB
+- 容量不足時は 1、2、4、8、16、32、64 MiB の段階で成長する
+- 一回の増分上限は既定 64 MiB であり、初期量と上限は option で設定できる
+- すべての確保量は 8 KiB page 境界へ切り上げる
+- committed allocation high-water を超える末尾ページは、既存の committed 構造から到達不能な物理領域として commit 前に確保できる
+- root、catalog、free-list から新規ページを到達可能にする after-image は、同じ transaction-owned write set と strict Commit 境界に従う
 
 ### メモリマップトファイル {#mmf}
 
 `MemoryMappedFile` + `MemoryMappedViewAccessor` がバッキングストレージを提供する。
 ファイル拡張は unmap/remap を引き起こす (`EnsureFileSizeAndRemapLocked`)。
 
+## インメモリ物理層 {#in-memory-paged-file}
+
+`InMemoryPagedFile` は同じ `IPagedFile` 契約を実装し、8 KB ページとページ単位の read/write ロックを
+プロセス内 RAM に保持する。`SingleFileContainer` より上のストア、索引、MVCC、rollback 経路は
+バイナリバックエンドと共通であり、物理層と WAL だけを `InMemoryPagedFile` /
+`NullWriteAheadLog` に差し替える。
+
+`QuiverDatabase.CreateInMemory()` または `QuiverDatabase.Open(":memory:")` で選択する。
+`Flush()` は no-op で、データファイル、WAL、チェックポイント、リカバリは作成しない。
+インスタンスを破棄すると全ページが失われる。
+
 ## 単一ファイルコンテナ {#single-file}
 
-`TenantPagedFile` は、複数の論理ストア（nodes, relationships, properties, indexes, vectors,
-FT postings, FT norms, catalog）を単一の `*.quiver` ファイルに多重化する。
+`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、scalar index、definition catalog）を単一の `*.quiver` ファイルに多重化する。
+
+全文の term data、document length、stats は `*.quiver-ftseg/` 内の checksum 付き immutable segment file に置き、専用 B+Tree tenant を割り当てない。
+artifact ID、checksum、source high-water、lifecycle state を持つ小さい manifest は definition catalog tenant に保存する。
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
+
+Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。
+vector definition catalog は target property と immutable segment policy を保持する。
+HNSW artifact と versioned manifest は primary property から再構築可能な derived data であり、primary property value の正本ではない。
 
 ### カタログ {#catalog}
 
@@ -55,10 +80,25 @@ FT postings, FT norms, catalog）を単一の `*.quiver` ファイルに多重�
 その `fileKind` バイトへのマッピングを保持する。カタログ自体もコンテナ内のテナントであり、
 WAL リカバリフェーズ中に復旧される。
 
+正常終了後の再オープンでは、カタログから versioned entity store、owner-bound property store、primary payload store、adjacency segment を同じ形式で復元する。
+カタログは checkpoint 済み committed high-water と次の transaction ID も保持する。
+process kill 後は、最後に完了した checkpoint 以降の winner redo と transaction ID 復元を通常 operation より先に終える。
+
 ## WAL サイドカー {#wal-sidecar}
 
-WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。チェックポイントは dirty ページと
-インデックスをデータファイルにフラッシュし、その後 WAL を切り詰める。
+WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。
+チェックポイントは writer lease を取得して active writer がいない境界を作り、`CheckpointBegin` を fsync してから committed dirty page とカタログを flush する。
+データファイルの flush 後に対応する `CheckpointEnd` を fsync できた場合だけ WAL を切り詰める。
+
+全文 index を持つ database は `*.quiver-ftseg/` artifact directory も保持する。
+online snapshot は container と WAL に加えてこの append-only artifact を複製する。
+reader の終了は待たない。
+
+## entity version sidecar {#entity-version-sidecar}
+
+Vertex、Edge、Nexus の version sidecar は 24 バイト固定長の `EntityVersionMeta(xmin, xmax, generation)` を格納する。
+8,152 バイトの page body には 339 record を格納する。
+sidecar header の format version は 4 であり、旧 40 バイト layout の fallback reader は持たない。
 
 ## チェックサム {#checksum}
 

@@ -1,146 +1,122 @@
 # 全文検索
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
-## アーキテクチャ {#architecture}
+## Definition {#definition}
 
-各全文インデックスは、コンテナテナントを共有する 2 つの B+Tree から構成される:
+全文インデックスは `FullTextIndexDefinition` として統一 schema catalog に登録する。
 
-| B+Tree | キー | 値 | 目的 |
-|---|---|---|---|
-| **Postings** | `(term, entityId)` 複合 | `tf` (uint16, 飽和) | 転置インデックス |
-| **Norms** | `entityId` (int64) | `docLen`（文書長） | BM25 の長さ正規化 |
+作成には `IWriteTransaction.EditSchema.CreateIndex(IndexDefinition)` を使い、削除には `DropIndex` を使う。
+
+definition は `PropertyTarget`、tokenizer、filter pipeline、BM25 の `K1` と `B`、`FullTextSegmentPolicy` を保持する。
+
+全文専用のlegacy schema surfaceは公開 API に存在しない。
+
+## Immutable segment {#immutable-segment}
+
+全文 artifact は mutable B+Tree ではなく、commit-local delta segment と merged segment から構成する。
+
+各 document entry は full typed owner identity、`PropertyVersionRef`、term frequency、document length、tombstone を保持する。
+
+property の set と update は新しい document entryを追加し、property remove と owner delete は tombstone を追加する。
+
+commit 済み segment は in-place 更新しない。
+
+manifest は transaction ID の `xmin` と `xmax` で version 化し、read transaction の snapshot から可視な版を選ぶ。
+
+segment body は `*.quiver-ftseg/` ディレクトリへ checksum 付き immutable artifact file として保存する。
+body を fsync した後、artifact ID、length、checksum、source committed high-water を持つ manifest だけを catalog page に書く。
+manifest と primary property mutation は同じ strict `Commit` で可視になる。
+
+old reader は開始時に可視だった manifest と property version を読み続け、新 reader だけが publish 後の manifest を選ぶ。
+
+同じ manifest generation から materialize した postings、norms、corpus stats は読み取り専用 snapshot として再利用する。
+
+## Merge と rebuild {#merge-rebuild}
+
+segment policy の document 変更数、segment 数、tombstone 比率を超えると background merge を要求する。
+
+primary text property の scan と immutable artifact 構築は read transaction で行い、writer lease を保持しない。
+
+構築後に短い write transaction を開始し、source manifest generation と current definition が一致する場合だけ publish する。
+
+構築中に delta または definition が変わった場合は stale artifact を破棄し、新しい snapshot から再試行する。
+
+正常 reopen は catalog の persisted manifest と checksum が一致する segment body を直接開き、primary property を scan しない。
+
+referenced body の欠損または checksum 不一致を検出した場合は definition を `RebuildRequired` にし、検索は同じ transaction の primary property scan から結果を復元する。
+
+transaction-local fallback artifact を global manifest として公開しない。
 
 ## トークナイザ {#tokenizer}
 
-`MixedBigramTokenizer` は 2 つのモードを持つ。インデックス作成時に `TokenizerId` で選択する。
+`MixedBigramTokenizer` はユニグラム併用モード `mixed-bigram-unigram-v1` とバイグラム専用モード `mixed-bigram-v1` を持つ。
 
-### ユニグラム併用モード (デフォルト) {#tokenizer-unigram}
+既定はユニグラム併用モードである。
 
-id = `mixed-bigram-unigram-v1`（`FullTextIndexOptions` の既定値）
+入力は NFKC と ASCII 小文字化で正規化する。
 
-CJK 連続 2 文字以上のランで、バイグラムに加えて各文字の**補足ユニグラム**を放出する。
-1 文字の CJK 検索クエリが、隣接文字に関わらずヒットする。
+Latin と ASCII は空白区切りの word token とし、CJK の連続は重なり bigram として処理する。
 
-| 入力 | 放出トークン |
-|---|---|
-| `粉体工学` | バイグラム: `粉体` `体工` `工学`、ユニグラム: `粉` `体` `工` `学` |
-| `猫`（孤立 CJK 1 文字） | ユニグラム: `猫` |
-| `Hello` | ワード: `hello` |
+ユニグラム併用モードは CJK の補足 unigram も放出するが、補足 unigram を document length に含めない。
 
-**Norms 計算**: 補足ユニグラムは `docLen` に含めない（バイグラム + ワード + 孤立ユニグラムのみ）。
-これにより BM25 の長さ正規化パラメータ (k1, b) がバイグラム専用モードと同一のチューニングで機能する。
+`LowercaseFilter` と `StopWordFilter` の設定は versioned definition payload に保存し、reopen 後に同じ pipeline を再構築する。
 
-**Fuzzy 展開制限**: CJK ユニグラム同士の置換展開を禁止する。全 CJK 文字が相互に
-Levenshtein 距離 1 となり N² 爆発するため。
+永続表現を持たない custom `ITokenFilter` は schema definition として受け付けない。
 
-### バイグラム専用モード {#tokenizer-bigram}
+## BM25 と WAND {#bm25}
 
-id = `mixed-bigram-v1`
+BM25 は definition の `K1` と `B` を使う。
 
-CJK 連続は重なりバイグラムのみ。孤立 CJK 1 文字はユニグラムとして放出する。
-補足ユニグラムは生成しないため、インデックスサイズが小さく CJK 頻出文字の
-postings 肥大がない。1 文字検索は `粉*`（プレフィクス展開）で代替する。
+既定値は `K1 = 1.2`、`B = 0.75` である。
 
-### 共通仕様
-
-- 入力は NFKC + ASCII 小文字化で正規化
-- Latin/ASCII: 空白区切り、小文字化したワードトークン
-- CJK / Latin の混在: Unicode スクリプト境界でシームレスに切り替え
-- `TokenizerRegistry` に両バリアントが自動登録される
-
-## Postings キーエンコーディング {#postings-key}
-
-`PostingsKey.Encode(termUtf8, entityId)` は B+Tree 用の byte[] キーを生成する:
-- term バイト列（可変長）の後にエンティティ ID (int64 big-endian) を続ける
-- `PostingsKey.TermRange(termUtf8)` は、ある term に一致する全エンティティを prefix スキャンするための
-  `(lower, upper)` 境界を返す
-
-## BM25 スコアリング {#bm25}
-
-標準パラメータの Okapi BM25:
-
-| パラメータ | 値 |
-|---|---|
-| k1 | 1.2 |
-| b | 0.75 |
-
-### 数式 {#bm25-formulas}
-
-```
+```text
 IDF(term) = log(1 + (N - df + 0.5) / (df + 0.5))
 
-Score(term, doc) = IDF × (tf × (k1 + 1)) / (tf + k1 × (1 - b + b × docLen / avgdl))
+Score(term, doc) = IDF × (tf × (K1 + 1)) / (tf + K1 × (1 - B + B × docLen / avgdl))
 ```
 
-ここで:
-- `N` = 総文書数
-- `df` = 文書頻度（その term を含む文書数）
-- `tf` = 文書内での term 頻度
-- `docLen` = 文書長（norms から取得）
-- `avgdl` = 平均文書長
+`N`、`df`、総 document length、WAND 上界は、検索と同じ visible segment snapshot から求める。
 
-### コーパス統計 {#corpus-stats}
+WAND 上界は `idf × (K1 + 1)` とし、上界の保守性を証明できない場合は strict scan へ fallback する。
 
-`Bm25CorpusStats`: DocumentCount, AverageDocLength, term ごとの統計（任意）。
-`Bm25TermStats`: `{term -> (df, maxTf)}`, MinDocLen。
+strict scan と WAND は score 降順、同点時 packed owner ID 昇順で決定論的に並べる。
 
-## WAND Top-K {#wand}
+## Candidate validation {#candidate-validation}
 
-`Bm25Scorer.RankWand()` は、効率的な top-k 取得のための Weighted AND (WAND) アルゴリズムを実装する:
+segment candidate は top-k 確定前に primary snapshot で再検証する。
 
-1. 各クエリ term について、その寄与の **上限** を計算する:
-   `ub = IDF × (maxTf × (k1 + 1)) / (maxTf + k1 × normMin)`
-2. term カーソルを現在の文書 ID でソートする
-3. **Pivot**: 整列したカーソルの累積上限が `theta`（これまでに見た k 番目に良いスコア）を
-   超える最初の文書を探す
-4. その pivot 文書を完全評価したスコアが theta を超えれば、top-k ヒープに挿入する
-5. 候補でない文書をスキップするため、`SeekTo` で遅れているカーソルを前進させる
+検証対象は owner kind、owner Generation、entity visibility、`PropertyVersionRef`、property owner である。
 
-## Reciprocal Rank Fusion (RRF) {#rrf}
+deleted owner、slot 再利用後の別 owner、old property version、tombstone、別 target の entry は結果へ出さない。
 
-全文検索とベクトル検索の結果を組み合わせる（ハイブリッド検索）際、RRF はランク付きリストをマージする:
+candidate を除外した後に次点を補充してから `Take(k)` を適用する。
 
-```
-RRF_score(doc) = sum(1 / (k + rank_i(doc)))
-```
+graph-first 経路は上流の full `VertexId` を primary `Read` で検証した後にだけ Sequence を physical posting lookup へ渡す。
 
-ここで `k` は平滑化定数（デフォルト 60）であり、`rank_i` は結果リスト `i` における文書の順位である。
+`Quiver.Rag` の `MetadataEquals` も一致文書の chunk candidate を BM25 scorer へ渡し、候補集合内で top-k を確定する。
+BM25 の累積 score は順位から再計算せず、scorer が生成した値を `RagHit.Score.Bm25Score` へ渡す。
 
-## 論理 WAL {#logical-wal}
+## Query {#query}
 
-全文 postings と norms は、リーフ更新に page-image ログではなく **論理 WAL レコード**
-(`FtLeafMutation`) を用いる。これにより、大量のテキスト取り込み時の WAL 増幅を劇的に削減する。
+`Search`、prefix、fuzzy、boolean、`FilterByText` は transaction snapshot から definition と manifest を解決する。
 
-### レコード種別 {#ft-wal-records}
+prefix と fuzzy は visible snapshot の term dictionary だけを展開対象にする。
 
-| WAL 種別 | 値 | 目的 |
-|---|---|---|
-| `FtLeafMutation` | 17 | state-setting なリーフ mutation（Upsert または Delete） |
-| `FtStructureImage` | 18 | 構造ページ（split/merge/root）の after-image |
+hybrid search は全文と vector を同じ read transaction から評価し、共通の RRF 実装で順位を統合する。
+RAG hit は BM25 score、vector similarity、RRF score、融合方式、rank 定数 60 を返す。
 
-### ジャーナリングモード {#ft-journaling}
+## WAL と recovery {#wal-recovery}
 
-| モード | リーフ | 構造 (SMO) |
-|---|---|---|
-| **Suppressed** | page-image なし。FtLeafMutation のみ | N/A |
-| **RedoOnly** | N/A | eager な PageImage、nested top action（undo なし） |
-| **Full** | 標準の page-image + CLR | 標準の page-image + CLR |
+全文専用 WAL record、logical redo、compensation、loser undo、recovery pass は存在しない。
 
-リーフ更新は Suppressed モードを用いる: FtLeafMutation レコードのみがログされる。
-構造変更（split, merge, root の変更）は RedoOnly モードを用いる: after-image が `FtStructureImage`
-レコードとして書き込まれ、リカバリ中に無条件で redo され、undo されることはない（nested top action のセマンティクス）。
+definition catalog と segment manifest の変更は通常の transaction-owned `PageImage` と strict `Commit` で durable にする。
 
-### リカバリ {#ft-recovery}
+segment body は manifest commit より前に fsync し、page-image WAL へ複製しない。
+body fsync 後かつ manifest commit 前の crash は未参照 orphan を残すだけである。
+maintenance は committed manifest の参照集合を作り、未参照 orphan file と reader horizon を越えた旧世代 file を削除する。
+現在または active reader が参照できる manifest の artifact は削除しない。
 
-リカバリ中:
-- **Pass 2a**: `FtStructureImage` レコードは無条件に redo される（nested top action）
-- **Pass 2b**: コミット済みトランザクションの `FtLeafMutation` レコードは `ApplyFtLeafRedo` で
-  redo される（state-setting、冪等）
-- **Pass 3**: loser トランザクションの `FtLeafMutation` レコードは逆操作で undo される
-  （Upsert は Delete に、Delete は保存値での Upsert になる）
+commit のない definition publish は recovery winner にならない。
 
-### WAL 増幅 {#wal-amplification}
-
-論理 WAL は postings の WAL 増幅を ~50-100x（リーフに触れるたびの page-image）から
-~5x（posting ごとの論理 mutation）へ削減する。batch=10 での実測値: 4.70x。
+詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。

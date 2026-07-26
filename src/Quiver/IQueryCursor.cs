@@ -1,4 +1,5 @@
-﻿using Quiver.Query.Physical;
+using Quiver.Query.Physical;
+using Quiver.Transactions;
 
 namespace Quiver;
 
@@ -22,7 +23,9 @@ internal interface IQueryCursor : IDisposable
 internal sealed class PhysicalOperatorCursor : IQueryCursor
 {
     private readonly IPhysicalOperator _plan;
-    private readonly Quiver.Storage.Records.INodeStore _nodes;
+    private readonly Quiver.Storage.Records.IVertexStore _vertices;
+    private readonly Quiver.Storage.Records.IEdgeStore _edges;
+    private readonly Quiver.Storage.Records.INexusStore _nexuses;
     private QueryRow _current;
     // A-sub: per-row 確保を避けるため slots / byteData バッファを 1 度確保して再利用する。
     // IQueryCursor.Current は「次の MoveNext までのみ有効」契約 (TraversalCursor が即座に
@@ -30,18 +33,30 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
     // ※ materialize 経路 (GraphTransaction.Execute) は各行を保持するので別実装 (プールしない)。
     private TupleSlot[]? _slots;
     private byte[]?[]? _byteData;
+    private readonly TransactionUsageGuard _usageGuard;
 
-    internal PhysicalOperatorCursor(IPhysicalOperator plan, Quiver.Storage.Records.INodeStore nodes)
+    internal PhysicalOperatorCursor(
+        IPhysicalOperator plan,
+        Quiver.Storage.Records.IVertexStore vertices,
+        Quiver.Storage.Records.IEdgeStore edges,
+        Quiver.Storage.Records.INexusStore nexuses,
+        TransactionUsageLease usage)
     {
         _plan = plan;
-        _nodes = nodes;
+        _vertices = vertices;
+        _edges = edges;
+        _nexuses = nexuses;
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     public TupleSchema Schema => _plan.Schema;
 
     public bool MoveNext()
     {
-        if (!_plan.MoveNext()) return false;
+        using var usage = _usageGuard.Enter();
+        if (!_plan.MoveNext())
+            return false;
         var cur = _plan.Current;
         int n = cur.ColumnCount;
         var slots = _slots;
@@ -66,13 +81,17 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
                 byteData[i] = _plan.GetBytes(i).ToArray();
             }
         }
-        // 結果 NodeId 列に現世代を load (round-trip 一貫)。
-        QueryRowMaterializer.StampNodeGenerations(slots, _nodes);
+        // 結果 VertexId 列に現世代を load (round-trip 一貫)。
+        QueryRowMaterializer.StampEntityGenerations(slots, _vertices, _edges, _nexuses);
         _current = new QueryRow(slots, byteData);
         return true;
     }
 
     public QueryRow Current => _current;
 
-    public void Dispose() => _plan.Dispose();
+    public void Dispose()
+    {
+        using var usage = _usageGuard.Enter();
+        _plan.Dispose();
+    }
 }

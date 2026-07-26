@@ -5,13 +5,14 @@ using Quiver.Core;
 using Quiver.Query.Logical;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 
 namespace Quiver.Api;
 
 /// <summary>
 /// グラフトラバーサルを構築するエントリポイント。
-/// <see cref="GraphTransactionExtensions.G"/> 拡張で取得し、ノード追加・
-/// リレーション追加・スキャン起点・Match DSL・KNN 検索の起点として用いる。
+/// <see cref="IReadTransaction.Query"/> から取得し、scan、Match DSL、
+/// KNN 検索の起点として用いる。
 /// </summary>
 /// <remarks>
 /// 同一トランザクション中で複数のトラバーサルを並行して生成できるが、
@@ -20,19 +21,19 @@ namespace Quiver.Api;
 /// </remarks>
 public sealed class GraphTraversalSource
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
     // 任意で注入された GraphStats。KNN push-down 時に label cardinality が高ければ
     // vector-first フォールバックさせる。null のときは構造ヒントのみで判定する。
     private readonly GraphStats? _stats;
 
     /// <summary>
     /// 指定したトランザクションとスキーマでトラバーサルソースを生成する。
-    /// 通常は <see cref="GraphTransactionExtensions.G"/> 経由で呼び出す。
+    /// 通常は <see cref="IReadTransaction.Query"/> 経由で取得する。
     /// </summary>
     /// <param name="tx">所属するグラフトランザクション。</param>
-    /// <param name="schema">ラベル / プロパティキー / リレーションシップ型を解決するスキーマ API。</param>
-    public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema)
+    /// <param name="schema">ラベル / プロパティキー / Edge型を解決するスキーマ API。</param>
+    internal GraphTraversalSource(IReadTransaction tx, ISchemaCatalog schema)
         : this(tx, schema, stats: null)
     {
     }
@@ -44,112 +45,91 @@ public sealed class GraphTraversalSource
     /// (既定 30%) 以上のときに vector-first フォールバックを選ぶための判定材料となる。
     /// stats を渡さない場合は構造ヒントのみで graph-first を選ぶ。
     /// </summary>
-    public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
+    internal GraphTraversalSource(IReadTransaction tx, ISchemaCatalog schema, GraphStats? stats)
     {
         _tx = tx; _schema = schema; _stats = stats;
     }
 
-    // ── ノード書き込み ──────────────────────────────────────────────────────
+    /// <summary>同じ transaction/schema に query planning 用統計を関連付けた source を返す。</summary>
+    public GraphTraversalSource WithStats(GraphStats stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        return new GraphTraversalSource(_tx, _schema, stats);
+    }
 
-    /// <summary>
-    /// 新しいノードビルダを開始する。
-    /// <c>g.AddNode("Person").P("Name", "Alice").Next()</c> のように呼ぶ。
-    /// </summary>
-    /// <param name="label">作成するノードのラベル名。</param>
-    public NodeBuilder         AddNode(string label) => new(_tx, label);
-
-    /// <summary>
-    /// 新しいリレーションシップビルダを開始する。
-    /// <c>g.AddRelationship("KNOWS").From(a).To(b).Next()</c> のように呼ぶ。
-    /// </summary>
-    /// <param name="type">作成するリレーションシップの型名。</param>
-    public RelationshipBuilder AddRelationship(string type) => new(_tx, type);
-
-    /// <summary>
-    /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
-    /// <see cref="IGraphTransaction.MergeNode"/> のラッパで、<c>Created</c> フラグを
-    /// 用いて ON CREATE SET / ON MATCH SET の分岐を呼び出し側で書ける。
-    /// </summary>
-    /// <param name="label">マージ対象ノードのラベル。</param>
-    /// <param name="matchKey">マッチに用いるプロパティキー。</param>
-    /// <param name="matchValue">マッチに用いるプロパティ値。</param>
-    /// <returns>マッチした or 作成されたノード ID と、新規作成だったかを表すフラグの組。</returns>
-    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in Storage.Records.PropertyValue matchValue)
-        => _tx.MergeNode(label, matchKey, in matchValue);
-
-    /// <summary>
-    /// Cypher の <c>MERGE (a)-[:type]-&gt;(b)</c> に相当するエッジ upsert 糖衣。
-    /// <see cref="IGraphTransaction.MergeRelationship"/> のラッパで、<c>Created</c> フラグで
-    /// 新規作成 / 既存ヒットを分岐できる (<see cref="MergeNode"/> と対称)。
-    /// </summary>
-    /// <param name="source">始点ノード。</param>
-    /// <param name="target">終点ノード。</param>
-    /// <param name="type">リレーションシップ型名。</param>
-    /// <returns>マッチした or 作成されたリレーションシップ ID と、新規作成だったかを表すフラグの組。</returns>
-    public (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type)
-        => _tx.MergeRelationship(source, target, type);
-
-    // ── エンティティ操作糖衣 (IGraphNode<T> ベース) ─────────────────────────
-
-    /// <summary><see cref="IGraphNode{T}"/> 実装型を用いた型安全な Insert。</summary>
-    public NodeId Insert<T>(T entity)             where T : IGraphNode<T> => T.Insert(_tx, entity);
-
-    /// <summary><see cref="IGraphNode{T}"/> 実装型を用いた Insert + インデックス登録。</summary>
-    public NodeId InsertIndexed<T>(T entity)      where T : IGraphNode<T> => T.InsertIndexed(_tx, entity);
-
-    /// <summary>指定 ID のノードプロパティを <typeparamref name="T"/> インスタンスに復元する。</summary>
-    public T      Load<T>(NodeId id)              where T : IGraphNode<T> => T.Load(_tx, id);
-
-    /// <summary>指定 ID のノードのプロパティを <paramref name="entity"/> の値で上書きする。</summary>
-    public void   Update<T>(NodeId id, T entity)  where T : IGraphNode<T> => T.Update(_tx, id, entity);
-
-    /// <summary>指定 ID のノードを削除する。</summary>
-    public void   Delete<T>(NodeId id)            where T : IGraphNode<T> => T.Delete(_tx, id);
+    /// <summary>指定 ID のVertexプロパティを <typeparamref name="T"/> インスタンスに復元する。</summary>
+    public T      Load<T>(VertexId id)              where T : IGraphVertex<T> => T.Load(_tx, id);
 
     // ── スキャン起点 ─────────────────────────────────────────────────────────
 
-    /// <summary>全ノードをスキャン起点とするトラバーサルを生成する。</summary>
-    public GraphTraversal<NodeId> Nodes()
+    /// <summary>全Vertexをスキャン起点とするトラバーサルを生成する。</summary>
+    public GraphTraversal<VertexId> Vertices()
     {
-        var plan = new ScanOp(EntityKind.Node, null);
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new ScanOp(EntityKind.Vertex, null);
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>
-    /// 全リレーションシップをスキャン起点とするトラバーサル。
+    /// 全Edgeをスキャン起点とするトラバーサル。
     /// 主用途は全件集約 (<c>Sum</c>/<c>Mean</c>/<c>Max</c>/<c>Min</c>) で、対象プロパティが列化済みなら
-    /// 列スキャンで高速集計する (それ以外は row path フォールバック)。<c>ToList()</c> で全 rel ID も取れる。
+    /// 列スキャンで高速集計する (それ以外は row path フォールバック)。<c>ToList()</c> で全 edge ID も取れる。
     /// </summary>
-    public GraphTraversal<RelationshipId> Relationships()
+    public GraphTraversal<EdgeId> Edges()
     {
-        var plan = new ScanOp(EntityKind.Relationship, null);
-        return new GraphTraversal<RelationshipId>(_tx, _schema, plan, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
+        var plan = new ScanOp(EntityKind.Edge, null);
+        return new GraphTraversal<EdgeId>(_tx, _schema, plan, row => row.GetEdgeId(0), 0, aliases: null, stats: _stats);
     }
 
-    /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル。</summary>
-    public GraphTraversal<NodeId> Node(NodeId nodeId)
+    /// <summary>
+    /// 可視な全Nexusをスキャン起点とするトラバーサルを生成する。
+    /// Nexusは、購入の buyer/item やファクトの subject/source のように、
+    /// 役割の異なる複数Vertexを一つの関係として束ねるエンティティである。
+    /// </summary>
+    /// <remarks>全件走査は O(H)。後続の <c>Members(role)</c> でロール別に参加Vertexへ展開できる。</remarks>
+    public GraphTraversal<NexusId> Nexuses()
     {
-        var plan = new NodeSeedOp(new[] { nodeId });
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new ScanOp(EntityKind.Nexus, null);
+        return new GraphTraversal<NexusId>(
+            _tx, _schema, plan, row => row.GetNexusId(0), 0, aliases: null, stats: _stats);
     }
 
-    /// <summary>指定 ID のノード群を起点とするトラバーサル。</summary>
-    public GraphTraversal<NodeId> Nodes(params NodeId[] nodeIds)
+    /// <summary>指定 ID のNexus 1 件を起点とするトラバーサルを生成する。</summary>
+    /// <param name="nexusId">起点にするNexus ID。</param>
+    /// <remarks>
+    /// この起点には「どのVertexから到達したか」という文脈がないため、
+    /// <c>OtherMembers()</c> ではなく <c>Members()</c> を使用する。
+    /// </remarks>
+    public GraphTraversal<NexusId> Nexus(NexusId nexusId)
     {
-        var plan = new NodeSeedOp(nodeIds);
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new NexusSeedOp(nexusId);
+        return new GraphTraversal<NexusId>(
+            _tx, _schema, plan, row => row.GetNexusId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>指定 ID のVertex 1 件だけを起点とするトラバーサル。</summary>
+    public GraphTraversal<VertexId> Vertex(VertexId vertexId)
+    {
+        var plan = new VertexSeedOp(new[] { vertexId });
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>指定 ID のVertex群を起点とするトラバーサル。</summary>
+    public GraphTraversal<VertexId> Vertices(params VertexId[] vertexIds)
+    {
+        var plan = new VertexSeedOp(vertexIds);
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
     }
 
     // ── 型付きスキャン起点 ────────────────────────────────────────────────────
 
     /// <summary>
-    /// <typeparamref name="T"/> の <see cref="IGraphNode{T}.GraphLabel"/> でフィルタした
+    /// <typeparamref name="T"/> の <see cref="IGraphVertex{T}.GraphLabel"/> でフィルタした
     /// 型付きトラバーサルを生成する。<c>Has(p => p.Name, "Alice")</c> のような
     /// 式ツリーベースのプロパティ参照が利用可能になる。
     /// </summary>
-    public TypedGraphTraversal<T> Nodes<T>() where T : IGraphNode<T>
+    public TypedGraphTraversal<T> Vertices<T>() where T : IGraphVertex<T>
     {
-        var inner = Nodes().HasLabel(T.GraphLabel);
+        var inner = Vertices().HasLabel(T.GraphLabel);
         return new TypedGraphTraversal<T>(inner, _tx, _schema);
     }
 
@@ -159,21 +139,30 @@ public sealed class GraphTraversalSource
     /// Match DSL クエリを開始する。<see cref="GraphPattern"/> でパターンを構築し、
     /// <c>Where</c> / <c>Return</c> をチェーンして結果を取得する。
     /// </summary>
-    /// <param name="pattern">マッチするノード / エッジパターン。</param>
+    /// <param name="pattern">マッチするVertex / エッジパターン。</param>
     public MatchQuery Match(GraphPattern pattern) => new(_tx, _schema, pattern);
+
+    /// <summary>
+    /// 星型Nexusパターンで Match DSL クエリを開始する。
+    /// <see cref="GraphPattern.Nexus(string, string?)"/> と
+    /// <see cref="NexusPattern.Member(string, VertexPattern)"/> で構築したパターンを渡すと、
+    /// 一つのNexusと役割別メンバーが同じ行に束ねられる。
+    /// </summary>
+    /// <param name="pattern">マッチする星型Nexusパターン。</param>
+    public MatchQuery Match(NexusPattern pattern) => new(_tx, _schema, pattern);
 
     // ── KNN スキャン起点 ────────────────────────────────────────────────
 
     /// <summary>
     /// ベクトル類似度上位 k 件をスキャン起点とするトラバーサル。
-    /// 類似度の降順でノード ID を放出し、<c>.HasLabel(...)</c> や <c>.Out(...)</c> を
+    /// 類似度の降順でVertex ID を放出し、<c>.HasLabel(...)</c> や <c>.Out(...)</c> を
     /// 続けて KNN とグラフトラバーサルを組み合わせられる。
     /// </summary>
     /// <remarks>
     /// 類似度スコア自体は伝播しない。生スコアが必要な場合は
-    /// <c>db.Vectors.KnnSearch(...)</c> を直接呼び出すこと。
-    /// インデックスは <see cref="Core.EntityKind.Node"/> にバインドされている必要がある。
-    /// リレーションシップ向け KNN は具体的なユースケースが出るまで意図的にスコープ外とする。
+    /// read transaction の <c>KnnSearch(...)</c> を使う。
+    /// インデックスは <see cref="Core.EntityKind.Vertex"/> にバインドされている必要がある。
+    /// Edge向け KNN は具体的なユースケースが出るまで意図的にスコープ外とする。
     /// <para>
     /// <c>g.Knn(...).HasLabel(...).Has(...)</c> のような後続 pure-filter チェーンは
     /// 自動的に candidate-side に巻き戻され、<see cref="GraphTraversal{T}.FilterByKnn"/> 相当の
@@ -188,18 +177,27 @@ public sealed class GraphTraversalSource
     /// <param name="indexName">対象のベクトルインデックス名。</param>
     /// <param name="query">問い合わせベクトル。</param>
     /// <param name="k">取得する上位件数。</param>
-    public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
+    /// <param name="options">探索精度と探索量を制御する実行時オプション。null は既定値。</param>
+    public GraphTraversal<VertexId> Knn(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         // 後続の pure-filter / Limit を candidate-side に巻き戻せるよう KnnOp で包む。
         // filter が積まれなければ終端で vector-first に materialize される。
         // _stats があれば label cardinality fallback を効かせる。
         // backend が spec を返せれば dim-aware piecewise threshold を使い、返さなければ
         // dim=0 で単一閾値経路にフォールバックする。
-        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
+        int dim = _tx.AsInternal().Access.TryGetVectorIndex(
+            indexName,
+            out var descriptor)
+            ? descriptor.Dimensions
+            : 0;
         // vector-first を既定とし、後続 pure-filter / Limit は終端で KnnPushdown が
         // candidate-side に巻き戻して graph-first 化を判定する。
-        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim);
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim, options);
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>
@@ -216,11 +214,11 @@ public sealed class GraphTraversalSource
     /// <param name="indexName">対象の全文索引名。</param>
     /// <param name="queryText">検索クエリ文字列。</param>
     /// <param name="k">取得する上位件数。</param>
-    public GraphTraversal<NodeId> Search(string indexName, string queryText, int k)
+    public GraphTraversal<VertexId> Search(string indexName, string queryText, int k)
     {
         // stats があれば N/avgdl スナップショットを op に焼き込み、クエリ毎の norms 走査を省く。
         var plan = new FullTextScanOp(null, indexName, queryText, k, _stats?.FullTextCorpus(indexName));
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>
@@ -241,16 +239,20 @@ public sealed class GraphTraversalSource
     /// <param name="vectorIndex">対象のベクトル索引名。</param>
     /// <param name="queryVector">問い合わせベクトル。</param>
     /// <param name="k">融合後に取得する上位件数。</param>
-    public GraphTraversal<NodeId> HybridSearch(
+    public GraphTraversal<VertexId> HybridSearch(
         string textIndex, string queryText,
         string vectorIndex, ReadOnlySpan<float> queryVector, int k)
     {
-        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(vectorIndex, out var spec) ? spec.Dimensions : 0;
+        int dim = _tx.AsInternal().Access.TryGetVectorIndex(
+            vectorIndex,
+            out var descriptor)
+            ? descriptor.Dimensions
+            : 0;
         var children = ImmutableArray.Create<LogicalOp>(
             new FullTextScanOp(null, textIndex, queryText, k, _stats?.FullTextCorpus(textIndex)),
             new KnnOp(null, vectorIndex, queryVector.ToArray(), k, dim));
         var plan = new FusionOp(children, k, FusionStrategy.Rrf);
-        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        return new GraphTraversal<VertexId>(_tx, _schema, plan, row => row.GetVertexId(0), 0, aliases: null, stats: _stats);
     }
 
     // ── 重み付き最短経路 (Dijkstra / A*) ───────────────────────────────────────
@@ -258,23 +260,23 @@ public sealed class GraphTraversalSource
     /// <summary>
     /// <paramref name="source"/> から <paramref name="target"/> までの
     /// <em>重み付き</em>最短経路を Dijkstra 法で求める。各エッジの重みは
-    /// リレーションシッププロパティ <paramref name="weightKey"/> (数値型) から読む。
+    /// Edgeプロパティ <paramref name="weightKey"/> (数値型) から読む。
     /// プロパティを持たないエッジの重みは 1.0 として扱う。
     /// </summary>
     /// <remarks>
     /// ホップ数最短の <see cref="GraphTraversal{T}.ShortestPathTo"/> と異なり、
-    /// 結果は重み合計が最小の経路を、距離 + ノード列 + エッジ列として返す。
+    /// 結果は重み合計が最小の経路を、距離 + Vertex列 + エッジ列として返す。
     /// 重みは非負でなければならない (負の重みを検出すると
     /// <see cref="InvalidOperationException"/>)。
     /// </remarks>
-    /// <param name="source">始点ノード。</param>
-    /// <param name="target">終点ノード。</param>
-    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
+    /// <param name="source">始点Vertex。</param>
+    /// <param name="target">終点Vertex。</param>
+    /// <param name="weightKey">エッジ重みを保持するEdgeプロパティのキー名。</param>
     /// <param name="direction">辿る方向。</param>
-    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="type">辿るEdge型 (null なら全型)。</param>
     /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
     public WeightedPathResult WeightedShortestPath(
-        NodeId source, NodeId target, string weightKey,
+        VertexId source, VertexId target, string weightKey,
         Direction direction = Direction.Outgoing,
         string? type = null,
         double maxDistance = double.PositiveInfinity)
@@ -282,30 +284,37 @@ public sealed class GraphTraversalSource
 
     /// <summary>
     /// ユーザ提供のヒューリスティック <paramref name="heuristic"/> を用いた A* 探索で
-    /// 重み付き最短経路を求める。<paramref name="heuristic"/> は各ノードから終点までの
+    /// 重み付き最短経路を求める。<paramref name="heuristic"/> は各Vertexから終点までの
     /// 推定残コストを返す。最適解を保証するには consistent (単調) かつ非負である必要がある。
     /// </summary>
-    /// <param name="source">始点ノード。</param>
-    /// <param name="target">終点ノード。</param>
-    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
-    /// <param name="heuristic">ノード → 終点までの推定残コスト。</param>
+    /// <param name="source">始点Vertex。</param>
+    /// <param name="target">終点Vertex。</param>
+    /// <param name="weightKey">エッジ重みを保持するEdgeプロパティのキー名。</param>
+    /// <param name="heuristic">Vertex → 終点までの推定残コスト。</param>
     /// <param name="direction">辿る方向。</param>
-    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="type">辿るEdge型 (null なら全型)。</param>
     /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
     public WeightedPathResult WeightedShortestPath(
-        NodeId source, NodeId target, string weightKey,
-        Func<NodeId, double> heuristic,
+        VertexId source, VertexId target, string weightKey,
+        Func<VertexId, double> heuristic,
         Direction direction = Direction.Outgoing,
         string? type = null,
         double maxDistance = double.PositiveInfinity)
     {
         ArgumentNullException.ThrowIfNull(heuristic);
-        return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
+        return RunWeightedShortestPath(
+            source,
+            target,
+            weightKey,
+            direction,
+            type,
+            maxDistance,
+            new DelegateVertexHeuristic(heuristic));
     }
 
     /// <summary>
-    /// ノードの座標プロパティから自動生成したヒューリスティックを用いた A* 探索で
-    /// 重み付き最短経路を求める。各ノードの座標は数値プロパティ
+    /// Vertexの座標プロパティから自動生成したヒューリスティックを用いた A* 探索で
+    /// 重み付き最短経路を求める。各Vertexの座標は数値プロパティ
     /// <paramref name="xKey"/> / <paramref name="yKey"/> から読む。
     /// </summary>
     /// <remarks>
@@ -315,17 +324,17 @@ public sealed class GraphTraversalSource
     /// 実経路長の下界になっている必要がある (例: 重みが平面距離なら Euclidean、
     /// メートルの道路距離なら Haversine)。
     /// </remarks>
-    /// <param name="source">始点ノード。</param>
-    /// <param name="target">終点ノード。</param>
-    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
-    /// <param name="xKey">X 座標 (経度) を保持するノードプロパティのキー名。</param>
-    /// <param name="yKey">Y 座標 (緯度) を保持するノードプロパティのキー名。</param>
+    /// <param name="source">始点Vertex。</param>
+    /// <param name="target">終点Vertex。</param>
+    /// <param name="weightKey">エッジ重みを保持するEdgeプロパティのキー名。</param>
+    /// <param name="xKey">X 座標 (経度) を保持するVertexプロパティのキー名。</param>
+    /// <param name="yKey">Y 座標 (緯度) を保持するVertexプロパティのキー名。</param>
     /// <param name="metric">座標から推定残コストを計算する距離尺度。</param>
     /// <param name="direction">辿る方向。</param>
-    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="type">辿るEdge型 (null なら全型)。</param>
     /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
     public WeightedPathResult WeightedShortestPathAStar(
-        NodeId source, NodeId target, string weightKey,
+        VertexId source, VertexId target, string weightKey,
         string xKey, string yKey,
         HeuristicMetric metric = HeuristicMetric.Euclidean,
         Direction direction = Direction.Outgoing,
@@ -335,56 +344,109 @@ public sealed class GraphTraversalSource
         ArgumentException.ThrowIfNullOrEmpty(xKey);
         ArgumentException.ThrowIfNullOrEmpty(yKey);
 
-        double targetX = NodeCoordinate(target, xKey);
-        double targetY = NodeCoordinate(target, yKey);
+        if (!_schema.TryGetPropertyKeyId(xKey, out var xKeyId))
+            throw MissingCoordinate(target, xKey);
+        if (!_schema.TryGetPropertyKeyId(yKey, out var yKeyId))
+            throw MissingCoordinate(target, yKey);
 
-        Func<NodeId, double> heuristic = metric == HeuristicMetric.Haversine
-            ? node => Haversine(NodeCoordinate(node, yKey), NodeCoordinate(node, xKey), targetY, targetX)
-            : node =>
-            {
-                double dx = NodeCoordinate(node, xKey) - targetX;
-                double dy = NodeCoordinate(node, yKey) - targetY;
-                return Math.Sqrt(dx * dx + dy * dy);
-            };
+        double targetX = VertexCoordinate(target, xKey);
+        double targetY = VertexCoordinate(target, yKey);
+        ITransactionVertexHeuristic heuristic = new CoordinateHeuristic(
+            xKeyId, yKeyId, xKey, yKey, targetX, targetY, metric);
 
         return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
     }
 
     private WeightedPathResult RunWeightedShortestPath(
-        NodeId source, NodeId target, string weightKey,
+        VertexId source, VertexId target, string weightKey,
         Direction direction, string? type, double maxDistance,
-        Func<NodeId, double>? heuristic)
+        ITransactionVertexHeuristic? heuristic)
     {
         ArgumentException.ThrowIfNullOrEmpty(weightKey);
 
-        var keyId = _schema.GetOrCreatePropertyKey(weightKey);
+        var keyId = _schema.TryGetPropertyKeyId(weightKey, out var resolvedKeyId)
+            ? resolvedKeyId
+            : PropertyKeyId.Invalid;
         var weightProvider = new PropertyChainWeightProvider(keyId);
-        RelationshipTypeId? typeId = type != null ? _schema.GetOrCreateRelationshipType(type) : null;
+        EdgeTypeId? typeId = null;
+        if (type is not null)
+        {
+            if (!_schema.TryGetEdgeTypeId(type, out var resolvedTypeId))
+                return WeightedPathResult.NotFound;
 
-        var pair = new PairWithConstantOperator(new SingleNodeOperator(source), 0, target);
+            typeId = resolvedTypeId;
+        }
+
+        var pair = new PairWithConstantOperator(new SingleVertexOperator(source), 0, target);
         var op = new WeightedShortestPathOperator(
             pair, 0, 1, direction, typeId, weightProvider, heuristic, maxDistance);
 
         using var result = _tx.Execute(op);
         foreach (var row in result.Rows())
         {
-            WeightedPathCodec.Decode(row.GetBytes(3), out var nodes, out var rels);
-            return new WeightedPathResult(true, row.GetDouble(2), nodes, rels);
+            WeightedPathCodec.Decode(row.GetBytes(3), out var vertices, out var edges);
+            return new WeightedPathResult(true, row.GetDouble(2), vertices, edges);
         }
         return WeightedPathResult.NotFound;
     }
 
-    private double NodeCoordinate(NodeId node, string key)
+    private double VertexCoordinate(VertexId vertex, string key)
     {
-        var v = _tx.GetProperty(node, key);
+        var v = _tx.GetProperty(vertex, key);
+        return NumericCoordinate(vertex, key, in v);
+    }
+
+    private static double VertexCoordinate(
+        ITransaction transaction,
+        VertexId vertex,
+        PropertyKeyId keyId,
+        string key)
+    {
+        var properties = transaction.Vertices.EnumerateProperties(vertex, transaction.Properties);
+        while (properties.MoveNext())
+        {
+            if (properties.Current.KeyId != keyId) continue;
+            PropertyValue value = properties.Current.Value;
+            return NumericCoordinate(vertex, key, in value);
+        }
+        throw MissingCoordinate(vertex, key);
+    }
+
+    private static double NumericCoordinate(VertexId vertex, string key, in PropertyValue v)
+    {
         return v.Type switch
         {
             Storage.Records.PropertyValueType.Double => v.DoubleValue,
             Storage.Records.PropertyValueType.Int64 => v.Int64Value,
             Storage.Records.PropertyValueType.Int32 => v.Int32Value,
             _ => throw new InvalidOperationException(
-                $"ノード {node.Value} の座標プロパティ '{key}' が数値型ではありません (型: {v.Type})。"),
+                $"Vertex {vertex.Value} の座標プロパティ '{key}' が数値型ではありません (型: {v.Type})。"),
         };
+    }
+
+    private static InvalidOperationException MissingCoordinate(VertexId vertex, string key)
+        => new($"Vertex {vertex.Value} の座標プロパティ '{key}' が設定されていません。");
+
+    private sealed class CoordinateHeuristic(
+        PropertyKeyId xKeyId,
+        PropertyKeyId yKeyId,
+        string xKey,
+        string yKey,
+        double targetX,
+        double targetY,
+        HeuristicMetric metric) : ITransactionVertexHeuristic
+    {
+        public double Estimate(ITransaction transaction, VertexId vertex)
+        {
+            double x = VertexCoordinate(transaction, vertex, xKeyId, xKey);
+            double y = VertexCoordinate(transaction, vertex, yKeyId, yKey);
+            if (metric == HeuristicMetric.Haversine)
+                return Haversine(y, x, targetY, targetX);
+
+            double dx = x - targetX;
+            double dy = y - targetY;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
     }
 
     /// <summary>緯度経度 (度) 2 点間の大圏距離をメートルで返す。</summary>
@@ -399,23 +461,4 @@ public sealed class GraphTraversalSource
                  * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
         return 2 * earthRadiusMeters * Math.Asin(Math.Min(1.0, Math.Sqrt(a)));
     }
-}
-
-/// <summary><see cref="IGraphTransaction"/> から <see cref="GraphTraversalSource"/> を取得する拡張メソッド。</summary>
-public static class GraphTransactionExtensions
-{
-    /// <summary>
-    /// トランザクションとスキーマから新規 <see cref="GraphTraversalSource"/> を構築する。
-    /// </summary>
-    public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema)
-        => new(tx, schema);
-
-    /// <summary>
-    /// GraphStats を渡してトラバーサルソースを構築する。
-    /// <c>g.Knn(...).HasLabel(L)</c> 形式の push-down が、L の cardinality が高いときに
-    /// vector-first にフォールバックして wall-clock 劣化を回避できる。stats を渡さない場合
-    /// は構造ヒントのみで graph-first を選ぶ。
-    /// </summary>
-    public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
-        => new(tx, schema, stats);
 }

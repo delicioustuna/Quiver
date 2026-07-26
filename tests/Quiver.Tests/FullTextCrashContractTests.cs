@@ -9,15 +9,15 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// 全文インデックスの永続性契約を <see cref="GraphDatabase"/> と
+/// 全文インデックスの永続性契約を <see cref="QuiverDatabase"/> と
 /// <c>g.Search</c> のエンジンレベルで検証する。
 /// コミット、プロセス停止の模擬、再オープン、リカバリーの順に実行し、
 /// 検索結果がコミット済み文書集合と一致することを確認する。
-/// Postings と Norms は通常の B+Tree なので、既存の ARIES ページ WAL で復旧する。
+/// segment bodyはappend-only artifact、manifestはpage-WALで復旧する。
 ///
 /// Windows では停止した同一プロセスが排他的ファイルハンドルを再利用できないため、
 /// ハンドルの破棄とファイナライザーの強制実行でプロセス停止を模擬してから再オープンする。
-/// <see cref="IGraphTransaction.Commit"/> が完了した変更は復旧し、
+/// <see cref="IWriteTransaction.Commit"/> が完了した変更は復旧し、
 /// 未コミットの変更は復活しないことを確認する。
 /// </summary>
 public sealed class FullTextCrashContractTests : IDisposable
@@ -42,22 +42,22 @@ public sealed class FullTextCrashContractTests : IDisposable
         }
     }
 
-    private GraphDatabase Open() => GraphDatabase.Open(_path);
+    private QuiverDatabase Open() => QuiverDatabase.Open(_path);
 
     /// <summary>
     /// 新しいデータベースを開いて全文インデックスを作成する。
     /// シナリオの初回だけ使用し、再オープン時は <see cref="Open"/> が
     /// カタログからインデックスを再構築する。
     /// </summary>
-    private GraphDatabase OpenAndCreateIndex()
+    private QuiverDatabase OpenAndCreateIndex()
     {
         var db = Open();
-        db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         return db;
     }
 
     /// <summary>正常終了時の完全なフラッシュを行わずにハンドルを破棄し、ファイナライザーを実行してプロセス停止を模擬する。</summary>
-    private static void Kill(GraphDatabase db)
+    private static void Kill(QuiverDatabase db)
     {
         try { db.Dispose(); } catch { /* 終了途中の処理が失われる状況を再現する。 */ }
         GcSettle();
@@ -73,19 +73,19 @@ public sealed class FullTextCrashContractTests : IDisposable
         }
     }
 
-    private static NodeId Ingest(GraphDatabase db, string body)
+    private static VertexId Ingest(QuiverDatabase db, string body)
     {
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
         return n;
     }
 
-    private static List<NodeId> Search(GraphDatabase db, string query, int k = 10)
+    private static List<VertexId> Search(QuiverDatabase db, string query, int k = 10)
     {
-        using var rtx = db.BeginReadOnlyTransaction();
-        return rtx.G(db.Schema).Search(Index, query, k).ToList();
+        using var rtx = db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     // ===== (a) committed full-text docs survive a kill and stay searchable =====
@@ -93,7 +93,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     [Fact]
     public void Committed_docs_survive_kill_and_remain_searchable()
     {
-        NodeId alpha, beta, gamma;
+        VertexId alpha, beta, gamma;
         var db = OpenAndCreateIndex();
         alpha = Ingest(db, "the quick alpha fox marker0001");
         beta = Ingest(db, "a slow beta dog marker0002");
@@ -118,20 +118,19 @@ public sealed class FullTextCrashContractTests : IDisposable
         var committed = Ingest(db, "durable content keepme9999");
 
         // Open a writer that indexes a property but never commits, then kill.
-        var dirtyTx = db.BeginTransaction();
-        var doomed = dirtyTx.CreateNode("Doc");
+        var dirtyTx = db.BeginWriteTransaction();
+        var doomed = dirtyTx.CreateVertex("Doc");
         dirtyTx.SetProperty(doomed, "body", PropertyValue.FromString("phantom doomed7777"));
         // NOTE: no Commit.
 
         Kill(db);
 
         using var reopened = Open();
-        // Committed doc is intact; the uncommitted posting was undone (ARIES), so
-        // the search result equals exactly the committed set.
+        // Committed doc is intact; uncommitted primary pages and manifest are not replayed.
         Search(reopened, "keepme9999").Should().ContainSingle().Which.Should().Be(committed);
         Search(reopened, "doomed7777").Should().BeEmpty("uncommitted postings must not survive a kill");
-        using var rtx = reopened.BeginReadOnlyTransaction();
-        rtx.NodeExists(doomed).Should().BeFalse();
+        using var rtx = reopened.BeginReadTransaction();
+        rtx.VertexExists(doomed).Should().BeFalse();
     }
 
     // ===== (c) kill mid-uncommitted keeps committed prefix consistent =====
@@ -143,8 +142,8 @@ public sealed class FullTextCrashContractTests : IDisposable
         var keep = Ingest(db, "first committed doc retain5555");
 
         // A second writer adds a doc and leaves it uncommitted before the kill.
-        var pendingTx = db.BeginTransaction();
-        var pending = pendingTx.CreateNode("Doc");
+        var pendingTx = db.BeginWriteTransaction();
+        var pending = pendingTx.CreateVertex("Doc");
         pendingTx.SetProperty(pending, "body", PropertyValue.FromString("second pending lose4444"));
 
         Kill(db);
@@ -160,7 +159,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     public void RepeatedKillRecover_100_iterations_fulltext_consistent()
     {
         const int Iterations = 100;
-        var ids = new List<NodeId>(Iterations);
+        var ids = new List<VertexId>(Iterations);
 
         // First open creates the index; subsequent opens re-materialize it.
         var db = OpenAndCreateIndex();
@@ -197,9 +196,9 @@ public sealed class FullTextCrashContractTests : IDisposable
     public void Committed_update_before_kill_reindexes_after_recovery()
     {
         var db = OpenAndCreateIndex();
-        NodeId doc = Ingest(db, "original oldterm1111 text");
+        VertexId doc = Ingest(db, "original oldterm1111 text");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(doc, "body", PropertyValue.FromString("revised newterm2222 text"));
             tx.Commit();
@@ -215,104 +214,78 @@ public sealed class FullTextCrashContractTests : IDisposable
     // ===== コミットレコードだけが失われた不完全コミット =====
 
     /// <summary>
-    /// 不完全コミット: FlushPending が本体の PageImage と先行する
-    /// FtLeafMutation を WAL へ書き終えた後、Commit レコードの前に crash。論理相 (RecoverLogical) は物理層と
-    /// 同じ **presume-committed** (PageImage ∧ ¬Abort) で分類しなければならない。厳格 committed で分類した
-    /// 修正前は、torn-commit した FT 取込 tx を loser 扱いして postings だけ消していた。
-    ///
-    /// 本テストの不変条件: torn-commit 後 recovery で例外を出さず、FT 検索結果がノード可視性と **整合**する
-    /// (可視なら検索可 / 不可視なら検索不可)。決定論的注入: committed データを flush で disk へ落とし、WAL 末尾の
-    /// Commit レコードを truncate。なお本エンジンの torn-commit body は Pass 2a (厳格 redo) では復元されず
-    /// (= ノードは不可視になりがち) だが、本テストは「postings 単独で消えて整合が崩れる」修正前の不整合が
-    /// 起きないことを検証する (presume-committed で body/postings が同じ運命をたどる)。
+    /// Vertex body と全文manifestの PageImage に続く Commit record を途中で切り詰める。
+    /// checksum を検証できない Commit を無視して開くと primary と posting の可視性が分かれうるため、
+    /// open は通常 operation を受け付ける前に corruption として拒否する。
     /// </summary>
     [Fact]
-    public void TornCommit_fulltext_recovery_keeps_postings_consistent_with_node()
+    public void TornCommit_record_is_rejected_before_fulltext_open()
     {
         var db = OpenAndCreateIndex();
-        NodeId baseDoc = Ingest(db, "durable base baseword0001");
-        NodeId torn = Ingest(db, "tornword7777 committed content");
-        // committed データ (node/property + Suppressed FT leaf) を disk へ flush し torn-commit の前提を作る。
+        _ = Ingest(db, "durable base baseword0001");
+        _ = Ingest(db, "tornword7777 committed content");
+        // committed データを disk へ flush し torn-commit の前提を作る。
         ((BinaryGraphStorageBackend)db.BackendInternal).FlushDataPagesForTest();
         // 未コミットの writer を 1 つ開いたまま kill すると WAL がクリーン削除されず torn 注入できる。
-        var keepWalAlive = db.BeginTransaction();
-        keepWalAlive.CreateNode("Doc");
+        var keepWalAlive = db.BeginWriteTransaction();
+        keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
-        // 末尾 (= torn doc) の Commit レコードを 1 件削る (これより後ろの未コミット tx 記録も落ちるが無害)。
-        // 残るのは torn doc の body PageImage + FtLeafMutation = torn-commit 窓。
+        // 末尾 (= torn doc) の Commit レコードを途中で切る。
+        // checksum を検証できない WAL tail は有効な prefix として受理しない。
         TruncateTrailingCommitRecord(_path + "-wal");
 
-        using var reopened = Open();
-        // 不変条件: 「torn doc がノードとして可視」⇔「torn doc が検索可能」(presume-committed の body/postings
-        // が同じ運命をたどる)。修正前は body は presume-committed 側で残るのに postings だけ loser undo で消え、
-        // 「可視ノードなのに検索不能」という不整合 (= false の左辺・空の右辺) を生んでいた。
-        bool nodeVisible;
-        using (var rtx = reopened.BeginReadOnlyTransaction())
-            nodeVisible = rtx.NodeExists(torn);
-        bool searchable = Search(reopened, "tornword7777").Contains(torn);
-        searchable.Should().Be(nodeVisible,
-            "torn-commit recovery must keep FT postings consistent with node visibility (presume-committed)");
-        // committed prefix (base doc) は無傷。
-        Search(reopened, "baseword0001").Should().ContainSingle().Which.Should().Be(baseDoc);
+        ((Action)(() => Open()))
+            .Should().Throw<CorruptionException>();
     }
 
-    // ===== (g) 監査 #1: loser 論理 undo は committed キーを clobber してはならない =====
+    // ===== abort 後のmanifest PageImageはcommitted segment参照を上書きしない =====
 
     /// <summary>
-    /// 監査 #1 (recovery clobber, spec: 02_wal_recovery.md#two-phase-recovery): recovery Pass 3 の loser 論理 undo は、
-    /// その後コミットされた tx が同じ postings キーへ加えた変更を上書き (clobber) してはならない。
-    ///
-    /// FtLeafMutation は state-setting で、Delete レコードは undo 再挿入用に旧値を載せる
-    /// (<see cref="FtLeafMutationCodec"/>)。よって loser の <c>Delete(K)</c> を Pass 3 が逆適用すると
-    /// <c>UpsertRaw(K, 旧値)</c> を無条件実行し、Pass 2b が確立した committed 値を旧値で上書きする。
-    ///
-    /// シナリオ (単一ライタ):
+    /// abortしたtransactionのmanifest PageImageが、その後commitされたsegment参照を上書きしないことを検証する。
+    /// シナリオ:
     ///   tx1: E1="alice"            commit  ((alice,E1) postings)
-    ///   tx2: E1="bob"  → Rollback  (aborted loser; WAL に Delete(alice,E1) が eager 記録される)
-    ///   tx3: E1="charlie"          commit  (Delete(alice,E1) + Upsert(charlie,E1))
+    ///   tx2: E1="bob"  -> Rollback
+    ///   tx3: E1="charlie"          commit
     ///   kill → recover
-    /// committed 最終状態は E1="charlie" なので "alice" は検索ヒットしてはならない。修正前は Pass 3 が
-    /// tx2 の Delete(alice,E1) を UpsertRaw で逆適用し "alice" を復活させ、committed の削除を clobber する。
+    /// committed 最終状態は E1="charlie" なので "alice" は検索ヒットしてはならない。
     /// </summary>
     [Fact]
-    public void AbortedTx_logical_undo_must_not_clobber_committed_key_after_recovery()
+    public void AbortedTx_page_image_must_not_clobber_committed_key_after_recovery()
     {
         var db = OpenAndCreateIndex();
-        NodeId e1 = Ingest(db, "alice");
+        VertexId e1 = Ingest(db, "alice");
 
-        // tx2: "alice" posting を削除する更新 → ロールバック (in-process で "alice" を復元)。
-        // ただし eager FtLeafMutation Delete(alice,E1) は WAL に残り、recovery で loser undo 対象になる。
-        using (var tx2 = db.BeginTransaction())
+        // tx2 は in-process before-image で rollback する。
+        using (var tx2 = db.BeginWriteTransaction())
         {
             tx2.SetProperty(e1, "body", PropertyValue.FromString("bob"));
             tx2.Rollback();
         }
 
         // tx3: "charlie" へ更新して commit。committed 最終状態は alice 無し / charlie 有り。
-        using (var tx3 = db.BeginTransaction())
+        using (var tx3 = db.BeginWriteTransaction())
         {
             tx3.SetProperty(e1, "body", PropertyValue.FromString("charlie"));
             tx3.Commit();
         }
 
-        // 未コミット writer を開いたまま kill して checkpoint truncate を防ぎ、recovery で論理相を必ず通す。
-        var keepWalAlive = db.BeginTransaction();
-        keepWalAlive.CreateNode("Doc");
+        // 未コミット writer を開いたまま kill して checkpoint truncate を防ぐ。
+        var keepWalAlive = db.BeginWriteTransaction();
+        keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
         using var reopened = Open();
         Search(reopened, "charlie").Should().ContainSingle().Which.Should().Be(e1,
             "committed final state E1=\"charlie\" must be searchable after recovery");
         Search(reopened, "alice").Should().BeEmpty(
-            "aborted tx's logical undo must not resurrect a key the committed state removed (audit #1 clobber)");
+            "aborted tx must not resurrect a key the committed state removed");
     }
 
-    // ===== (h) 監査 #2: RollbackTo(savepoint) は FT 論理変更を巻き戻す (in-process) =====
+    // ===== RollbackTo(savepoint) は全文mutation bufferも巻き戻す =====
 
     /// <summary>
-    /// 監査 #2 (FT savepoint undo, spec: 03_mvcc.md#ft-logical-undo): savepoint への部分ロールバックは、
-    /// savepoint 以降に発行された FT leaf 論理ミューテーションも巻き戻さねばならない。
+    /// savepointへの部分rollbackは、savepoint以降の全文mutation bufferも巻き戻す。
     ///
     /// シナリオ (単一 tx 内):
     ///   tx1: E1="alice"                 commit  (alice→E1)
@@ -321,16 +294,14 @@ public sealed class FullTextCrashContractTests : IDisposable
     ///        RollbackTo(sp)   ← page (E1.body) は "alice" に戻る
     ///        commit
     /// committed 最終状態は E1="alice" なので "alice" がヒットし "bob" はヒットしてはならない。
-    /// 修正前は RollbackTo が FT 論理 undo を呼ばず、postings が bob→E1 のまま commit され、
-    /// 生きている E1 への false-positive ("bob") + 取りこぼし ("alice") が発生する。
     /// </summary>
     [Fact]
     public void RollbackToSavepoint_undoes_fulltext_mutations_in_process()
     {
         var db = OpenAndCreateIndex();
-        NodeId e1 = Ingest(db, "alice");
+        VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
@@ -341,25 +312,22 @@ public sealed class FullTextCrashContractTests : IDisposable
         Search(db, "alice").Should().ContainSingle().Which.Should().Be(e1,
             "RollbackTo restored E1.body=\"alice\" so the alice posting must be present");
         Search(db, "bob").Should().BeEmpty(
-            "RollbackTo must undo the savepoint's FT mutations (audit #2): the bob posting was rolled back");
+            "RollbackTo must undo the savepoint's full-text mutations");
         db.Dispose();
     }
 
-    // ===== (i) 監査 #2: 上記が crash 後も保たれる (WAL 補償レコード) =====
+    // ===== savepoint rollback後のmanifestがcrash recoveryでも保たれる =====
 
     /// <summary>
-    /// 監査 #2 (crash 経路): FtLeafMutation は eager に WAL へ追記されるため、savepoint で破棄された
-    /// 変更も commit した tx の WAL に残る。RollbackTo は逆操作を **補償 FtLeafMutation** として WAL へ
-    /// 追記し、recovery Pass 2b が forward→補償で正しい (ロールバック後の) 状態へ収束しなければならない。
-    /// in-process 巻き戻しだけでは crash 後に破棄分が Pass 2b で蘇る。
+    /// RollbackTo後にcommitしたmanifestがrollback後の状態を表し、crash recoveryでも破棄分が蘇らないことを検証する。
     /// </summary>
     [Fact]
     public void RollbackToSavepoint_fulltext_undo_survives_kill()
     {
         var db = OpenAndCreateIndex();
-        NodeId e1 = Ingest(db, "alice");
+        VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
@@ -367,24 +335,23 @@ public sealed class FullTextCrashContractTests : IDisposable
             tx.Commit();
         }
 
-        // checkpoint truncate を防いで recovery の論理相を必ず通す。
-        var keepWalAlive = db.BeginTransaction();
-        keepWalAlive.CreateNode("Doc");
+        // checkpoint truncate を防いで recovery を通す。
+        var keepWalAlive = db.BeginWriteTransaction();
+        keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
         using var reopened = Open();
         Search(reopened, "alice").Should().ContainSingle().Which.Should().Be(e1,
             "committed final state E1=\"alice\" must be searchable after recovery");
         Search(reopened, "bob").Should().BeEmpty(
-            "rolled-back FT mutation must not resurface after recovery (audit #2 WAL compensator)");
+            "rolled-back FT mutation must not resurface after recovery");
     }
 
-    // ===== (j) 監査 #2: rollback 後に full abort しても二重破壊しない =====
+    // ===== rollback後にfull abortしても二重破壊しない =====
 
     /// <summary>
-    /// 監査 #2 (相互作用): savepoint 以降の FT mutation を RollbackTo で巻き戻した後、tx 全体を abort する。
-    /// RollbackTo の補償レコードは undo スタックに積まないため、full abort は savepoint 以前の mutation のみ
-    /// 巻き戻す (補償を再 undo して蘇らせない)。最終的に tx 開始前の committed 状態に戻る。
+    /// savepoint以降の全文mutationをRollbackToで戻した後、transaction全体をabortする。
+    /// 最終的に transaction 開始前の committed 状態へ戻る。
     ///   tx1: E1="alice"               commit
     ///   tx2: sp=Savepoint(); E1="bob"; RollbackTo(sp); E1="charlie"; Rollback() (full abort)
     /// 期待: E1 は committed の "alice" のまま (charlie も bob も無し)。kill を挟んでも同じ。
@@ -393,9 +360,9 @@ public sealed class FullTextCrashContractTests : IDisposable
     public void RollbackToSavepoint_then_full_abort_restores_committed_state()
     {
         var db = OpenAndCreateIndex();
-        NodeId e1 = Ingest(db, "alice");
+        VertexId e1 = Ingest(db, "alice");
 
-        var tx = db.BeginTransaction();
+        var tx = db.BeginWriteTransaction();
         var sp = tx.Savepoint();
         tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
         tx.RollbackTo(sp);
@@ -403,8 +370,8 @@ public sealed class FullTextCrashContractTests : IDisposable
         tx.Rollback(); // full abort
 
         // 未コミット writer で WAL を残し、recovery 経路も通す。
-        var keepWalAlive = db.BeginTransaction();
-        keepWalAlive.CreateNode("Doc");
+        var keepWalAlive = db.BeginWriteTransaction();
+        keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
         using var reopened = Open();
@@ -427,9 +394,9 @@ public sealed class FullTextCrashContractTests : IDisposable
     public void NestedSavepoint_release_then_rollback_undoes_merged_fulltext()
     {
         var db = OpenAndCreateIndex();
-        NodeId e1 = Ingest(db, "alice");
+        VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp1 = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
@@ -447,14 +414,14 @@ public sealed class FullTextCrashContractTests : IDisposable
         db.Dispose();
     }
 
-    // WAL 末尾の Commit レコードを 1 件削って torn commit を作る。レコード形式:
+    // WAL 末尾の Commit レコードを途中で切って torn commit を作る。レコード形式:
     // [length:4][lsn:8][txId:8][type:1][crc:4][payload] (WriteAheadLog.EncodeRecord)。
     private static void TruncateTrailingCommitRecord(string walPath)
     {
         byte[] bytes = File.ReadAllBytes(walPath);
         const int headerSize = 25;
         long lastCommit = -1;
-        int pos = 0;
+        int pos = WalFormat.FileHeaderSize;
         while (pos + headerSize <= bytes.Length)
         {
             int len = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(pos));
@@ -464,6 +431,6 @@ public sealed class FullTextCrashContractTests : IDisposable
         }
         if (lastCommit < 0) throw new InvalidOperationException("no Commit record in WAL to truncate");
         using var fs = new FileStream(walPath, FileMode.Open, FileAccess.Write, FileShare.None);
-        fs.SetLength(lastCommit);
+        fs.SetLength(lastCommit + headerSize / 2);
     }
 }

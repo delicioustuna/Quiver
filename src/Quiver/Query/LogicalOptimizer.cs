@@ -21,15 +21,15 @@ namespace Quiver.Query.Optimizer;
 /// <item><b>FullTextPushdown</b>: <c>&lt;filters&gt;(FullTextScan(null))</c> を KnnPushdown と同型で
 ///   graph-first (<c>FullTextScan(Candidate=&lt;filters&gt;(Scan))</c>) か text-first に確定。閾値は単一定数
 ///   <see cref="TextFirstLabelFraction"/> (dim 概念が無いため)。<c>Limit</c> による K 縮小も対称に行う。</item>
-///   <item><b>LabelScanRewrite</b>: <c>Filter(LabelPredicate@col0, Scan(Node,null))</c> → <c>Scan(Node,label)</c>
-///   (AllNodesScan→NodeByLabelScan)。graph-first 候補 + Match 由来プランの両方に効く idempotent rule。</item>
+///   <item><b>LabelScanRewrite</b>: <c>Filter(LabelPredicate@col0, Scan(Vertex,null))</c> → <c>Scan(Vertex,label)</c>
+///   (AllVerticesScan→VertexByLabelScan)。graph-first 候補 + Match 由来プランの両方に効く idempotent rule。</item>
 /// </list>
 /// </remarks>
 internal static class LogicalOptimizer
 {
     /// <summary>
-    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
-    /// この値以上なら vector-first にフォールバックする (sidecar 不在 backend で使う legacy 単一閾値)。
+    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalVertices が
+    /// この値以上なら vector-first にフォールバックする (sidecar 不在 backend の保守的な単一閾値)。
     /// </summary>
     internal const double VectorFirstLabelFraction = 0.30;
 
@@ -59,15 +59,15 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>
-    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
+    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalVertices が
     /// この値以上なら全文検索を text-first に据え置く保守閾値。BM25 graph-first は df のため
     /// postings を全走査するので、候補集合が十分小さい (低選択率ラベル) ときだけ得をする。KNN と違い
-    /// dim 概念が無いため単一定数 (legacy KnnPushdown と同値)。ベンチ実測で調整する余地がある。
+    /// dim 概念が無いため、sidecar 不在時と同じ単一定数を使う。ベンチ実測で調整する余地がある。
     /// </summary>
     internal const double TextFirstLabelFraction = 0.30;
 
     /// <summary>論理プランを最適化する。<paramref name="stats"/> が null なら KNN / 全文は構造ヒントのみで判定。</summary>
-    public static LogicalOp Optimize(LogicalOp plan, GraphStats? stats, ISchemaApi schema)
+    public static LogicalOp Optimize(LogicalOp plan, GraphStats? stats, ISchemaCatalog schema)
     {
         var p = RewriteKnn(plan, stats, schema);
         p = RewriteFullText(p, stats, schema);
@@ -77,7 +77,7 @@ internal static class LogicalOptimizer
 
     // ── KnnLimitPushdown + KnnPushdown (再帰的書き換え) ──────────────────────────
 
-    private static LogicalOp RewriteKnn(LogicalOp n, GraphStats? stats, ISchemaApi schema)
+    private static LogicalOp RewriteKnn(LogicalOp n, GraphStats? stats, ISchemaCatalog schema)
     {
         // KnnLimitPushdown: Limit(skip=0) が <filters>(Knn(null,K)) の直上にあるなら K を縮め Limit を除去。
         if (n is LimitOp { Skip: 0 } lim
@@ -96,32 +96,32 @@ internal static class LogicalOptimizer
     }
 
     private static LogicalOp PushdownKnn(
-        List<Func<ISchemaApi, IPredicate>> filters, KnnOp knn, GraphStats? stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, KnnOp knn, GraphStats? stats, ISchemaCatalog schema)
     {
         // 構造ヒントあり (filters 非空)。stats があり label cardinality が閾値以上なら vector-first へ。
         if (stats is not null && ShouldFallBackToVectorFirst(filters, knn.Dim, stats, schema))
             return RebuildStack(filters, knn); // vector-first: filter は Knn(null) の post-filter のまま
 
-        // graph-first: filter を node scan の上に積み直し、label filter を label scan へ畳む。
-        LogicalOp candidate = LabelScanRewrite(RebuildStack(filters, new ScanOp(EntityKind.Node, null)), schema);
+        // graph-first: filter を vertex scan の上に積み直し、label filter を label scan へ畳む。
+        LogicalOp candidate = LabelScanRewrite(RebuildStack(filters, new ScanOp(EntityKind.Vertex, null)), schema);
         return knn with { Candidate = candidate };
     }
 
     private static bool ShouldFallBackToVectorFirst(
-        List<Func<ISchemaApi, IPredicate>> filters, int dim, GraphStats stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, int dim, GraphStats stats, ISchemaCatalog schema)
     {
-        if (stats.TotalNodes <= 0) return false;
+        if (stats.TotalVertices <= 0) return false;
         if (FindLabel(filters, schema) is not LabelId lid) return false;
         long card = stats.EstimateCardinality(lid);
         if (card <= 0) return false;
 
-        double fraction = (double)card / stats.TotalNodes;
+        double fraction = (double)card / stats.TotalVertices;
         double threshold = stats.HasFastLabelIndex ? FastIndexThresholdForDim(dim) : VectorFirstLabelFraction;
         return fraction >= threshold;
     }
 
     /// <summary>filter 群を materialize し、最初に見つかった col0 の <see cref="LabelPredicate"/> のラベルを返す。</summary>
-    private static LabelId? FindLabel(List<Func<ISchemaApi, IPredicate>> filters, ISchemaApi schema)
+    private static LabelId? FindLabel(List<Func<ISchemaCatalog, IPredicate>> filters, ISchemaCatalog schema)
     {
         foreach (var f in filters)
             if (f(schema) is LabelPredicate { Column: 0 } lp) return lp.Label;
@@ -129,9 +129,9 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>FilterOp を剥がしながら底の <see cref="KnnOp"/> まで辿る。filter は outer→inner 順で返す。</summary>
-    private static bool TryCollectKnnStack(LogicalOp n, out List<Func<ISchemaApi, IPredicate>> filters, out KnnOp? knn)
+    private static bool TryCollectKnnStack(LogicalOp n, out List<Func<ISchemaCatalog, IPredicate>> filters, out KnnOp? knn)
     {
-        filters = new List<Func<ISchemaApi, IPredicate>>();
+        filters = new List<Func<ISchemaCatalog, IPredicate>>();
         var cur = n;
         while (cur is FilterOp f) { filters.Add(f.PredicateFactory); cur = f.Source; }
         if (cur is KnnOp k) { knn = k; return true; }
@@ -140,7 +140,7 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>outer→inner 順の filter 群を <paramref name="baseOp"/> の上に元の入れ子で積み直す。</summary>
-    private static LogicalOp RebuildStack(List<Func<ISchemaApi, IPredicate>> filters, LogicalOp baseOp)
+    private static LogicalOp RebuildStack(List<Func<ISchemaCatalog, IPredicate>> filters, LogicalOp baseOp)
     {
         var result = baseOp;
         for (int i = filters.Count - 1; i >= 0; i--)
@@ -150,7 +150,7 @@ internal static class LogicalOptimizer
 
     // ── FullTextLimitPushdown + FullTextPushdown (KnnPushdown と同型) ──────
 
-    private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaApi schema)
+    private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaCatalog schema)
     {
         // FullTextLimitPushdown: Limit(skip=0) が <filters>(FullTextScan(null,K)) の直上なら K を縮め Limit を除去。
         if (n is LimitOp { Skip: 0 } lim
@@ -169,32 +169,32 @@ internal static class LogicalOptimizer
     }
 
     private static LogicalOp PushdownFullText(
-        List<Func<ISchemaApi, IPredicate>> filters, FullTextScanOp ft, GraphStats? stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, FullTextScanOp ft, GraphStats? stats, ISchemaCatalog schema)
     {
         // stats があり label cardinality が閾値以上なら text-first に据え置く (filter は post-filter のまま)。
         if (stats is not null && ShouldStayTextFirst(filters, stats, schema))
             return RebuildStack(filters, ft);
 
-        // graph-first: filter を node scan の上に積み直し、label filter を label scan へ畳む。
-        LogicalOp candidate = LabelScanRewrite(RebuildStack(filters, new ScanOp(EntityKind.Node, null)), schema);
+        // graph-first: filter を vertex scan の上に積み直し、label filter を label scan へ畳む。
+        LogicalOp candidate = LabelScanRewrite(RebuildStack(filters, new ScanOp(EntityKind.Vertex, null)), schema);
         return ft with { Candidate = candidate };
     }
 
     private static bool ShouldStayTextFirst(
-        List<Func<ISchemaApi, IPredicate>> filters, GraphStats stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, GraphStats stats, ISchemaCatalog schema)
     {
-        if (stats.TotalNodes <= 0) return false;
+        if (stats.TotalVertices <= 0) return false;
         if (FindLabel(filters, schema) is not LabelId lid) return false;
         long card = stats.EstimateCardinality(lid);
         if (card <= 0) return false;
-        return (double)card / stats.TotalNodes >= TextFirstLabelFraction;
+        return (double)card / stats.TotalVertices >= TextFirstLabelFraction;
     }
 
     /// <summary>FilterOp を剥がしながら底の <see cref="FullTextScanOp"/> まで辿る。filter は outer→inner 順で返す。</summary>
     private static bool TryCollectFullTextStack(
-        LogicalOp n, out List<Func<ISchemaApi, IPredicate>> filters, out FullTextScanOp? ft)
+        LogicalOp n, out List<Func<ISchemaCatalog, IPredicate>> filters, out FullTextScanOp? ft)
     {
-        filters = new List<Func<ISchemaApi, IPredicate>>();
+        filters = new List<Func<ISchemaCatalog, IPredicate>>();
         var cur = n;
         while (cur is FilterOp f) { filters.Add(f.PredicateFactory); cur = f.Source; }
         if (cur is FullTextScanOp s) { ft = s; return true; }
@@ -204,26 +204,28 @@ internal static class LogicalOptimizer
 
     // ── LabelScanRewrite ────────────────────────────────────────────────────────
 
-    private static LogicalOp LabelScanRewrite(LogicalOp n, ISchemaApi schema)
+    private static LogicalOp LabelScanRewrite(LogicalOp n, ISchemaCatalog schema)
     {
         n = RewriteChildren(n, c => LabelScanRewrite(c, schema));
-        if (n is FilterOp { Source: ScanOp { Kind: EntityKind.Node, Label: null } } f
+        if (n is FilterOp { Source: ScanOp { Kind: EntityKind.Vertex, Label: null } } f
             && f.PredicateFactory(schema) is LabelPredicate { Column: 0 } lp)
-            return new ScanOp(EntityKind.Node, lp.Label);
+            return new ScanOp(EntityKind.Vertex, lp.Label);
         return n;
     }
 
-    // ── 子ノードの汎用書き換え ──────────────────────────────────────────────────
+    // ── 子Vertexの汎用書き換え ──────────────────────────────────────────────────
 
     private static LogicalOp RewriteChildren(LogicalOp n, Func<LogicalOp, LogicalOp> f) => n switch
     {
         FilterOp x               => x with { Source = f(x.Source) },
         ExpandOp x               => x with { Source = f(x.Source) },
+        ExpandToNexusOp x    => x with { Source = f(x.Source) },
+        ExpandMembersOp x        => x with { Source = f(x.Source) },
         VarLenExpandOp x         => x with { Source = f(x.Source) },
         PathOp x                 => x with { Source = f(x.Source) },
         PropertyLookupOp x       => x with { Source = f(x.Source) },
         LabelNameLookupOp x      => x with { Source = f(x.Source) },
-        RelationshipEndpointOp x => x with { Source = f(x.Source) },
+        EdgeEndpointOp x => x with { Source = f(x.Source) },
         LimitOp x                => x with { Source = f(x.Source) },
         SortOp x                 => x with { Source = f(x.Source) },
         DedupOp x                => x with { Source = f(x.Source) },
@@ -232,6 +234,6 @@ internal static class LogicalOptimizer
         KnnOp x                  => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
         FullTextScanOp x         => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
         FusionOp x               => x with { Children = ImmutableArray.CreateRange(x.Children, f) },
-        _                        => n, // 葉: ScanOp / NodeSeedOp / CorrelatedInputOp
+        _                        => n, // 葉: ScanOp / VertexSeedOp / CorrelatedInputOp
     };
 }

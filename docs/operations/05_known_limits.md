@@ -16,12 +16,12 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
   外部公開したいなら、アプリ側で HTTP/gRPC API を立てて Quiver をその裏に置く
   ([`samples/Quiver.Samples.Hosting`](../../samples/Quiver.Samples.Hosting/) 参照)。
 - **1 つの DB ディレクトリは 1 プロセスからのみ開ける**。複数プロセスからの同時オープンは不可。
-  同一プロセス内では `GraphDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
-- **並行モデルは「単一ライタ + 並行リーダ」**。読み取りはスナップショット分離でロックフリーに並行でき、
-  書き込み中でも読める。書き込みは 1 度に 1 tx を前提とするため、複数スレッドから書く場合はアプリ側で
-  直列化する (`SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キュー)。
-  トランザクションはスレッド親和で、生成したスレッドで使い切る (別スレッドへ渡さない)。
-  tx は短く保つ。開いたままだと checkpoint、`Vacuum`、WAL 切り詰めが止まり WAL が肥大する。
+  同一プロセス内では `QuiverDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
+- **並行モデルは「単一ライタ + 並行リーダ」**。読み取りはスナップショット分離で並行でき、
+  書き込み中でも読める。書き込みはデータベース内のwriter gateが直列化するため、
+  アプリケーション側の追加ゲートは不要である。高頻度の書き込みでは、専用キューによる集約を選べる。
+  同じトランザクションハンドルを複数スレッドから同時に使うことはできない。
+  トランザクションは短く保つ。開いたままだとcheckpoint、`Vacuum`、WAL切り詰めが遅れ、WALが肥大する。
   並行性とスレッドの規約、リトライ実装例は
   [docs/spec/08_known_limits.md#concurrency](../spec/08_known_limits.md#concurrency) に集約。
 
@@ -45,22 +45,12 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ## 容量・規模の目安
 
-数値は設計目標および実測ベンチに基づく **目安** であり、ハードウェア・ワークロード・スキーマで
+数値は実測ベンチに基づく**目安**であり、ハードウェア、ワークロード、スキーマで
 大きく変わる。本番投入前に自分のワークロードで実測すること。
-
-### GA 出口条件 (設計目標)
-
-ロードマップ上の 1.0 GA 出口条件は:
-
-> **100K nodes / 1M relationships / 10K concurrent reads (32 thread) を 1 時間連続 +
-> chaos injection nightly が 24h 連続グリーン**
-
-これは「この規模・並列度で安定動作することを検証する」という目標であり、**上限ではない**が、
-この規模感が快適に動く設計ということ。これを大きく超える規模 (数億ノード等) は未検証領域。
 
 ### 書き込みスループット
 
-- bulk パス (1 tx にまとめる) で **~100k inserts/sec** 程度 ([WAL 増幅計測](../benchmark-results.md#索引付き書き込みの-wal-増幅))。
+- bulkパス（1 transactionにまとめる）で約100k inserts/sec（[WAL増幅計測](../benchmark-results.md#索引付き書き込みのwal増幅)）。
 - per-tx (1 件 1 commit) は約 100 倍遅い。必ず [03_performance_tuning.md](03_performance_tuning.md) の鉄則に従う。
 
 ### メモリ
@@ -80,18 +70,17 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### トランザクション / 分離レベル
 
-- 既定は SnapshotIsolation。
-  Serializable (SSN) は実験的 API (`[Experimental("QUIVER001")]`) として提供されている。
-  Write skew を厳密に排除したいワークロードでの利用を想定するが、安定性保証の対象外である
-  ([api-stability.md §5](../api-stability.md) 参照)。
-- ロック競合が多い場合は `DeadlockDetectionInterval` を設定しないと `LockTimeout` でしか抜けられない
-  ([03_performance_tuning.md](03_performance_tuning.md))。
+- 分離レベルは snapshot isolation である。
+- writer は database instance ごとに一つであり、`WriterContentionMode` と `WriterWaitTimeout` が
+  二本目の書き込み要求を待機させるか即時拒否するかを決める。
+- reader は writer lease を取得せず、開始時の snapshot を並行して読む。
 
-### vacuum はアクティブ tx 0 が前提
+### vacuum と長時間 reader
 
-- `Vacuum()` はアクティブトランザクションがあると `Skipped = true` で何もしない。常時書き込みがある
-  ワークロードでは回収機会が来ないことがある。
-  AutoVacuum ワーカーや低トラフィック時間帯の明示実行を計画する。
+- `Vacuum()` は writer lease を取得するが、active reader の終了を待たない。
+- active reader が存在する場合は、その最古 snapshot が固定した visibility horizon より前だけを回収する。
+- 長時間 reader は安全性を壊さないが、古い property、payload、index manifest、segment artifact の回収を遅らせる。
+- `GetSnapshotDiagnostics()` または snapshot metrics で最古 reader を特定し、不要な read transaction を閉じる。
 
 ### バックエンド差異
 
@@ -99,7 +88,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### 索引
 
-- 索引は明示的に作る必要がある (自動索引は無い)。検索/MERGE する列に `Schema.CreateIndex`。
+- 索引は明示的に作る必要がある (自動索引は無い)。検索/MERGE する列に `EditSchema` で `ScalarIndexDefinition` を作成する。
 - 索引数を増やすほど書き込みコスト (WAL 増幅) が上がる。必要な列に絞る。
 - abort/crash 後に稀に orphan が残ることがある。`CheckIndexConsistency`、`RepairIndexes` で対処
   ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))。
@@ -117,11 +106,11 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 | 項目 | 確認方法 / 決め方 | 効いてくるノブ |
 |---|---|---|
-| 想定ノード数 / エッジ数 | ドメインから見積もる。GA 目標 (100K/1M) を大きく超えるなら要実測 | — |
+| 想定Vertex数 / エッジ数 | ドメインから見積もる。GA 目標 (100K/1M) を大きく超えるなら要実測 | — |
 | hot working set のサイズ | 頻繁に触るページ量。全件か一部か | `BufferPoolSize` |
 | ピーク書き込み速度 | inserts/sec。bulk か per-tx か (鉄則) | tx 設計 / `CheckpointThresholdBytes` |
-| 並列 reader 数 | 同時に読むスレッド数 | `LockingMode = ReaderWriter` |
-| 並列 writer 数 | 同時に commit するスレッド数 | `GroupCommitWindow` |
+| 並列 reader 数 | 同時に読むスレッド数 | snapshot age と working set |
+| writer 要求数 | 同時に到着する mutation 数 | writer queue、`WriterContentionMode`、`WriterWaitTimeout` |
 | 許容 recovery 時間 | 起動 SLA (秒) | `CheckpointPolicy = Adaptive` + `TargetRecoveryTime` |
 | 許容データ損失 (RPO) | スナップショット間隔を決める | バックアップ周期 ([02](02_backup_restore.md)) |
 | ディスク予算 | データ + dead version + WAL + バックアップ世代 | `Vacuum` 周期 / 世代数 |

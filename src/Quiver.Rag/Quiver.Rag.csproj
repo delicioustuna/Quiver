@@ -11,7 +11,7 @@
     <PackageTags>$(PackageTags);rag;retrieval-augmented-generation;vector-search;full-text-search;bm25;chunking;hybrid-search</PackageTags>
   </PropertyGroup>
   <ItemGroup>
-    <!-- 依存はコア Quiver のみ (14_rag_layer.md §2)。Quiver.Embedding には依存しない。 -->
+    <!-- 埋め込みモデルは IChunkEmbedder を通じて呼び出し側から注入する。 -->
     <ProjectReference Include="..\Quiver\Quiver.csproj" />
   </ItemGroup>
 </Project>

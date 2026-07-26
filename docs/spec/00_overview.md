@@ -1,6 +1,8 @@
 # Quiver: システム概要
 
-> as-built 仕様 (v1 baseline, 2026-06-16)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+>
+> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、horizon-aware maintenance、トランザクション境界付き query を実装している。
 
 ## ポジショニング {#positioning}
 
@@ -9,23 +11,14 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## 主要ユースケース {#use-case}
 
-**ローカル RAG バックエンド** -- ただしエンジン自体は汎用である。RAG 固有の API は `Quiver.Rag` に置く。
+**ローカルRAGバックエンド**を主要ユースケースとする。
+エンジン自体は汎用とし、RAG固有のAPIは`Quiver.Rag`に置く。
 
 ## ゼロ依存テーゼ {#zero-dep}
 
-外部に依存するのは LLM モデルの駆動のみ。それ以外のコンポーネント（ストレージ、WAL、リカバリ、インデックス、
-ベクトル検索、全文検索、クエリエンジン）はすべてサードパーティ依存ゼロのマネージド C# でフルスクラッチ実装する。
-
-**Trusted Computing Base (TCB):**
-
-| コンポーネント | 信頼の根拠 |
-|---|---|
-| .NET BCL | プラットフォームランタイム |
-| Claude | 実装者（全コードは人間のレビュー下で AI が記述） |
-| LLM プロバイダ | ランタイム依存（埋め込み / 生成） |
-
-マネージド C# は、C/C++ ストレージエンジンが抱えるメモリ安全性の脆弱性クラスを排除する。
-テストはセキュリティ統制として機能し、主要な検証メカニズムである。
+コアエンジンが実行時に依存するのは.NET BCLだけである。
+ストレージ、WAL、リカバリ、インデックス、ベクトル検索、全文検索、クエリエンジンは、サードパーティ依存のないマネージドC#で実装する。
+埋め込み生成とLLM呼び出しはアプリケーション側の責務とし、`Quiver.Rag`にはプロバイダを注入する。
 
 ## アーキテクチャレイヤ {#layers}
 
@@ -33,9 +26,10 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 ┌─────────────────────────────────────────────────┐
 │  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
-│  GraphDatabase (facade)                         │
-│  ├─ ISchemaApi (labels, indexes, FT indexes)    │
-│  ├─ IGraphTransaction (CRUD, index, vector)     │
+│  QuiverDatabase (facade)                         │
+│  ├─ ISchemaCatalog / ISchemaEditor              │
+│  ├─ IReadTransaction / IWriteTransaction        │
+│  ├─ GraphTraversalSource / GraphMutationSource  │
 │  ├─ IDiagnosticsApi (consistency check, repair) │
 │  └─ Logical mutation sink (audit / replication) │
 ├─────────────────────────────────────────────────┤
@@ -46,16 +40,18 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 ├─────────────────────────────────────────────────┤
 │  Transaction Manager                            │
 │  ├─ MVCC (snapshot isolation)                   │
-│  ├─ ARIES WAL + recovery                        │
+│  ├─ QUIVER-SW page WAL + Commit-only recovery   │
 │  └─ Checkpointer                                │
 ├─────────────────────────────────────────────────┤
 │  Storage Engine                                 │
 │  ├─ PagedFile (8 KB pages, Clock buffer pool)   │
 │  ├─ SingleFileContainer (*.quiver)              │
-│  ├─ NodeStore / RelationshipStore / PropertyStore│
+│  ├─ Versioned Vertex / Edge / Nexus stores      │
+│  ├─ PropertyVersionStore / payload stores       │
+│  ├─ Incidence / AdjacencySegment stores         │
 │  ├─ B+Tree indexes                              │
-│  ├─ FullTextIndex (postings + norms B+Trees)    │
-│  └─ PersistentVectorStore + HNSW                │
+│  ├─ Immutable full-text segments + BM25/WAND    │
+│  └─ Immutable vector segments + HNSW artifacts  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -69,15 +65,32 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
+## RAG 利用者契約 {#rag-contract}
+
+`Quiver.Rag` は Document と Chunk の取込、BM25 と vector の融合検索、graph expansion を提供する。
+`MetadataEquals` は一致文書の Chunk を scorer の候補集合へ渡し、全文と vector の top-k を候補集合内で確定する。
+後段 filter と oversampling を正しさの前提にしない。
+
+`RagHit.Score` は BM25 score、vector similarity、融合後 score、融合方式、RRF の rank 定数を返す。
+片方の検索チャンネルだけを使う場合は、使わない側の生 score を `null` にする。
+
+内容変更による upsert は Document ID を維持しない。
+旧 Document、Chunk、旧 ID に接続した Edge、旧 ID が参加した Nexus を同じ logical delete 境界で削除する。
+`UpsertResult` は旧 ID と新 ID の対応を返し、利用者が所有する関係だけを明示的に再アンカーできるようにする。
+旧 ID の利用者関係を新 ID へ暗黙継承しない。
+
 ## ファイルレイアウト {#file-layout}
 
-静止時、Quiver データベースは **単一ファイル** `*.quiver` である。稼働中は WAL サイドカー
-`*.quiver-wal` が並んで存在する。クリーンシャットダウン時には WAL は空になるか存在しない。
+primary state は `*.quiver` に格納する。
+稼働中は WAL サイドカー `*.quiver-wal` が並び、クリーンシャットダウン時には空になるか存在しない。
+全文索引を使う場合は、manifest が参照する immutable artifact を `*.quiver-ftseg/` ディレクトリへ個別ファイルとして格納する。
+snapshot は primary file、WAL、参照可能な artifact directory を一組として複製する。
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V1 = 1`。自動マイグレーションは行わない。異なるフォーマットバージョンの
-データベースを開くと `FormatVersionMismatchException` をスローする。
+現行のデータファイルと WAL は `QUIVER-SW` family version 2 である。
+旧フォーマットを読み替える decoder と自動マイグレーションは提供しない。
+旧データベースは `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する。
 
 ## 非目標 {#non-goals}
 

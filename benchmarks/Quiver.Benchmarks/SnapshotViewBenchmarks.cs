@@ -7,10 +7,10 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-15 / codex_advice_3 §7.7. Compare per-pass cost of running PageRank
+///  / codex_advice_3 §7.7. Compare per-pass cost of running PageRank
 /// against three neighbour sources for the same graph:
 /// - <c>AdjacencyCursor</c>: open + walk a fresh <see cref="AdjacencyCursor"/>
-///   for every node every iteration (the previous "best" path).
+///   for every vertex every iteration (the previous "best" path).
 /// - <c>SnapshotView</c>: build a CSR/CSC <see cref="GraphSnapshotView"/> once
 ///   and iterate flat <see cref="ReadOnlySpan{T}"/> rows each pass.
 ///
@@ -22,7 +22,7 @@ namespace Quiver.Benchmarks;
 public class SnapshotViewBenchmarks
 {
     [Params(1_000, 10_000)]
-    public int NodeCount { get; set; }
+    public int VertexCount { get; set; }
 
     [Params(8)]
     public int AvgDegree { get; set; }
@@ -30,9 +30,9 @@ public class SnapshotViewBenchmarks
     [Params(10)]
     public int Iterations { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -41,28 +41,28 @@ public class SnapshotViewBenchmarks
 
         var rng = new Random(42);
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
-            for (int i = 0; i < NodeCount; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
+            for (int i = 0; i < VertexCount; i++)
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
 
-            int relId = 0;
-            for (int i = 0; i < NodeCount; i++)
+            int edgeId = 0;
+            for (int i = 0; i < VertexCount; i++)
             {
                 for (int e = 0; e < AvgDegree; e++)
                 {
-                    int target = rng.Next(NodeCount);
+                    int target = rng.Next(VertexCount);
                     if (target == i) continue;
-                    loader.AppendRelationship(
-                        new RelationshipId(relId++),
-                        new NodeId(i), new NodeId(target),
-                        new RelationshipTypeId(0));
+                    loader.AppendEdge(
+                        new EdgeId(edgeId++),
+                        new VertexId(i), new VertexId(target),
+                        new EdgeTypeId(0));
                 }
             }
             loader.Commit();
         }
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _readTx = _db.BeginTransaction();
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -77,8 +77,8 @@ public class SnapshotViewBenchmarks
     [Benchmark(Description = "PageRank via AdjacencyCursor (per-pass open)", Baseline = true)]
     public double PageRank_Cursor()
     {
-        var adj = _readTx.AsInternal().AdjacencyBlocks!;
-        int n = NodeCount;
+        var adj = _readTx.AsInternal().AdjacencySegments!;
+        int n = VertexCount;
         var rank = new double[n];
         var next = new double[n];
         for (int i = 0; i < n; i++) rank[i] = 1.0 / n;
@@ -88,12 +88,12 @@ public class SnapshotViewBenchmarks
             for (int i = 0; i < n; i++) next[i] = (1.0 - 0.85) / n;
             for (int src = 0; src < n; src++)
             {
-                using var c = adj.OpenCursor(new NodeId(src), Direction.Outgoing, null);
+                using var c = adj.OpenCursor(new VertexId(src), Direction.Outgoing, null);
                 int outDeg = 0;
                 var neighbors = new List<long>();
                 while (c.MoveNext())
                 {
-                    if (adj.IsTombstoned(c.Relationship)) continue;
+                    if (adj.IsTombstoned(c.Edge)) continue;
                     neighbors.Add(c.Neighbor.Value);
                     outDeg++;
                 }

@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
@@ -6,20 +6,24 @@ namespace Quiver;
 
 /// <summary>オプティマイザが評価対象とする候補インデックスを表す。</summary>
 internal sealed record IndexCandidate(
-    string IndexName,
+    ScalarIndexDefinition Definition,
+    PropertyKeyId PropertyKey,
     LabelId Label,
-    long EstimatedRows);
+    long EstimatedRows)
+{
+    internal string IndexName => Definition.Name;
+}
 
 /// <summary>多段トラバーサルプランの 1 ホップ。</summary>
 internal sealed record TraversalPlanStep(
-    RelationshipTypeId? TypeFilter,
+    EdgeTypeId? TypeFilter,
     Direction Direction);
 
 /// <summary>オプティマイザが選択したスキャン種別。</summary>
 internal enum ScanKind
 {
-    /// <summary>全ノードスキャン。</summary>
-    AllNodesScan,
+    /// <summary>全Vertexスキャン。</summary>
+    AllVerticesScan,
     /// <summary>ラベル別スキャン。</summary>
     LabelScan,
     /// <summary>インデックスシーク。</summary>
@@ -33,12 +37,12 @@ internal enum ScanKind
 /// </summary>
 internal enum ExpandStrategy
 {
-    /// <summary>ノード毎の隣接ブロック fast path + リンクリストフォールバック (バイナリバックエンドの既定)。</summary>
+    /// <summary>Vertex毎の隣接ブロック fast path + リンクリストフォールバック (バイナリバックエンドの既定)。</summary>
     AdjacencyBlock = 1,
-    /// <summary>隣接ブロック fast path を使わず、リレーションシップリンクリスト (チェーン) を辿る。</summary>
+    /// <summary>隣接ブロック fast path を使わず、Edgeリンクリスト (チェーン) を辿る。</summary>
     LinkedListChain = 2,
-    /// <summary>予約: シーケンシャルリレーションシップスキャン + frontier ビットセット probe。</summary>
-    RelationshipScan = 3,
+    /// <summary>予約: シーケンシャルEdgeスキャン + frontier ビットセット probe。</summary>
+    EdgeScan = 3,
 }
 
 /// <summary><see cref="QueryOptimizer.SelectExpandPlan"/> が返す展開プラン。</summary>
@@ -48,21 +52,21 @@ internal sealed record ExpandPlan(
 {
     /// <summary>
     /// プランを物理オペレータとして実体化する。
-    /// <see cref="ExpandStrategy.RelationshipScan"/> なら <see cref="RelationshipScanExpandOperator"/> を、
+    /// <see cref="ExpandStrategy.EdgeScan"/> なら <see cref="EdgeScanExpandOperator"/> を、
     /// それ以外は <see cref="ExpandOperator"/> を返す
     /// (バイナリバックエンドの access methods が内部で隣接ブロック / リンクリストを選ぶ)。
     /// </summary>
     public IPhysicalOperator Build(
         IPhysicalOperator source,
-        int sourceNodeColumn,
+        int sourceVertexColumn,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         ExpandOutputMode outputMode)
         => Strategy switch
         {
-            ExpandStrategy.RelationshipScan =>
-                new RelationshipScanExpandOperator(source, sourceNodeColumn, direction, typeFilter, outputMode),
-            _ => new ExpandOperator(source, sourceNodeColumn, direction, typeFilter, outputMode),
+            ExpandStrategy.EdgeScan =>
+                new EdgeScanExpandOperator(source, sourceVertexColumn, direction, typeFilter, outputMode),
+            _ => new ExpandOperator(source, sourceVertexColumn, direction, typeFilter, outputMode),
         };
 }
 
@@ -70,17 +74,23 @@ internal sealed record ExpandPlan(
 internal sealed record ScanPlan(
     ScanKind Kind,
     LabelId? Label,
-    string? IndexName,
+    IndexCandidate? Index,
     long EstimatedRows)
 {
+    internal string? IndexName => Index?.IndexName;
+
     /// <summary>プランを物理オペレータとして実体化する。</summary>
     public IPhysicalOperator Build(ITupleProvider? indexKey = null) => Kind switch
     {
-        ScanKind.IndexSeek when IndexName != null && indexKey != null
-            => new NodeIndexSeekOperator(IndexName, indexKey),
+        ScanKind.IndexSeek when Index is not null && indexKey != null
+            => new VertexIndexSeekOperator(
+                Index.Definition,
+                Index.PropertyKey,
+                Index.Label,
+                indexKey),
         ScanKind.LabelScan when Label.HasValue
-            => new NodeByLabelScanOperator(Label.Value),
-        _ => new AllNodesScanOperator(Label),
+            => new VertexByLabelScanOperator(Label.Value),
+        _ => new AllVerticesScanOperator(Label),
     };
 }
 
@@ -104,7 +114,7 @@ internal sealed class QueryOptimizer
 
     /// <summary>
     /// 任意のインデックス候補を考慮しつつ、ラベルに対して最も選択的なスキャンを選ぶ。
-    /// ルール: IndexSeek &gt; LabelScan &gt; AllNodesScan。
+    /// ルール: IndexSeek &gt; LabelScan &gt; AllVerticesScan。
     /// </summary>
     public ScanPlan SelectScan(LabelId? label, IReadOnlyList<IndexCandidate>? candidates = null)
     {
@@ -113,10 +123,10 @@ internal sealed class QueryOptimizer
             var best = candidates.MinBy(c => c.EstimatedRows)!;
             var labelCount = label.HasValue
                 ? _stats.EstimateCardinality(label.Value)
-                : _stats.TotalNodes;
+                : _stats.TotalVertices;
 
             if (labelCount == 0 || (double)best.EstimatedRows / labelCount < IndexSelectivityThreshold)
-                return new ScanPlan(ScanKind.IndexSeek, label, best.IndexName, best.EstimatedRows);
+                return new ScanPlan(ScanKind.IndexSeek, label, best, best.EstimatedRows);
         }
 
         if (label.HasValue)
@@ -125,28 +135,7 @@ internal sealed class QueryOptimizer
             return new ScanPlan(ScanKind.LabelScan, label, null, count);
         }
 
-        return new ScanPlan(ScanKind.AllNodesScan, null, null, _stats.TotalNodes);
-    }
-
-    // ---- 列スキャン集約のコスト判定 ----
-
-    // 列 dense スキャンの 1 entry あたり概算コスト (in-memory 配列舐め + visibility 判定)。
-    private const double ColumnScanCostPerEntry = 1.0;
-    // row path 集約の 1 row あたり概算コスト (per-row プロパティチェーン走査 + ページ pin)。
-    // spike 実測で projection は列が ~325× 速かった (= per-row が 2 桁 ns、列が ~1ns)。
-    private const double RowAggregateCostPerRow = 50.0;
-
-    /// <summary>
-    /// full-scan 集約で列スキャンと row path のどちらが安いかを判定する。
-    /// 列コスト = (head entries + delta versions) × <see cref="ColumnScanCostPerEntry"/>、
-    /// row コスト = 推定行数 × <see cref="RowAggregateCostPerRow"/>。delta が肥大して列が不利になる
-    /// 状況 (compaction 前) でのみ row へ倒れる。compaction (5e) で delta は horizon 未満に保たれる。
-    /// </summary>
-    public static bool ShouldUseColumnAggregate(long columnHeadEntries, long deltaVersions, long estimatedRows)
-    {
-        double columnCost = (columnHeadEntries + deltaVersions) * ColumnScanCostPerEntry;
-        double rowCost = estimatedRows * RowAggregateCostPerRow;
-        return columnCost <= rowCost;
+        return new ScanPlan(ScanKind.AllVerticesScan, null, null, _stats.TotalVertices);
     }
 
     // ---- トラバーサル順最適化 ----
@@ -166,13 +155,12 @@ internal sealed class QueryOptimizer
 
     // ---- 展開プラン ----
 
-    // RelationshipScanExpandOperator が勝つのは frontier がほぼエッジ全体を覆う場合のみ。
-    // ノード毎経路はリンクリスト / 隣接ブロック fast path の恩恵を受け、かつ各ソースの
-    // 直接の隣接で停止するのに対し、スキャン経路は常に O(TotalRelationships) のコストを払う。
+    // EdgeScanExpandOperator が勝つのは frontier がほぼエッジ全体を覆う場合のみ。
+    // Vertex毎経路はリンクリスト / 隣接ブロック fast path の恩恵を受け、かつ各ソースの
+    // 直接の隣接で停止するのに対し、スキャン経路は常に O(TotalEdges) のコストを払う。
     // バイナリバックエンド (リンクリスト、隣接ブロックなし) では frontier カバー率約 85% でクロスオーバー、
     // 隣接ブロックあり構成ではクロスオーバーはさらに高くなる。
-    // 詳細は docs/benchmarks/2026-05-15__after.md。
-    private const double RelationshipScanFrontierFraction = 0.85;
+    private const double EdgeScanFrontierFraction = 0.85;
 
     /// <summary>
     /// frontier サイズが不明な 1 ホップ展開に対して <see cref="ExpandStrategy"/> を選ぶ。
@@ -182,35 +170,35 @@ internal sealed class QueryOptimizer
     /// </summary>
     public ExpandPlan SelectExpandPlan(
         LabelId? sourceLabel,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         Direction direction)
         => SelectExpandPlan(sourceLabel, typeFilter, direction, frontierSize: null);
 
     /// <summary>
     /// 既知の <paramref name="frontierSize"/> から 1 ホップ展開向けに
-    /// <see cref="ExpandStrategy"/> を選ぶ。<c>frontierSize * fanOut</c> がリレーションシップストアの
-    /// 大部分に触れる見込みなら <see cref="ExpandStrategy.RelationshipScan"/> を、それ以外は
-    /// <see cref="ExpandStrategy.AdjacencyBlock"/> (バイナリバックエンドはブロック未保有ノードでは
+    /// <see cref="ExpandStrategy"/> を選ぶ。<c>frontierSize * fanOut</c> がEdgeストアの
+    /// 大部分に触れる見込みなら <see cref="ExpandStrategy.EdgeScan"/> を、それ以外は
+    /// <see cref="ExpandStrategy.AdjacencyBlock"/> (バイナリバックエンドはブロック未保有Vertexでは
     /// 内部でリンクリストフォールバックに再委譲する) を選ぶ。
     /// </summary>
     public ExpandPlan SelectExpandPlan(
         LabelId? sourceLabel,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         Direction direction,
         long? frontierSize)
     {
         double fanOut = _stats.EstimateFanOut(sourceLabel, typeFilter, direction);
 
-        if (frontierSize is long fs && fs > 0 && _stats.TotalRelationships > 0)
+        if (frontierSize is long fs && fs > 0 && _stats.TotalEdges > 0)
         {
-            // ノード毎経路の総コストは fs * fanOut 回のリンクリスト / 隣接ブロック probe で、
+            // Vertex毎経路の総コストは fs * fanOut 回のリンクリスト / 隣接ブロック probe で、
             // 各 probe が cold ページを参照する可能性がある。スキャン経路は生存中の
-            // リレーションシップページに 1 度ずつしか触れない。
-            // ノード毎の probe 数がリレーションシップストアの一定割合を超えるところで切り替える。
+            // Edgeページに 1 度ずつしか触れない。
+            // Vertex毎の probe 数がEdgeストアの一定割合を超えるところで切り替える。
             double estimatedProbes = fs * Math.Max(fanOut, 1.0);
-            double threshold = _stats.TotalRelationships * RelationshipScanFrontierFraction;
+            double threshold = _stats.TotalEdges * EdgeScanFrontierFraction;
             if (estimatedProbes >= threshold)
-                return new ExpandPlan(ExpandStrategy.RelationshipScan, fanOut);
+                return new ExpandPlan(ExpandStrategy.EdgeScan, fanOut);
         }
 
         return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
@@ -287,13 +275,13 @@ internal sealed class QueryOptimizer
     /// オプティマイザが誤っても結果は正しいが、適切な選択により無駄なスコアリングを大幅に削減できる。
     /// </summary>
     /// <param name="candidateCount">
-    /// グラフ / プロパティ制約側 (label + Has + 近傍) を満たすノードの推定件数。
+    /// グラフ / プロパティ制約側 (label + Has + 近傍) を満たすVertexの推定件数。
     /// 不明な場合は 0 を渡すと、オプティマイザは vector-first をデフォルト採用する。
     /// </param>
     /// <param name="k">KNN 側から要求された top-k。</param>
     /// <param name="totalIndexedCount">
-    /// ベクトルインデックスのサイズ (通常は <c>db.Vectors</c> のエントリ数)。
-    /// 厳密な件数を把握できない場合は <c>GraphStats.TotalNodes</c> を渡す。
+    /// ベクトルインデックスが対象とする owner の推定件数。
+    /// 厳密な件数を把握できない場合は <c>GraphStats.TotalVertices</c> を渡す。
     /// </param>
     public KnnStrategy ChooseKnnStrategy(long candidateCount, int k, long totalIndexedCount)
     {

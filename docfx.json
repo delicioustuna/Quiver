@@ -6,26 +6,18 @@
         {
           "files": [
             "src/Quiver/**/*.csproj",
-            "src/Quiver.Client/**/*.csproj",
-            "src/Quiver.Client.Attributes/**/*.csproj",
-            "src/Quiver.Core/**/*.csproj",
-            "src/Quiver.Operators/**/*.csproj",
-            "src/Quiver.Stores/**/*.csproj",
-            "src/Quiver.Storage/**/*.csproj",
-            "src/Quiver.Index/**/*.csproj",
-            "src/Quiver.Wal/**/*.csproj",
-            "src/Quiver.Codec/**/*.csproj",
-            "src/Quiver.Transactions/**/*.csproj",
-            "src/Quiver.Embedding/**/*.csproj"
+            "src/Quiver.Rag/**/*.csproj",
+            "src/Quiver.Hosting/**/*.csproj",
+            "src/Quiver.OpenTelemetry/**/*.csproj"
           ],
           "src": "."
         }
       ],
       "dest": "docs/api/_apispec",
       "includePrivateMembers": false,
-      "disableGitFeatures": false,
+      "disableGitFeatures": true,
       "disableDefaultFilter": false,
-      "noRestore": false,
+      "noRestore": true,
       "namespaceLayout": "flattened",
       "memberLayout": "samePage",
       "EnumSortOrder": "alphabetic",
@@ -62,6 +54,6 @@
     "template": ["default", "modern"],
     "postProcessors": ["ExtractSearchIndex"],
     "keepFileLink": false,
-    "disableGitFeatures": false
+    "disableGitFeatures": true
   }
 }

@@ -37,18 +37,18 @@ internal static class InlineSeeds
         [2],
         [3],
         [99],
-        // v1 の短いヘッダー
-        new byte[WalPageImageCodecLayout.HeaderLengthV1],
-        // usedLen が overflow する v2 ヘッダー (> 8192)
-        BuildV2Header(usedLen: 0xFFFF, fileKind: 1, pageId: 0),
-        // usedLen == 8192 だが payload がない v2 ヘッダー
-        BuildV2Header(usedLen: 8192, fileKind: 1, pageId: 0),
-        // chunk が切り詰められた v3
-        BuildV3Truncated(),
-        // 未知の chunk type を持つ v3
-        BuildV3UnknownChunk(),
-        // usedLen は 100 だが単一 literal が 200 バイトを宣言する v3
-        BuildV3LiteralOverrun(),
+        // 現行ヘッダーより短い入力
+        new byte[WalPageImageCodecLayout.HeaderLength - 1],
+        // usedLen が page size を超える
+        BuildHeader(usedLen: 0xFFFF, fileKind: 1, pageId: 0),
+        // usedLen == 8192 だが payload がない
+        BuildHeader(usedLen: 8192, fileKind: 1, pageId: 0),
+        // chunk が切り詰められた入力
+        BuildTruncatedChunk(),
+        // 未知の chunk type を持つ入力
+        BuildUnknownChunk(),
+        // usedLen は 100 だが単一 literal が 200 バイトを宣言する入力
+        BuildLiteralOverrun(),
     ];
 
     public static readonly byte[][] SpanCodec =
@@ -66,10 +66,10 @@ internal static class InlineSeeds
         [0x01, 0x02, 0x04, 0x80, 0x01, 0xFF, 0x7F],
     ];
 
-    private static byte[] BuildV2Header(int usedLen, byte fileKind, long pageId)
+    private static byte[] BuildHeader(int usedLen, byte fileKind, long pageId)
     {
-        var buf = new byte[WalPageImageCodecLayout.HeaderLengthV2];
-        buf[0] = 2;
+        var buf = new byte[WalPageImageCodecLayout.HeaderLength];
+        buf[0] = 1;
         buf[1] = fileKind;
         System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(2), pageId);
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
@@ -77,12 +77,12 @@ internal static class InlineSeeds
         return buf;
     }
 
-    private static byte[] BuildV3Truncated()
+    private static byte[] BuildTruncatedChunk()
     {
-        // version=3、fileKind=1、pageId=0、usedLen=64 に続いて、
+        // familyVersion=1、fileKind=1、pageId=0、usedLen=64 に続いて、
         // 長さ 64 を宣言する単一 literal chunk header があるが、後続バイトはない。
-        var buf = new byte[WalPageImageCodecLayout.HeaderLengthV2 + 2];
-        buf[0] = 3;
+        var buf = new byte[WalPageImageCodecLayout.HeaderLength + 2];
+        buf[0] = 1;
         buf[1] = 1;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(10), 64);
         buf[12] = 0x00; // chunk = literal
@@ -90,19 +90,19 @@ internal static class InlineSeeds
         return buf;
     }
 
-    private static byte[] BuildV3UnknownChunk()
+    private static byte[] BuildUnknownChunk()
     {
-        var buf = new byte[WalPageImageCodecLayout.HeaderLengthV2 + 1];
-        buf[0] = 3;
+        var buf = new byte[WalPageImageCodecLayout.HeaderLength + 1];
+        buf[0] = 1;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(10), 1);
         buf[12] = 0x7E; // 未知 chunk
         return buf;
     }
 
-    private static byte[] BuildV3LiteralOverrun()
+    private static byte[] BuildLiteralOverrun()
     {
-        var buf = new byte[WalPageImageCodecLayout.HeaderLengthV2 + 4 + 50];
-        buf[0] = 3;
+        var buf = new byte[WalPageImageCodecLayout.HeaderLength + 4 + 50];
+        buf[0] = 1;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(10), 100);
         buf[12] = 0x00;
         // varint = 200 (2 バイト)
@@ -115,6 +115,5 @@ internal static class InlineSeeds
 /// <summary>codec 内定数を test 側で再現するためのシンボル。</summary>
 internal static class WalPageImageCodecLayout
 {
-    public const int HeaderLengthV1 = 10;
-    public const int HeaderLengthV2 = 12;
+    public const int HeaderLength = 12;
 }

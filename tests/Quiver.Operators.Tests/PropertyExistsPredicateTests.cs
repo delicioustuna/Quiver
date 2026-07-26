@@ -14,63 +14,63 @@ public class PropertyExistsPredicateTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: true);
-        using var tx = fx.Db.BeginTransaction();
-        using var result = tx.Execute(new FilterOperator(new FixedNodeListOperator(), pred));
+        using var tx = fx.Db.BeginWriteTransaction();
+        using var result = tx.Execute(new FilterOperator(new FixedVertexListOperator(), pred));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
     }
 
     [Fact]
-    public void Has_keeps_nodes_with_property()
+    public void Has_keeps_vertices_with_property()
     {
-        NodeId withProp = default, without = default;
+        VertexId withProp = default, without = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            withProp = tx.CreateNode("X");
+            withProp = tx.CreateVertex("X");
             tx.SetProperty(withProp, "name", PropertyValue.FromString("alice"));
-            without = tx.CreateNode("X");
+            without = tx.CreateVertex("X");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: true);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
-            new FixedNodeListOperator(withProp, without), pred));
+            new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);
-        result.Rows().Single().GetNodeId(0).Should().Be(withProp);
+        result.Rows().Single().GetVertexId(0).Should().Be(withProp);
         tx2.Rollback();
     }
 
     [Fact]
-    public void HasNot_keeps_nodes_without_property()
+    public void HasNot_keeps_vertices_without_property()
     {
-        NodeId withProp = default, without = default;
+        VertexId withProp = default, without = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            withProp = tx.CreateNode("X");
+            withProp = tx.CreateVertex("X");
             tx.SetProperty(withProp, "name", PropertyValue.FromString("bob"));
-            without = tx.CreateNode("X");
+            without = tx.CreateVertex("X");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: false);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
-            new FixedNodeListOperator(withProp, without), pred));
+            new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);
-        result.Rows().Single().GetNodeId(0).Should().Be(without);
+        result.Rows().Single().GetVertexId(0).Should().Be(without);
         tx2.Rollback();
     }
 
     [Fact]
     public void Has_with_unknown_keyId_returns_no_rows()
     {
-        NodeId n = default;
-        using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateNode("X"); });
+        VertexId n = default;
+        using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateVertex("X"); });
         // PropertyKeyId.Invalid で未登録キーを再現する。
         var pred = new PropertyExistsPredicate(0, default, mustExist: true);
-        using var tx2 = fx.Db.BeginTransaction();
-        using var result = tx2.Execute(new FilterOperator(new FixedNodeListOperator(n), pred));
+        using var tx2 = fx.Db.BeginWriteTransaction();
+        using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(n), pred));
         result.Rows().Should().BeEmpty();
         tx2.Rollback();
     }
@@ -78,15 +78,15 @@ public class PropertyExistsPredicateTests
     [Fact]
     public void HasNot_with_unknown_keyId_passes_everything()
     {
-        NodeId a = default, b = default;
+        VertexId a = default, b = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            a = tx.CreateNode("X");
-            b = tx.CreateNode("X");
+            a = tx.CreateVertex("X");
+            b = tx.CreateVertex("X");
         });
         var pred = new PropertyExistsPredicate(0, default, mustExist: false);
-        using var tx2 = fx.Db.BeginTransaction();
-        using var result = tx2.Execute(new FilterOperator(new FixedNodeListOperator(a, b), pred));
+        using var tx2 = fx.Db.BeginWriteTransaction();
+        using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(a, b), pred));
         result.Rows().Should().HaveCount(2);
         tx2.Rollback();
     }

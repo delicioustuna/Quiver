@@ -28,11 +28,14 @@ public readonly struct MatchTuple
         return col;
     }
 
-    /// <summary>エイリアスに紐づくスロットを <see cref="NodeId"/> として取り出す。</summary>
-    public NodeId Node(string alias) => _row.GetNodeId(Column(alias));
+    /// <summary>エイリアスに紐づくスロットを <see cref="VertexId"/> として取り出す。</summary>
+    public VertexId Vertex(string alias) => _row.GetVertexId(Column(alias));
 
-    /// <summary>エイリアスに紐づくスロットを <see cref="RelationshipId"/> として取り出す。</summary>
-    public RelationshipId Relationship(string alias) => _row.GetRelationshipId(Column(alias));
+    /// <summary>エイリアスに紐づくスロットを <see cref="EdgeId"/> として取り出す。</summary>
+    public EdgeId Edge(string alias) => _row.GetEdgeId(Column(alias));
+
+    /// <summary>エイリアスに紐づくスロットを <see cref="NexusId"/> として取り出す。</summary>
+    public NexusId Nexus(string alias) => _row.GetNexusId(Column(alias));
 
     /// <summary>エイリアスに紐づくスロットを <see cref="long"/> として取り出す。</summary>
     public long Int64(string alias) => _row.GetInt64(Column(alias));
@@ -49,8 +52,9 @@ public readonly struct MatchTuple
     /// <summary>エイリアスに紐づくスロットの実型を返す。</summary>
     public MatchValueType TypeOf(string alias) => _row.GetSlotType(Column(alias)) switch
     {
-        TupleSlotType.NodeId => MatchValueType.Node,
-        TupleSlotType.RelationshipId => MatchValueType.Relationship,
+        TupleSlotType.VertexId => MatchValueType.Vertex,
+        TupleSlotType.EdgeId => MatchValueType.Edge,
+        TupleSlotType.NexusId => MatchValueType.Nexus,
         TupleSlotType.Bool => MatchValueType.Boolean,
         TupleSlotType.Int64 => MatchValueType.Int64,
         TupleSlotType.Double => MatchValueType.Double,

@@ -1,23 +1,22 @@
 namespace Quiver.Migrations;
 
 /// <summary>
-/// <see cref="GraphDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
+/// <see cref="QuiverDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
 /// 未適用マイグレーションを <see cref="IMigration.Version"/> 昇順 → <see cref="IMigration.Id"/>
 /// Ordinal 昇順で並べ、それぞれ独立した tx で適用する。
 /// </summary>
 internal static class Migrator
 {
     public static async Task<MigrationResult> RunAsync(
-        GraphDatabase db,
-        string dataDirectory,
+        QuiverDatabase db,
         IEnumerable<IMigration> migrations,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(migrations);
-        ArgumentException.ThrowIfNullOrEmpty(dataDirectory);
-
-        var history = new MigrationHistory(dataDirectory);
+        var appliedIds = db.GetMigrationHistory()
+            .Select(entry => entry.Id)
+            .ToHashSet(StringComparer.Ordinal);
 
         var ordered = migrations
             .OrderBy(m => m.Version)
@@ -33,31 +32,21 @@ internal static class Migrator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (history.IsApplied(migration.Id))
+            if (appliedIds.Contains(migration.Id))
             {
                 skipped.Add(migration.Id);
                 continue;
             }
 
-            // 各マイグレーションを独立した tx で apply。失敗時は tx 全体をロールバック。
-            // - データミューテーション (CreateNode/SetProperty/...) は WAL 経由で tx 境界に乗る。
-            // - スキーマミューテーション (rename / index add) は MigrationContext の OnRolledBack
-                // フックで論理的に巻き戻される。
-            // - History.Append は OnCommitted フックに乗せ、commit が WAL に durable に落ちた
-                // 直後に append される。commit 完了後・append 完了前の crash 窓は冪等性
-            //  (history 不在 → 次回 re-run で同じ migration を再適用) で吸収する。
-            using var tx = db.BeginTransaction();
-            var ctx = new MigrationContext(tx, db.Schema, migration.Id);
+            // データ、schema catalog、migration history を同じ page-WAL transaction に載せる。
+            // 履歴だけを後から追記する crash 窓を作らないため、commit 前に primary catalog を更新する。
+            using var tx = db.BeginWriteTransaction();
+            var ctx = new MigrationContext(tx, tx.EditSchema, migration.Id);
             var entry = new MigrationHistoryEntry(migration.Id, migration.Version, DateTime.UtcNow);
-            bool committed = false;
-            tx.OnCommitted(() =>
-            {
-                history.Append(entry);
-                committed = true;
-            });
             try
             {
                 await migration.ApplyAsync(ctx).ConfigureAwait(false);
+                tx.AsInternal().Inner.Indexes.AppendMigrationHistory(entry);
                 tx.Commit();
             }
             catch
@@ -66,7 +55,8 @@ internal static class Migrator
                 throw;
             }
 
-            if (committed) applied.Add(entry);
+            applied.Add(entry);
+            appliedIds.Add(entry.Id);
         }
 
         return new MigrationResult(applied, skipped);
@@ -85,10 +75,10 @@ internal static class Migrator
 }
 
 /// <summary>
-/// <see cref="GraphDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
+/// <see cref="QuiverDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
 /// </summary>
 /// <param name="Applied">この呼び出しで新規適用されたマイグレーション。</param>
-/// <param name="Skipped">既に <see cref="MigrationHistory"/> にあったため skip した ID。</param>
+/// <param name="Skipped">primary catalog に記録済みだったため skip した ID。</param>
 public sealed record MigrationResult(
     IReadOnlyList<MigrationHistoryEntry> Applied,
     IReadOnlyList<string> Skipped);

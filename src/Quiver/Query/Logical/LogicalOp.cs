@@ -7,29 +7,29 @@ using Quiver.Storage.Records;
 namespace Quiver.Query.Logical;
 
 /// <summary>
-/// 単一論理プラン代数 (LogicalPlan IR) のノード基底。
+/// 単一論理プラン代数 (LogicalPlan IR) のVertex基底。
 /// fluent DSL / Match / 将来のクエリ parser はすべて <see cref="LogicalOp"/> ツリーへ
 /// lower し、<c>LogicalOptimizer</c> が rule + cost で書き換え、<c>PhysicalPlanner</c> が
 /// <see cref="IPhysicalOperator"/> へ落とす。実行は現行 pull 型を踏襲する。
 /// </summary>
 /// <remarks>
-/// 各ノードは <see cref="CurrentEntityColumn"/> / <see cref="PredictedOutputColumnCount"/> の
+/// 各Vertexは <see cref="CurrentEntityColumn"/> / <see cref="PredictedOutputColumnCount"/> の
 /// 論理シェイプメタデータを持つ。これは as/select エイリアスと carry 列計算を DSL 側で
 /// 継続するためで、旧 <c>IOperatorBuilder</c> が担っていた役割をそのまま引き継ぐ。
 /// </remarks>
 internal abstract record LogicalOp
 {
-    /// <summary>このノードが放出するタプルのうち「カレントエンティティ」を保持する列番号。</summary>
+    /// <summary>このVertexが放出するタプルのうち「カレントエンティティ」を保持する列番号。</summary>
     public abstract int CurrentEntityColumn { get; }
 
-    /// <summary>このノードが放出するタプルの列数 (予測)。</summary>
+    /// <summary>このVertexが放出するタプルの列数 (予測)。</summary>
     public abstract int PredictedOutputColumnCount { get; }
 }
 
 /// <summary>
-/// 全件スキャン起点。<see cref="EntityKind.Node"/> + <see cref="Label"/>=null で全ノード、
-/// label 指定でラベル別スキャン、<see cref="EntityKind.Relationship"/> で全リレーションシップ。
-/// label は lowering 時に解決済みの <see cref="LabelId"/> を保持する (planner は <c>NodeByLabelScan</c> へ直結)。
+/// 全件スキャン起点。<see cref="EntityKind.Vertex"/> + <see cref="Label"/>=null で全Vertex、
+/// label 指定でラベル別スキャン、<see cref="EntityKind.Edge"/> で全Edge。
+/// label は lowering 時に解決済みの <see cref="LabelId"/> を保持する (planner は <c>VertexByLabelScan</c> へ直結)。
 /// </summary>
 internal sealed record ScanOp(EntityKind Kind, LabelId? Label) : LogicalOp
 {
@@ -37,8 +37,15 @@ internal sealed record ScanOp(EntityKind Kind, LabelId? Label) : LogicalOp
     public override int PredictedOutputColumnCount => 1;
 }
 
-/// <summary>定数ノード起点 (<c>g.Node(id)</c> / <c>g.Nodes(ids)</c>)。</summary>
-internal sealed record NodeSeedOp(NodeId[] Ids) : LogicalOp
+/// <summary>定数Vertex起点 (<c>g.Vertex(id)</c> / <c>g.Vertices(ids)</c>)。</summary>
+internal sealed record VertexSeedOp(VertexId[] Ids) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
+/// <summary>定数Nexus起点 (<c>g.Nexus(id)</c>)。</summary>
+internal sealed record NexusSeedOp(NexusId Id) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;
@@ -55,7 +62,7 @@ internal sealed record CorrelatedInputOp(CorrelatedInputOperator Probe) : Logica
 }
 
 /// <summary>述語フィルタ。<see cref="PredicateFactory"/> は物理化時に schema を受け取り述語を作る。</summary>
-internal sealed record FilterOp(LogicalOp Source, Func<ISchemaApi, IPredicate> PredicateFactory) : LogicalOp
+internal sealed record FilterOp(LogicalOp Source, Func<ISchemaCatalog, IPredicate> PredicateFactory) : LogicalOp
 {
     public override int CurrentEntityColumn => Source.CurrentEntityColumn;
     public override int PredictedOutputColumnCount => Source.PredictedOutputColumnCount;
@@ -73,21 +80,51 @@ internal sealed record ExpandOp(
     private int BaseColumnCount => Mode switch
     {
         ExpandOutputMode.NeighborOnly   => 1,
-        ExpandOutputMode.NeighborAndRel => 2,
+        ExpandOutputMode.NeighborAndEdge => 2,
         _                               => 3,
     };
 
     public override int CurrentEntityColumn => Mode switch
     {
         ExpandOutputMode.NeighborOnly   => 0,
-        ExpandOutputMode.NeighborAndRel => 1,
+        ExpandOutputMode.NeighborAndEdge => 1,
         _ /* Full */                    => 2,
     };
 
     public override int PredictedOutputColumnCount => BaseColumnCount + (Carry?.Length ?? 0);
 }
 
-/// <summary>可変長展開 (<c>Repeat</c>)。(startNode, endNode) を放出し endNode が列 1。</summary>
+/// <summary>
+/// vertex から参加 nexus へ展開する。出力は (sourceVertex, nexus) + carry。
+/// source vertex は後続の OtherMembers で除外に使える hidden origin として保持する。
+/// </summary>
+internal sealed record ExpandToNexusOp(
+    LogicalOp Source,
+    int SourceVertexColumn,
+    string? Type,
+    string? Role,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
+/// <summary>
+/// nexus から member vertex へ展開する。出力は (nexus, member) + carry。
+/// <see cref="ExcludeVertexColumn"/> が指定された場合は同じ vertex を結果から除外する。
+/// </summary>
+internal sealed record ExpandMembersOp(
+    LogicalOp Source,
+    int NexusColumn,
+    string? Role,
+    int? ExcludeVertexColumn,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
+/// <summary>可変長展開 (<c>Repeat</c>)。(startVertex, endVertex) を放出し endVertex が列 1。</summary>
 internal sealed record VarLenExpandOp(
     LogicalOp Source,
     Direction Direction,
@@ -102,7 +139,7 @@ internal sealed record VarLenExpandOp(
 /// <summary>ホップ数最短経路 (<c>ShortestPathTo</c>)。(source, target, distance) を放出し distance が列 2。</summary>
 internal sealed record PathOp(
     LogicalOp Source,
-    NodeId Target,
+    VertexId Target,
     Direction Direction,
     string? Type,
     long MaxDistance) : LogicalOp
@@ -122,7 +159,8 @@ internal sealed record KnnOp(
     string IndexName,
     float[] Query,
     int K,
-    int Dim) : LogicalOp
+    int Dim,
+    VectorSearchOptions? Options = null) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;
@@ -171,7 +209,7 @@ internal sealed record FusionOp(
 }
 
 /// <summary>
-/// ダイアディック演算子によるスコアリング。上流の候補ノードのベクトルプロパティ <see cref="PropertyName"/>
+/// ダイアディック演算子によるスコアリング。上流の候補Vertexのベクトルプロパティ <see cref="PropertyName"/>
 /// を <see cref="IDyadicOperator{TResult}.Invoke"/> で <see cref="BVector"/> (or <see cref="BPlan"/> の
 /// 評価結果) とスコアリングし、上位 <see cref="K"/> 件をスコア降順で放出する。
 /// <see cref="Oversample"/> が <c>null</c> なら全候補を brute-force スコアリングする。
@@ -208,14 +246,14 @@ internal sealed record PropertyLookupOp(LogicalOp Source, string Key, EntityKind
 }
 
 /// <summary>ラベル名を末尾列へマテリアライズする (<c>.label()</c>)。</summary>
-internal sealed record LabelNameLookupOp(LogicalOp Source, int NodeColumn) : LogicalOp
+internal sealed record LabelNameLookupOp(LogicalOp Source, int VertexColumn) : LogicalOp
 {
     public override int CurrentEntityColumn => Source.CurrentEntityColumn;
     public override int PredictedOutputColumnCount => Source.PredictedOutputColumnCount + 1;
 }
 
-/// <summary>リレーションシップ列をノード列へ解決する (<c>.outV()</c> / <c>.inV()</c> / <c>.otherV()</c>)。</summary>
-internal sealed record RelationshipEndpointOp(LogicalOp Source, int RelColumn, RelationshipEndpoint Endpoint) : LogicalOp
+/// <summary>Edge列をVertex列へ解決する (<c>.outV()</c> / <c>.inV()</c> / <c>.otherV()</c>)。</summary>
+internal sealed record EdgeEndpointOp(LogicalOp Source, int EdgeColumn, EdgeEndpoint Endpoint) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;
@@ -261,7 +299,7 @@ internal enum LogicalBranchKind
 /// </summary>
 internal sealed record BranchOp(
     LogicalOp Source,
-    Func<ISchemaApi, (CorrelatedInputOperator[] Probes, IPhysicalOperator[] Branches)> BuildBranches,
+    Func<ISchemaCatalog, (CorrelatedInputOperator[] Probes, IPhysicalOperator[] Branches)> BuildBranches,
     LogicalBranchKind Kind) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;

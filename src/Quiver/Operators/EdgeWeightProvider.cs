@@ -12,19 +12,35 @@ namespace Quiver.Query.Physical;
 internal interface IEdgeWeightProvider
 {
     /// <summary>
-    /// リレーションシップ <paramref name="relationshipId"/> の重みを返す。
+    /// Edge <paramref name="edgeId"/> の重みを返す。
     /// </summary>
     /// <param name="tx">探索中のトランザクション。</param>
-    /// <param name="relationshipId">重みを引きたいエッジ。</param>
+    /// <param name="edgeId">重みを引きたいエッジ。</param>
     /// <param name="weightRaw">
     /// <see cref="ExpandCursor.WeightRaw"/> が転送した 64 ビット生 payload。
     /// payload lane を持たないカーソルでは 0。
     /// </param>
-    double GetWeight(ITransaction tx, RelationshipId relationshipId, long weightRaw);
+    double GetWeight(ITransaction tx, EdgeId edgeId, long weightRaw);
+}
+
+/// <summary>A* の推定残コストを transaction の明示的 snapshot store から計算する。</summary>
+internal interface ITransactionVertexHeuristic
+{
+    double Estimate(ITransaction transaction, VertexId vertex);
+}
+
+internal sealed class DelegateVertexHeuristic(Func<VertexId, double> heuristic)
+    : ITransactionVertexHeuristic
+{
+    public double Estimate(ITransaction transaction, VertexId vertex)
+    {
+        _ = transaction;
+        return heuristic(vertex);
+    }
 }
 
 /// <summary>
-/// リレーションシップのプロパティチェーンを走査して重みを取得する既定の
+/// Edgeのプロパティチェーンを走査して重みを取得する既定の
 /// <see cref="IEdgeWeightProvider"/>。セットアップ不要でどのバックエンドでも動くが、
 /// エッジあたり O(P) (P = そのエッジのプロパティ数)。大規模ホットパスでは
 /// <see cref="PayloadLaneWeightProvider"/> や join index 版に差し替えるとよい。
@@ -34,7 +50,7 @@ internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
     private readonly PropertyKeyId _weightKey;
     private readonly double _defaultWeight;
 
-    /// <param name="weightKey">重みを保持するリレーションシッププロパティのキー ID。</param>
+    /// <param name="weightKey">重みを保持するEdgeプロパティのキー ID。</param>
     /// <param name="defaultWeight">
     /// 対象キーのプロパティを持たないエッジに適用する重み (既定 1.0 = 重み無しエッジ)。
     /// </param>
@@ -45,10 +61,10 @@ internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
     }
 
     /// <inheritdoc/>
-    public double GetWeight(ITransaction tx, RelationshipId relationshipId, long weightRaw)
+    public double GetWeight(ITransaction tx, EdgeId edgeId, long weightRaw)
     {
-        // rel weight も inline + overflow を結合列挙する。
-        var e = tx.Relationships.EnumerateProperties(relationshipId, tx.Properties);
+        // edge weight も inline + overflow を結合列挙する。
+        var e = tx.Edges.EnumerateProperties(edgeId, tx.Properties);
         while (e.MoveNext())
         {
             if (e.Current.KeyId == _weightKey)
@@ -81,6 +97,6 @@ internal sealed class PayloadLaneWeightProvider : IEdgeWeightProvider
     public static readonly PayloadLaneWeightProvider Instance = new();
 
     /// <inheritdoc/>
-    public double GetWeight(ITransaction tx, RelationshipId relationshipId, long weightRaw)
+    public double GetWeight(ITransaction tx, EdgeId edgeId, long weightRaw)
         => BitConverter.Int64BitsToDouble(weightRaw);
 }

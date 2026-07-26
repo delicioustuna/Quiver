@@ -23,7 +23,7 @@ internal sealed class BinaryBackendFaultInjector(string databaseDirectory) : IFa
     {
         var seg = LatestWalSegment();
         if (seg is null) return;
-        // WAL header: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 B.
+        // WAL ヘッダ: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32(4) = 25 B。
         // 既存 BinaryGraphStorageBackendCrashContractTests と同様、Type バイトを反転させて
         // CRC を確実に外す。
         ChecksumCorruptor.FlipBitAt(seg, offset: 20, bitInByte: 0);
@@ -44,7 +44,7 @@ internal sealed class BinaryBackendFaultInjector(string databaseDirectory) : IFa
             {
                 fired = true;
                 throw new InvalidOperationException(
-                    $"TS-4 simulated kill at checkpoint phase {phase}");
+                    $" simulated kill at checkpoint phase {phase}");
             }
         };
         return new Disarm();

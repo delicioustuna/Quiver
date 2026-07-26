@@ -18,6 +18,7 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 - `1.0.0` 未満 (`0.x` / `-rc` / `-preview`) は **安定性の保証対象外**。`0.x` 系では MINOR でも breaking change が入りうる。
 - pre-release タグ (`-rc.1`, `-preview.2` 等) が付くバージョンは feedback 収集目的であり、GA (`1.0.0`) までは API が動く可能性がある。
+- トランザクション上の非同期 API は v1 の契約に含めない。1.0 後に再導入する場合は、次の MAJOR バージョンで契約を再設計する。
 
 ### breaking change の定義
 
@@ -45,8 +46,8 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 | 名前空間 | 対象 | 備考 |
 |---|---|---|
-| `Quiver` | ✅ 対象 | 公開ファサード (`GraphDatabase`, `GraphTransaction`, options 等) |
-| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Node]` 等の属性 |
+| `Quiver` | ✅ 対象 | 公開ファサード (`QuiverDatabase`, `GraphTransaction`, options 等) |
+| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Vertex]` 等の属性 |
 | `Quiver.Core` | ✅ 対象 | 共通 ID 型、例外型、`EntityId` 等の基礎型 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:
@@ -70,7 +71,7 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 1. **告知 (deprecate)**: 削除予定の 1 つ前の MINOR で `[Obsolete]` を付ける。
    ```csharp
    [Obsolete("Use GraphTransaction.SeekIndex instead. Will be removed in v2.0.", error: false)]
-   public IReadOnlyList<NodeId> FindByIndex(string indexName, PropertyValue value) { ... }
+   public IReadOnlyList<VertexId> FindByIndex(string indexName, PropertyValue value) { ... }
    ```
    - メッセージには **代替 API** と **削除予定バージョン** を必ず書く。
    - `error: false` のまま (コンパイルは通る)。
@@ -102,28 +103,6 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 まだ安定化していない API には `[System.Diagnostics.CodeAnalysis.Experimental("QUIVERxxx")]` 属性を付ける。
 
-```csharp
-// SSN ベースの Serializable 分離は評価中。利用すると QUIVER001 診断が出る。
-public enum IsolationLevel : byte
-{
-    ReadCommitted = 1,
-    SnapshotIsolation = 2,
-    [Experimental("QUIVER001")]
-    Serializable = 3,
-}
-
-[Experimental("QUIVER001")]
-public sealed class SerializabilityException : GraphDbException { ... }
-```
-
-利用側は明示的に opt-in する:
-
-```csharp
-#pragma warning disable QUIVER001 // SSN Serializable は実験的と理解した上で使う
-using var tx = db.BeginTransaction(IsolationLevel.Serializable);
-#pragma warning restore QUIVER001
-```
-
 - `[Experimental]` 付きの API は **SemVer の対象外**。MINOR / PATCH でも予告なくシグネチャ変更・削除しうる。
 - 利用するには診断 ID (`QUIVER001` 等) を明示的に suppress する必要があり、「これは不安定」と利用側が意識的に opt-in する形になる。
 - 安定化したら `[Experimental]` を外す。これは API 追加扱い (MINOR) であり breaking ではない。
@@ -132,7 +111,7 @@ using var tx = db.BeginTransaction(IsolationLevel.Serializable);
 
 | ID | 対象 | 状態 |
 |---|---|---|
-| `QUIVER001` | SSN ベースの Serializable 分離 (`IsolationLevel.Serializable` / `SerializabilityException`) | 評価中 |
+| なし | 現在公開中の experimental API はない | - |
 
 ---
 
@@ -181,7 +160,7 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ### 7.2 オンディスクフォーマット互換性
 
-- **1.x 内では `FormatVersion` を bump しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
+- **1.x 内では QUIVER-SW family version を変更しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
   そのまま開ける。
 - 新機能が追加フィールドを必要とする場合は、既存レイアウトの予約領域またはオプショナルな拡張ページを
   使い、旧バイナリでも読み飛ばせる形で追加する。
@@ -190,7 +169,7 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ### 7.3 挙動の安定性
 
-- デフォルトの `CheckpointPolicy`、`VacuumPolicy`、`GroupCommitWindow` 等のチューニングパラメータの
+- デフォルトの `CheckpointPolicy`、`VacuumPolicy`、`WriterContentionMode` 等のチューニングパラメータの
   デフォルト値は 1.x 内で変更しない。パフォーマンス改善のためにデフォルトを変えたい場合は新しい
   オプション値として追加し、既存アプリの挙動を変えない。
 - BM25 スコアリングアルゴリズム（k1=1.2, b=0.75）は 1.x 内で変更しない。
@@ -213,6 +192,5 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ## 関連ドキュメント
 
-- [README の Versioning セクション](../README.md#versioning)
-- [00_conventions.md](design/00_conventions.md) — 命名・ID 型・例外型の正本
-- [docs/api/](api/) — docfx で生成した API リファレンス
+- [現行仕様](spec/00_overview.md) — ストレージと実行契約
+- [docs/api/](api/) — docfxで生成したAPIリファレンス

@@ -10,9 +10,9 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
-/// タスク B の Spike B1: 非bulk 読取経路 (リレーションシップ linked-list) の per-edge コスト配分。
-/// `tx.EnumerateRelationships` は bulk-load 済みデータでも adjacency block を使わず linked-list を
-/// 辿る (= 非bulk DB の読取経路と同型)。各 edge で <c>VersionedRelationshipStore.Read</c> を呼び、
+/// タスク B の Spike B1: 非bulk 読取経路 (Edge linked-list) の per-edge コスト配分。
+/// `tx.EnumerateEdges` は bulk-load 済みデータでも adjacency block を使わず linked-list を
+/// 辿る (= 非bulk DB の読取経路と同型)。各 edge で <c>VersionedEdgeStore.Read</c> を呼び、
 /// 内部で <c>TryReadHeadRaw</c> (構造) + <c>TryReadVisible</c> (MVCC 可視性) の **2 回 pin** +
 /// 45B ToArray ×2 (1 つは破棄) を行う。
 ///
@@ -28,7 +28,7 @@ public static class SpikeBReadPathRunner
         Console.WriteLine("=== Spike B1: linked-list 1-hop read path (per-edge cost + alloc) ===");
         Measure(10);
         Measure(100);
-        Console.WriteLine("  (linked-list = tx.EnumerateRelationships → VersionedRelationshipStore.Read/edge");
+        Console.WriteLine("  (linked-list = tx.EnumerateEdges → VersionedEdgeStore.Read/edge");
         Console.WriteLine("   現状 Read/edge = 2× page pin (TryReadHeadRaw + TryReadVisible) + 45B ToArray ×2 (1 破棄)。");
         Console.WriteLine("   adj block = floor。kill criterion: linked-list 1-hop ≤ 0.8 µs/edge。)");
         return 0;
@@ -40,27 +40,27 @@ public static class SpikeBReadPathRunner
         try
         {
             {
-                using var db0 = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
+                using var db0 = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
                 using var loader = db0.BeginBulkLoad(buildAdjacencyIndex: true);
-                loader.AppendNode(new NodeId(0), new LabelId(0));
+                loader.AppendVertex(new VertexId(0), new LabelId(0));
                 for (int i = 1; i <= degree; i++)
                 {
-                    loader.AppendNode(new NodeId(i), new LabelId(1));
-                    loader.AppendRelationship(new RelationshipId(i - 1),
-                        new NodeId(0), new NodeId(i), new RelationshipTypeId(0));
+                    loader.AppendVertex(new VertexId(i), new LabelId(1));
+                    loader.AppendEdge(new EdgeId(i - 1),
+                        new VertexId(0), new VertexId(i), new EdgeTypeId(0));
                 }
                 loader.Commit();
             }
-            using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            var hub = new NodeId(0);
-            using var tx = db.BeginTransaction();
-            var adj = tx.AsInternal().AdjacencyBlocks!;
+            using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
+            var hub = new VertexId(0);
+            using var tx = db.BeginWriteTransaction();
+            var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Math.Max(1024, degree + 16)];
 
             int LinkedScan()
             {
                 int c = 0;
-                var en = tx.EnumerateRelationships(hub, Direction.Outgoing);
+                var en = tx.EnumerateEdges(hub, Direction.Outgoing);
                 while (en.MoveNext()) c++;
                 return c;
             }

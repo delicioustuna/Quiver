@@ -1,34 +1,50 @@
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.Vector;
+using Quiver.Index.FullText;
 using Quiver.Logical;
 using Quiver.Maintenance;
 using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Quiver.Storage.Wal;
+using Quiver.Telemetry;
+using System.Diagnostics;
 
 namespace Quiver;
 
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
-    private readonly IVectorStore _vectors;
-    // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
-    // (tx 内の呼び出しは ambient WalPageContext を検出して join する)。生の _vectors は
-    // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
-    private IVectorStore? _vectorsFacade;
+    internal static Action<CompactAdjacencyPhase>? CompactAdjacencyPhaseInjector;
+    internal static Action? ScalarIndexArtifactBuiltForTest;
+    internal static Action<ScalarIndexRebuildPhase>? ScalarIndexRebuildPhaseInjector;
+    internal static Action? VectorSegmentBuildStartedForTest;
+    internal static Action? VectorSegmentBuildCompletedForTest;
+    internal static Action<TimeSpan>? VectorSegmentPublishMeasuredForTest;
+    internal static Action? FullTextSegmentBuildStartedForTest;
+    internal static Action? FullTextSegmentBuildCompletedForTest;
+    internal static Action<TimeSpan>? FullTextSegmentPublishMeasuredForTest;
+
+    private readonly IVectorDefinitionCatalog _vectorDefinitions;
+    private readonly VectorSegmentIndex _vectorSegments = new();
+    private readonly FullTextSegmentIndex _fullTextSegments;
     private readonly PageManager _pageManager;
-    private readonly WriteAheadLog _wal;
-    private readonly VersionedNodeStore _nodeStore;
-    private readonly VersionedRelationshipStore _relStore;
-    private readonly PropertyStore _propStore;
+    private readonly IWriteAheadLog _wal;
+    private readonly VersionedVertexStore _vertexStore;
+    private readonly VersionedEdgeStore _edgeStore;
+    private readonly PropertyVersionStore _propStore;
     private readonly LabelTokenStore _labelTokens;
-    private readonly RelationshipTypeTokenStore _relTypeTokens;
+    private readonly EdgeTypeTokenStore _edgeTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
+    private readonly NexusTypeTokenStore _nexusTypeTokens;
+    private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
-    // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
+    private readonly NexusMergeIndex _nexusMergeIndex = new();
+    // immutable adjacency segment view を保持する。
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
     // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
-    private IAdjacencyBlockStore? _adjStore;
+    private IAdjacencySegmentStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     // bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
     private readonly SingleFileContainer _container;
     private readonly TransactionManager _txManager;
@@ -39,25 +55,47 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
     private readonly string _containerPath;
     private readonly ILogicalMutationSink? _logicalSink;
+    private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
+    private readonly PersistentEdgeDeltaStore? _edgeDeltas;
+    private readonly RelationshipReuseCoordinator _relationshipReuse;
+    private readonly CancellationTokenSource _scalarIndexRebuildCancellation = new();
+    private readonly object _scalarIndexRebuildSync = new();
+    private Task? _scalarIndexRebuildTask;
+    private int _scalarIndexRebuildRequested;
+    private Exception? _scalarIndexRebuildError;
+    private readonly CancellationTokenSource _vectorSegmentMergeCancellation = new();
+    private readonly object _vectorSegmentMergeSync = new();
+    private Task? _vectorSegmentMergeTask;
+    private int _vectorSegmentMergeRequested;
+    private Exception? _vectorSegmentMergeError;
+    private readonly CancellationTokenSource _fullTextSegmentMergeCancellation = new();
+    private readonly object _fullTextSegmentMergeSync = new();
+    private Task? _fullTextSegmentMergeTask;
+    private int _fullTextSegmentMergeRequested;
+    private Exception? _fullTextSegmentMergeError;
 
     internal BinaryGraphStorageBackend(
         string containerPath,
         SingleFileContainer container,
         PageManager pageManager,
-        WriteAheadLog wal,
-        VersionedNodeStore nodeStore,
-        VersionedRelationshipStore relStore,
-        PropertyStore propStore,
+        IWriteAheadLog wal,
+        VersionedVertexStore vertexStore,
+        VersionedEdgeStore edgeStore,
+        PropertyVersionStore propStore,
         LabelTokenStore labelTokens,
-        RelationshipTypeTokenStore relTypeTokens,
+        EdgeTypeTokenStore edgeTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
+        NexusTypeTokenStore nexusTypeTokens,
+        RoleTokenStore roleTokens,
         IndexManager indexManager,
-        IAdjacencyBlockStore? adjStore,
+        IAdjacencySegmentStore? adjStore,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
-        IVectorStore vectors,
-        ColumnManager columnManager,
-        LabelNodeIndex? labelIndex = null,
+        IVectorDefinitionCatalog vectorDefinitions,
+        ICoMembershipBlockStore? coMembershipStore = null,
+        LabelVertexIndex? labelIndex = null,
+        EdgeDeltaHeadStore? edgeDeltaHeads = null,
+        PersistentEdgeDeltaStore? edgeDeltas = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
         long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
@@ -67,28 +105,60 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _logicalSink = logicalSink;
         _containerPath = containerPath;
         _container = container;
-        _vectors = vectors;
+        _vectorDefinitions = vectorDefinitions;
         _pageManager = pageManager;
         _wal = wal;
-        _nodeStore = nodeStore;
-        _relStore = relStore;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
         _propStore = propStore;
         _labelTokens = labelTokens;
-        _relTypeTokens = relTypeTokens;
+        _edgeTypeTokens = edgeTypeTokens;
         _propKeyTokens = propKeyTokens;
+        _nexusTypeTokens = nexusTypeTokens;
+        _roleTokens = roleTokens;
         _indexManager = indexManager;
+        _fullTextSegments = new FullTextSegmentIndex(
+            string.IsNullOrEmpty(_containerPath)
+                ? null
+                : _containerPath + "-ftseg",
+            _indexManager.ResolveTokenizer,
+            _indexManager.MarkFullTextRebuildRequiredInMemory,
+            _labelTokens,
+            _edgeTypeTokens,
+            _nexusTypeTokens,
+            _propKeyTokens);
         _adjStore = adjStore;
+        _coMembershipStore = coMembershipStore;
+        _edgeDeltaHeads = edgeDeltaHeads;
+        _edgeDeltas = edgeDeltas;
         _txManager = txManager;
-        _columnManager = columnManager;
+        _relationshipReuse = new RelationshipReuseCoordinator(
+            _container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantRelationshipReuse,
+                PageKind.Header),
+            _edgeStore,
+            CompactAdjacencyCore,
+            _container.Flush);
 
-        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
+        _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
+            nexusTypes: _nexusTypeTokens,
+            roles: _roleTokens,
+            vectorDefinitions: _vectorDefinitions,
+            acquireMutationLease: _txManager.AcquireMutationLease,
+            acquireOwnedMutationLease: owner => _txManager.AcquireMutationLease(owner));
+        _vectorSegments.MergeRequested = QueueVectorSegmentMerge;
+        _fullTextSegments.MergeRequested = QueueFullTextSegmentMerge;
+        _fullTextSegments.CatalogStateChanged = _schema.UpdateCommittedIndexState;
+        _txManager.FullTextSegments = _fullTextSegments;
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
-            _nodeStore, _relStore, access, _indexManager, labelIndex, _txManager,
+            _vertexStore, _edgeStore, access, _propStore,
+            _txManager.NexusStore, _txManager.IncidenceStore, _txManager.VertexIncidenceHeadStore,
+            _indexManager, labelIndex, _txManager,
             adaptiveTargetRecoveryTime,
             adaptiveMinThresholdBytes,
             adaptiveMaxThresholdBytes,
@@ -97,20 +167,154 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _bulkLoad = new BulkLoadCapabilities
         {
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
-                _nodeStore, _relStore, _propStore,
-                buildAdjacencyIndex ? _container : null),
+                _vertexStore, _edgeStore, _propStore,
+                buildAdjacencyIndex ? _container : null,
+                _txManager.AcquireMutationLease(),
+                RefreshDerivedIndexesAfterBulkLoad),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
-                _nodeStore, _relStore, _propStore,
-                buildAdjacencyIndex ? _container : null),
+                _vertexStore, _edgeStore, _propStore,
+                buildAdjacencyIndex ? _container : null,
+                _txManager.AcquireMutationLease(),
+                RefreshDerivedIndexesAfterBulkLoad),
         };
+
+        using (_txManager.AcquireMutationLease())
+            _relationshipReuse.Resume();
+
+        if (_indexManager.ListIndexDefinitions()
+            .Any(x => x.State != IndexLifecycleState.Ready))
+        {
+            Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+            QueueScalarIndexRebuild();
+        }
     }
 
-    // *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
+    private void RefreshDerivedIndexesAfterBulkLoad()
+    {
+        using ITransaction transaction = _txManager.BeginWrite();
+        ScalarIndexMetadata[] definitions =
+            [.. transaction.Indexes.ListIndexDefinitions()];
+        FullTextCatalogEntry[] fullTextDefinitions =
+            [.. transaction.Indexes.ListFullTextCatalogEntries()];
+        foreach (ScalarIndexMetadata metadata in definitions)
+            transaction.Indexes.SetIndexState(
+                metadata.Definition.Name,
+                IndexLifecycleState.RebuildRequired);
+        foreach (FullTextCatalogEntry definition in fullTextDefinitions)
+            transaction.Indexes.UpdateFullTextManifest(
+                definition.Name,
+                definition.Manifest,
+                IndexLifecycleState.RebuildRequired);
+        transaction.Commit();
+        _fullTextSegments.InvalidateAll();
+        foreach (FullTextCatalogEntry definition in fullTextDefinitions)
+            _schema.UpdateCommittedIndexState(
+                definition.Name,
+                IndexLifecycleState.RebuildRequired);
+        if (definitions.Length > 0)
+        {
+            Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+            QueueScalarIndexRebuild();
+        }
+    }
+
+    private void QueueScalarIndexRebuild()
+    {
+        if (_disposed || Volatile.Read(ref _scalarIndexRebuildRequested) == 0)
+            return;
+
+        lock (_scalarIndexRebuildSync)
+        {
+            if (_scalarIndexRebuildTask is { IsCompleted: false })
+                return;
+            _scalarIndexRebuildTask = Task.Run(
+                () => RebuildScalarIndexes(_scalarIndexRebuildCancellation.Token));
+        }
+    }
+
+    private void RebuildScalarIndexes(CancellationToken cancellationToken)
+    {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                ScalarIndexBuildArtifact[] artifacts;
+                using (ITransaction read = _txManager.BeginRead())
+                {
+                    ScalarIndexMetadata[] pending = read.Indexes
+                        .ListIndexDefinitions()
+                        .Where(x => x.State != IndexLifecycleState.Ready)
+                        .ToArray();
+                    if (pending.Length == 0)
+                    {
+                        Volatile.Write(ref _scalarIndexRebuildRequested, 0);
+                        return;
+                    }
+
+                    // primary scan、key decode、sort は snapshot reader だけで行う。
+                    // writer lease は下の source generation 検証と publish にだけ使う。
+                    artifacts = pending
+                        .Select(x => _schema.BuildScalarIndexArtifact(
+                            read,
+                            x.Definition))
+                        .ToArray();
+                }
+
+                ScalarIndexRebuildPhaseInjector?.Invoke(
+                    ScalarIndexRebuildPhase.AfterArtifactBuilt);
+                Interlocked.Exchange(ref ScalarIndexArtifactBuiltForTest, null)?.Invoke();
+                cancellationToken.ThrowIfCancellationRequested();
+                using ITransaction publish = _txManager.BeginWrite();
+                _ = _schema.Bind(publish, readOnly: false);
+                long oldestReader = _txManager.Snapshots.OldestCommittedHighWater(
+                    publish.Snapshot.CommittedHighWater);
+                bool accepted = artifacts.All(
+                    artifact => oldestReader >= artifact.SourceCommittedHighWater);
+                foreach (ScalarIndexBuildArtifact artifact in artifacts)
+                {
+                    if (!accepted
+                        || !_schema.TryPublishScalarIndexArtifact(publish, artifact))
+                    {
+                        accepted = false;
+                        break;
+                    }
+                }
+
+                if (accepted)
+                {
+                    ScalarIndexRebuildPhaseInjector?.Invoke(
+                        ScalarIndexRebuildPhase.BeforePublishCommit);
+                    publish.Commit();
+                    ScalarIndexRebuildPhaseInjector?.Invoke(
+                        ScalarIndexRebuildPhase.AfterPublishCommit);
+                    continue;
+                }
+
+                publish.Abort();
+                if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(10)))
+                    return;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _scalarIndexRebuildError = ex;
+            // rebuild failure is a derived-data failure。
+            // definition remains non-Ready, so query continues to use the same-snapshot fallback。
+            Trace.TraceWarning(
+                $"[Quiver] Scalar index rebuild was deferred after an error: {ex}");
+        }
+    }
+
+    // *.quiver の親ディレクトリ。backend-local artifact の配置基準として保持する。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     /// <summary>
     /// テスト専用 (torn-commit crash 再現): 全データページ + B+Tree 索引を fsync する
-    /// (WAL truncate なし)。これにより未 checkpoint の committed データ (Suppressed FT leaf 含む) を
+    /// (WAL truncate なし)。これにより未 checkpoint の committed データを
     /// disk へ落とし、Commit レコードだけ欠けた torn-commit の「body 保持」状態を決定論的に作れる。
     /// </summary>
     internal void FlushDataPagesForTest()
@@ -119,146 +323,349 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _indexManager.FlushAll();
     }
 
-    // opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
-    // startup で eager に構築 (factory が注入)。write 経路 (GraphTransaction) と abort hook
-    // (ReloadStoreMeta → ReloadColumns) の両方から参照される。
-    private readonly ColumnManager _columnManager;
-
-    /// <summary>write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
-    internal ColumnManager Columns => _columnManager;
-
-    internal bool CreateColumn(EntityKind kind, int keyId)
+    internal void RequestCheckpointForTest()
     {
-        // opt-in 列の DDL はアクティブ tx 無しを要求する。CreateColumn は
-        // 現コミット済みデータから列を 1 パス構築するため、構築を跨ぐ並行 writer がいると列が
-        // 取りこぼし、列スキャン集約が row path と乖離しうる。CompactAdjacency と同じ契約で塞ぐ。
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException("CreateColumn requires no active transactions.");
-        // 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
-        // WAL 文脈下で行い commit する。これにより crash recovery / CreateSnapshot (online backup) が
-        // 列ページを redo / 複製できる。tx 外で書くと clean Dispose のフラッシュ依存になり、
-        // 未チェックポイント crash や snapshot で列が失われる。
-        return RunColumnDdl(() => _columnManager.CreateColumn(kind, keyId));
-    }
-
-    internal bool DropColumn(EntityKind kind, int keyId)
-    {
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException("DropColumn requires no active transactions.");
-        return RunColumnDdl(() => _columnManager.DropColumn(kind, keyId));
-    }
-
-    // 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
-    private bool RunColumnDdl(Func<bool> ddl)
-    {
-        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
         try
         {
-            bool result = ddl();
-            tx.Commit();
-            return result;
+            _txManager.RequestCheckpoint();
         }
         catch
         {
-            try { tx.Abort(); } catch { /* best-effort */ }
+            // phase injector が checkpoint を中断した後の Dispose を clean shutdown にしない。
+            _txManager.MarkFaulted();
             throw;
         }
-        finally { tx.Dispose(); }
-    }
-    internal bool TryGetColumn(EntityKind kind, int keyId, out ScalarColumnStore column)
-        => _columnManager.TryGetColumn(kind, keyId, out column);
-
-    /// <summary>
-    /// 検証用 (interim): 列の可視値合計。列の登録/構築/永続を確認するために使用する。
-    /// optimizer/operator 経由の本 read 経路に置き換わる予定。
-    /// </summary>
-    internal long ColumnProjectSumForTest(EntityKind kind, int keyId)
-    {
-        if (!TryGetColumn(kind, keyId, out var col)) return -1;
-        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
-        try
-        {
-            _ = tx.Relationships.Read(new RelationshipId(0)); // MvccContext を activate
-            return col.ProjectSum(MvccContext.CurrentSnapshot, MvccContext.CurrentTxId, MvccContext.CurrentCommitted!);
-        }
-        finally { tx.Dispose(); }
     }
 
     public ITransactionManager Transactions => _txManager;
-    public ISchemaApi Schema => _schema;
+    internal ISchemaCatalog Schema => _schema.CommittedCatalog;
+    internal SchemaApi SchemaApiForTesting => _schema;
+    public ISchemaCatalog SchemaCatalog => _schema.CommittedCatalog;
     public IDiagnosticsApi Diagnostics => _diagnostics;
+
+    // 整合性テストは公開 API では作れない破損を明示的に注入する必要がある。
+    // ストア実体だけを internal に露出し、通常の利用者が物理レコードを変更する経路にはしない。
+    internal INexusStore NexusStoreForTest => _txManager.NexusStore;
+    internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
+    internal long CoMembershipReadCountForTest
+        => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
+    internal Exception? ScalarIndexRebuildErrorForTest => _scalarIndexRebuildError;
+    internal Exception? VectorSegmentMergeErrorForTest => _vectorSegmentMergeError;
+    internal void WaitForVectorSegmentMergeForTest()
+    {
+        while (true)
+        {
+            Task? task;
+            lock (_vectorSegmentMergeSync)
+                task = _vectorSegmentMergeTask;
+            task?.GetAwaiter().GetResult();
+            lock (_vectorSegmentMergeSync)
+            {
+                if (_vectorSegmentMergeTask == task
+                    && Volatile.Read(ref _vectorSegmentMergeRequested) == 0)
+                    return;
+            }
+        }
+    }
+    internal Exception? FullTextSegmentMergeErrorForTest => _fullTextSegmentMergeError;
+    internal long FullTextPrimaryFallbackScanCountForTest
+        => _fullTextSegments.PrimaryFallbackScanCountForTest;
+    internal void WaitForFullTextSegmentMergeForTest()
+    {
+        while (true)
+        {
+            Task? task;
+            lock (_fullTextSegmentMergeSync)
+                task = _fullTextSegmentMergeTask;
+            task?.GetAwaiter().GetResult();
+            lock (_fullTextSegmentMergeSync)
+            {
+                if (_fullTextSegmentMergeTask == task
+                    && Volatile.Read(ref _fullTextSegmentMergeRequested) == 0)
+                    return;
+            }
+        }
+    }
+    internal IVertexIncidenceHeadStore VertexIncidenceHeadStoreForTest => _txManager.VertexIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
-    public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
-        _vectors, () => BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false));
+    public IReadTransaction BeginReadTransaction()
+        => new ReadTransaction(WrapGraphTransaction(_txManager.BeginRead(), readOnly: true));
 
-    public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
+    public IWriteTransaction BeginWriteTransaction()
     {
-        var inner = _txManager.Begin(level);
+        if (Volatile.Read(ref _scalarIndexRebuildRequested) == 0
+            && _indexManager.ListIndexDefinitions()
+                .Any(x => x.State != IndexLifecycleState.Ready))
+        {
+            Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+        }
+        QueueScalarIndexRebuild();
+        return new WriteTransaction(WrapGraphTransaction(
+            _txManager.BeginWrite(),
+            readOnly: false));
+    }
+
+    private GraphTransaction WrapGraphTransaction(ITransaction inner, bool readOnly)
+    {
         return new GraphTransaction(
-            inner, _labelTokens, _relTypeTokens, _propKeyTokens,
+            inner, _labelTokens, _edgeTypeTokens, _propKeyTokens,
+            _nexusTypeTokens, _roleTokens,
+            _schema.Bind(inner, readOnly),
             readOnly,
-            // read-only tx と sink 未設定時はレコーダを完全にスキップし、ホットパスを allocation-free に保つ。
             readOnly ? null : _logicalSink,
-            // 列マネージャは read/write 双方へ渡す。write hook は
-            // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
-            // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
-            _columnManager,
-            // tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
-            // 渡すが、メソッド側で IsReadOnly ガードする。
-            _vectors);
+            _vectorSegments,
+            _fullTextSegments,
+            _nexusMergeIndex);
+    }
+
+    private void QueueVectorSegmentMerge()
+    {
+        if (_disposed)
+            return;
+        Volatile.Write(ref _vectorSegmentMergeRequested, 1);
+        lock (_vectorSegmentMergeSync)
+        {
+            if (_vectorSegmentMergeTask is { IsCompleted: false })
+                return;
+            _vectorSegmentMergeTask = Task.Run(() =>
+            {
+                try
+                {
+                    MergeVectorSegments(_vectorSegmentMergeCancellation.Token);
+                }
+                finally
+                {
+                    lock (_vectorSegmentMergeSync)
+                        _vectorSegmentMergeTask = null;
+                    if (!_disposed
+                        && Volatile.Read(ref _vectorSegmentMergeRequested) != 0)
+                        QueueVectorSegmentMerge();
+                }
+            });
+        }
+    }
+
+    private void MergeVectorSegments(CancellationToken cancellationToken)
+    {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested
+                   && Interlocked.Exchange(ref _vectorSegmentMergeRequested, 0) != 0)
+            {
+                IReadOnlyList<VectorSegmentBuildSource> sources =
+                    _vectorSegments.CaptureBuildSources();
+                foreach (VectorSegmentBuildSource source in sources)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    IReadOnlyList<VectorSegmentMutation> entries;
+                    using (ITransaction read = _txManager.BeginRead())
+                    {
+                        entries = VectorSegmentIndex.ScanPrimary(
+                            read,
+                            source.Definition,
+                            _labelTokens,
+                            _edgeTypeTokens,
+                            _nexusTypeTokens,
+                            _propKeyTokens);
+                    }
+
+                    // artifact構築はread snapshotの内容だけを使い、writer leaseを保持しない。
+                    VectorSegmentBuildStartedForTest?.Invoke();
+                    VectorSegmentBuildArtifact artifact =
+                        VectorSegmentIndex.Build(source, entries);
+                    VectorSegmentBuildCompletedForTest?.Invoke();
+                    using ITransaction publish = _txManager.BeginWrite();
+                    var publishDuration = Stopwatch.StartNew();
+                    long publishTransactionId = publish.Id.Value;
+                    publish.OnCommitted(() =>
+                    {
+                        IndexDefinition? currentDefinition = null;
+                        if (_schema.CommittedCatalog.TryGetIndex(
+                                source.IndexName,
+                                out IndexInfo current))
+                            currentDefinition = current.Definition;
+                        if (!_vectorSegments.TryPublishMerge(
+                                publishTransactionId,
+                                artifact,
+                                currentDefinition))
+                        {
+                            artifact.Segment.Dispose();
+                            Volatile.Write(ref _vectorSegmentMergeRequested, 1);
+                        }
+                    });
+                    publish.Commit();
+                    publishDuration.Stop();
+                    VectorSegmentPublishMeasuredForTest?.Invoke(
+                        publishDuration.Elapsed);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _vectorSegmentMergeError = ex;
+        }
+    }
+
+    private void QueueFullTextSegmentMerge()
+    {
+        if (_disposed)
+            return;
+        Volatile.Write(ref _fullTextSegmentMergeRequested, 1);
+        lock (_fullTextSegmentMergeSync)
+        {
+            if (_fullTextSegmentMergeTask is { IsCompleted: false })
+                return;
+            _fullTextSegmentMergeTask = Task.Run(() =>
+            {
+                try
+                {
+                    MergeFullTextSegments(_fullTextSegmentMergeCancellation.Token);
+                }
+                finally
+                {
+                    lock (_fullTextSegmentMergeSync)
+                        _fullTextSegmentMergeTask = null;
+                    if (!_disposed
+                        && Volatile.Read(ref _fullTextSegmentMergeRequested) != 0)
+                        QueueFullTextSegmentMerge();
+                }
+            });
+        }
+    }
+
+    private void MergeFullTextSegments(CancellationToken cancellationToken)
+    {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested
+                   && Interlocked.Exchange(ref _fullTextSegmentMergeRequested, 0) != 0)
+            {
+                IReadOnlyList<FullTextSegmentBuildSource> sources =
+                    _fullTextSegments.CaptureBuildSources();
+                foreach (FullTextSegmentBuildSource source in sources)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    IReadOnlyList<FullTextSegmentMutation> entries;
+                    long sourceCommittedHighWater;
+                    using (ITransaction read = _txManager.BeginRead())
+                    {
+                        entries = FullTextSegmentIndex.ScanPrimary(
+                            read,
+                            source.Definition,
+                            _labelTokens,
+                            _edgeTypeTokens,
+                            _nexusTypeTokens,
+                            _propKeyTokens);
+                        sourceCommittedHighWater =
+                            read.Snapshot.CommittedHighWater;
+                    }
+
+                    FullTextSegmentBuildStartedForTest?.Invoke();
+                    FullTextSegmentBuildArtifact artifact =
+                        _fullTextSegments.Build(
+                            source,
+                            entries,
+                            sourceCommittedHighWater);
+                    FullTextSegmentBuildCompletedForTest?.Invoke();
+                    using ITransaction publish = _txManager.BeginWrite();
+                    var publishDuration = Stopwatch.StartNew();
+                    if (!_fullTextSegments.TryPrepareMerge(publish, artifact))
+                    {
+                        artifact.Segment.Dispose();
+                        Volatile.Write(ref _fullTextSegmentMergeRequested, 1);
+                        publish.Abort();
+                        continue;
+                    }
+                    publish.Commit();
+                    publishDuration.Stop();
+                    FullTextSegmentPublishMeasuredForTest?.Invoke(
+                        publishDuration.Elapsed);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _fullTextSegmentMergeError = ex;
+        }
     }
 
     /// <summary>
-    /// イミュータブルな base 隣接ビューを現在のリレーションシップストアから再構築し、
+    /// イミュータブルな base 隣接ビューを現在のEdgeストアから再構築し、
     /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
-    /// 新しいリレーションシップが作成されるまで delta 走査は何も返さない。
+    /// 新しいEdgeが作成されるまで delta 走査は何も返さない。
     ///
-    /// 現在は V1 ストア (payload lane なし) のみ対応。V2 ストアがアクティブな場合は
-    /// 例外を投げる (V2 compact はプロパティストアから inline payload を再読する必要があり未実装)。
-    /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
+    /// writer lease が更新を直列化し、既存 reader は snapshot visibility で結果を絞り込む。
     /// </summary>
     public void CompactAdjacency()
     {
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException(
-                "CompactAdjacency requires no active transactions.");
-        if (_adjStore is AdjacencyBlockStoreV2)
-            throw new NotSupportedException(
-                "CompactAdjacency for V2 (payload lane) is not yet implemented.");
+        using var mutationLease = _txManager.AcquireMutationLease();
+        CompactAdjacencyCore();
+    }
 
-        // 現在の adj ファイルを壊す前に生存 rels (id, src, tgt, type) をスナップショットする。
-        // IRelationshipStore.Scan はストア順で id を返し、各読み出しがアクティブページから
+    private void CompactAdjacencyCore()
+    {
+        PayloadLaneSpec payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec
+            ?? new PayloadLaneSpec(PayloadKind.None, -1, 0);
+
+        // 現在の adj ファイルを壊す前に生存 edges (id, src, tgt, type) をスナップショットする。
+        // IEdgeStore.Scan はストア順で id を返し、各読み出しがアクティブページから
         // src/tgt/type を取得する。
         var live = new List<(long Id, long Src, long Tgt, int TypeId)>();
         long maxId = -1;
-        foreach (var relId in _relStore.Scan())
+        foreach (var edgeId in _edgeStore.Scan())
         {
-            var r = _relStore.Read(relId);
+            var r = _edgeStore.Read(edgeId);
             // 隣接ビルドへ渡す id は Sequence (packed Value ではない)。
-            live.Add((relId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
-            if (relId.Sequence > maxId) maxId = relId.Sequence;
+            live.Add((edgeId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
+            if (edgeId.Sequence > maxId) maxId = edgeId.Sequence;
         }
-        long newBaseHwm = maxId + 1; // リレーションシップが無ければ 0 — "no base" と一致
+        long newBaseHwm = maxId + 1; // Edgeが無ければ 0 — "no base" と一致
+        Dictionary<long, long>? weights = null;
+        if (payloadSpec.Kind != PayloadKind.None)
+        {
+            weights = CaptureExistingPayloads(live);
+            foreach (var (id, _, _, _) in live)
+            {
+                var edgeId = EdgeId.Create(id, _edgeStore.CurrentGeneration(id));
+                if (TryReadPayload(edgeId, payloadSpec, out long raw))
+                    weights[edgeId.Sequence] = raw;
+            }
+        }
 
-        // 隣接データは container 内テナントに同居する。Build は対象テナントを
-        // truncate して作り直すため、旧 PagedFile を pageManager から drop する必要はない。
-        if (_adjStore is AdjacencyBlockStore old) old.Dispose();
-        _txManager.SwapAdjacencyStore(null);
-        _adjStore = null;
-
-        // 隣接インデックスをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
-        // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
-        long nodeHwm = 0;
+        long vertexHwm = 0;
         foreach (var (_, src, tgt, _) in live)
         {
-            if (src + 1 > nodeHwm) nodeHwm = src + 1;
-            if (tgt + 1 > nodeHwm) nodeHwm = tgt + 1;
+            if (src + 1 > vertexHwm) vertexHwm = src + 1;
+            if (tgt + 1 > vertexHwm) vertexHwm = tgt + 1;
         }
 
         var adjData = _container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
         var adjIdx = _container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
-        AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm);
+
+        // compact は導出ビューの再構築であり、正本は edge store にある。
+        // 先に descriptor を無効化して durable 化しておくと、以降の crash/reopen は
+        // 部分的な adjacency view を開かず、row path へ安全にフォールバックできる。
+        if (_adjStore is IDisposable old) old.Dispose();
+        _txManager.SwapAdjacencyStore(null, writerLeaseHeld: true);
+        _adjStore = null;
+        AdjacencyContainer.WriteDescriptor(adjData, AdjacencyContainer.KindNone, null);
+        _container.Flush();
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterDescriptorInvalidated);
+
+        // 隣接インデックスをその場で再構築する。Build は論理Vertex ID ごとに 1 エントリを持つ前提なので
+        // vertexHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
+        AdjacencySegmentStore.Build(
+            adjData, adjIdx, live, weights ?? [], vertexHwm, payloadSpec, writeDescriptor: false);
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterRebuild);
 
         // epoch メタデータをリセットして再オープン。ResetAfterCompact は epoch カウンタを
         // 進め (オブザーバが再構築を検出可能にする)、tombstone を破棄する
@@ -266,11 +673,90 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var epochTenant = _container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header);
         AdjacencyEpoch newEpoch = AdjacencyEpoch.Open(epochTenant);
         newEpoch.ResetAfterCompact(newBaseHwm);
+        _edgeDeltas?.Reset();
+        _edgeDeltaHeads?.ReloadMeta();
+        _edgeDeltas?.ReloadMeta();
+        _edgeStore.RebuildLocators();
+        AdjacencyContainer.WriteDescriptor(
+            adjData,
+            AdjacencyContainer.KindSegment,
+            payloadSpec);
         // CompactAdjacency は tx 外なので、再構築したページを durable 化する。
         _container.Flush();
-        var newStore = new AdjacencyBlockStore(adjData, adjIdx, newEpoch);
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterFinalDescriptorFlushed);
+        IAdjacencySegmentStore newStore = new AdjacencySegmentStore(
+            adjData, adjIdx, payloadSpec, newEpoch);
         _adjStore = newStore;
-        _txManager.SwapAdjacencyStore(newStore);
+        _txManager.SwapAdjacencyStore(newStore, writerLeaseHeld: true);
+    }
+
+    private bool TryReadPayload(EdgeId edgeId, PayloadLaneSpec spec, out long raw)
+    {
+        var keyId = new PropertyKeyId(spec.PropertyKeyId);
+        var owner = EntityRef.From(edgeId);
+        var firstPropertyRef = _edgeStore.Read(edgeId).FirstPropertyRef;
+        var propEnum = _propStore.Enumerate(owner, firstPropertyRef);
+        while (propEnum.MoveNext())
+        {
+            var prop = propEnum.Current;
+            if (prop.KeyId == keyId &&
+                TryEncodePayload(prop.Value, spec, out raw))
+            {
+                return true;
+            }
+        }
+
+        raw = spec.DefaultRaw;
+        return false;
+    }
+
+    private Dictionary<long, long> CaptureExistingPayloads(
+        IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> live)
+    {
+        var result = new Dictionary<long, long>();
+        if (_adjStore is not IAdjacencyPayloadView)
+            return result;
+
+        var seenSources = new HashSet<long>();
+        foreach (var (_, src, _, _) in live)
+        {
+            if (!seenSources.Add(src))
+                continue;
+
+            using var cursor = _adjStore.OpenCursor(new VertexId(src), Direction.Outgoing, null);
+            while (cursor.MoveNext())
+            {
+                var edgeId = cursor.Edge;
+                if (!_adjStore.IsTombstoned(edgeId))
+                    result[edgeId.Sequence] = cursor.WeightRaw;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryEncodePayload(in PropertyValue value, PayloadLaneSpec spec, out long raw)
+    {
+        switch (spec.Kind)
+        {
+            case PayloadKind.Int64:
+                if (value.Type is PropertyValueType.Int64 or PropertyValueType.Int32 or PropertyValueType.Bool)
+                {
+                    raw = value.Int64Value;
+                    return true;
+                }
+                break;
+            case PayloadKind.Double:
+                if (value.Type == PropertyValueType.Double)
+                {
+                    raw = BitConverter.DoubleToInt64Bits(value.DoubleValue);
+                    return true;
+                }
+                break;
+        }
+
+        raw = spec.DefaultRaw;
+        return false;
     }
 
     /// <summary>
@@ -285,31 +771,68 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     ///     並行 writer は同一ページが衝突するときだけ短い待ち時間を経験する (block しない)。
     ///  3. トークン / 隣接 / .fileKinds / .idxmeta などの非ページファイルを <see cref="File.Copy"/> で複製。
     ///     これらはいずれも <c>FileShare.Read</c> 以上で開かれているため外部から並行読みできる。
-    ///  4. WAL を <see cref="IWriteAheadLog.FlushTo"/> で末尾までフラッシュしてから wal/*.log を複製。
-    ///     データファイルを先に取って WAL を後に取る順序は重要: 並行 in-flight tx が <c>PinForWrite</c>
-    ///     で吐く CompensationLogRecord (before-image) は <b>即時 WAL 追記</b>される (案 C の FlushPending
-    ///     が後段でまとめる PageImage と異なる) ため、データコピー中にバッファ pool eviction で
-    ///     uncommitted modification が target のデータファイルへ漏れたとしても、WAL コピーは必ず
-    ///     その CLR を含み、target recovery の Pass 3 undo が正しく巻き戻せる。
+    ///  4. WAL を <see cref="IWriteAheadLog.FlushTo"/> で末尾までフラッシュしてから単一 WAL を複製。
+    ///     データファイルを先に取り、WAL を後に取ることで、コピー中に完了した Commit とその PageImage を
+    ///     コピー先の recovery が観測できる。Commit を持たない transaction の PageImage は適用されない。
     ///
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
     /// <summary>
-    /// ノードストアの dead version 物理回収 + committed registry の prune。
-    /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
+    /// oldest snapshot horizon より古い dead version の物理回収と
+    /// committed registry の prune。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
+        using IDisposable garbageCollectionMeasurement =
+            QuiverTelemetry.TrackGarbageCollection();
+        using var mutationLease = _txManager.AcquireMutationLease();
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
+        // nexus / incidence / vertex-incidence-head の実体は transaction 配線側が保持するため、
+        // そこから取り出して nexus 回収を有効にする (backend は直接参照を持たない)。
         var vac = new Vacuum(
-            _nodeStore, _relStore, _propStore,
-            _txManager, _txManager.CommittedRegistry, _wal, _columnManager);
-        return vac.Run(options);
+            _vertexStore, _edgeStore, _propStore,
+            _txManager, _txManager.CommittedRegistry, _wal,
+            _txManager.NexusStore as VersionedNexusStore,
+            _txManager.IncidenceStore as IncidenceStore,
+            _txManager.VertexIncidenceHeadStore);
+        VacuumReport report = vac.Run(options);
+        VacuumOptions effectiveOptions = options ?? new VacuumOptions();
+        if ((effectiveOptions.Targets & VacuumTarget.Indexes) != 0)
+        {
+            bool dryRun = effectiveOptions.Mode == VacuumMode.DryRun;
+            int retiredVectorManifests = _vectorSegments.CollectGarbage(
+                report.HorizonTxId,
+                dryRun);
+            SegmentGarbageCollectionResult fullTextGc =
+                _fullTextSegments.CollectGarbage(
+                    report.HorizonTxId,
+                    dryRun,
+                    _indexManager.ListFullTextCatalogEntries());
+            report = report with
+            {
+                RetiredVectorManifests = retiredVectorManifests,
+                RetiredFullTextManifests = fullTextGc.RetiredManifests,
+                ReclaimedFullTextArtifacts = fullTextGc.ReclaimedArtifacts,
+            };
+        }
+        if (vac.ReclaimedEdgeSequences.Count > 0)
+            _relationshipReuse.BeginAndRun(vac.ReclaimedEdgeSequences);
+        // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
+        // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
+        if (report.ReclaimedNexuses > 0 || _txManager.ActiveCount == 0)
+            _coMembershipStore?.Rebuild(
+                _txManager.NexusStore,
+                _txManager.IncidenceStore);
+        // vacuum は transaction 外の maintenance mutation なので、返却前に同じ writer lease 下で
+        // sharp checkpoint を完了し、回収した page/free-list/catalog state を durable にする。
+        _txManager.RequestCheckpoint(writerLeaseHeld: true);
+        return report;
     }
 
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
     {
+        using var mutationLease = _txManager.AcquireMutationLease();
         ArgumentException.ThrowIfNullOrEmpty(targetFilePath);
         options ??= new SnapshotOptions();
 
@@ -317,7 +840,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var parentDir = Path.GetDirectoryName(targetFilePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
-        _txManager.RequestCheckpoint();
+        _txManager.RequestCheckpoint(writerLeaseHeld: true);
 
         // 1. コンテナ (graph.quiver = コア / 索引 / 隣接 / token / epoch を同居) を page-by-page で
         //    複製する。PinForRead でフレームレベル read lock を取りながら写すので、並行 writer は
@@ -332,6 +855,15 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var srcWal = _containerPath + "-wal";
         if (File.Exists(srcWal))
             CopySharedFile(srcWal, targetFilePath + "-wal");
+
+        // 3. manifestが参照するimmutable全文segment bodyを複製する。
+        //    artifact storeはappend-onlyなので、checkpoint後に増えた末尾recordを含んでも
+        //    snapshot側manifestから参照されず、安全な孤児になる。
+        string srcFullTextSegments = _containerPath + "-ftseg";
+        if (Directory.Exists(srcFullTextSegments))
+            CopyImmutableArtifactDirectory(
+                srcFullTextSegments,
+                targetFilePath + "-ftseg");
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)
@@ -365,6 +897,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         dst.Flush(flushToDisk: true);
     }
 
+    private static void CopyImmutableArtifactDirectory(string srcPath, string dstPath)
+    {
+        Directory.CreateDirectory(dstPath);
+        foreach (string sourceFile in Directory.EnumerateFiles(
+                     srcPath,
+                     "*.qfts",
+                     SearchOption.TopDirectoryOnly))
+            CopySharedFile(
+                sourceFile,
+                Path.Combine(dstPath, Path.GetFileName(sourceFile)));
+    }
+
     private bool _disposed;
 
     public void Dispose()
@@ -373,31 +917,68 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // 冪等でないので、2 回目以降は no-op にする (テストが db を二重 Dispose する経路がある)。
         if (_disposed) return;
         _disposed = true;
+        _scalarIndexRebuildCancellation.Cancel();
+        _vectorSegmentMergeCancellation.Cancel();
+        _fullTextSegmentMergeCancellation.Cancel();
+        Task? rebuildTask;
+        Task? vectorMergeTask;
+        Task? fullTextMergeTask;
+        lock (_scalarIndexRebuildSync)
+            rebuildTask = _scalarIndexRebuildTask;
+        lock (_vectorSegmentMergeSync)
+            vectorMergeTask = _vectorSegmentMergeTask;
+        lock (_fullTextSegmentMergeSync)
+            fullTextMergeTask = _fullTextSegmentMergeTask;
+        try { rebuildTask?.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
+        try { vectorMergeTask?.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
+        try { fullTextMergeTask?.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
+        _scalarIndexRebuildCancellation.Dispose();
+        _vectorSegmentMergeCancellation.Dispose();
+        _fullTextSegmentMergeCancellation.Dispose();
+        _vectorSegments.Dispose();
+        _fullTextSegments.Dispose();
 
         // クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
         // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。
         // ActiveCount==0 なので未コミットデータは存在せず、flush 後の graph.quiver は完全。
-        bool cleanShutdown = _txManager.ActiveCount == 0;
+        bool cleanShutdown = _txManager.ActiveCount == 0 && !_txManager.IsFaulted;
         if (cleanShutdown)
         {
-            // committed TxId 高水位を container へ永続化してから flush する。
-            // WAL 削除後の reopen で MVCC visibility horizon と次 TxId 採番を復元するため。
-            _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
-            _pageManager.FlushAll();   // 全データページを fsync (container.Physical を含む)
-            _indexManager.FlushAll();  // 索引も container 上だが念のため
-            _wal.MarkDeleteOnDispose();
+            // clean close も manual/threshold と同じ sharp checkpoint を通す。
+            _txManager.RequestCheckpoint();
+            if (_wal is WriteAheadLog durableWal)
+                durableWal.MarkDeleteOnDispose();
         }
 
         _txManager.Dispose();
         if (_adjStore is IDisposable d) d.Dispose();
         _indexManager.Dispose();
         _labelTokens.Dispose();
-        _relTypeTokens.Dispose();
+        _edgeTypeTokens.Dispose();
         _propKeyTokens.Dispose();
+        _nexusTypeTokens.Dispose();
+        _roleTokens.Dispose();
         // WAL を dispose する前にデータファイルを flush する。PagedFile.Flush() は
         // write-ahead 順序 (WAL→データ) に従うため、page manager がダーティフレームを
         // ディスクへ flush する間は WAL がまだ生きている必要がある。
         _pageManager.Dispose();
         _wal.Dispose();
     }
+}
+
+internal enum CompactAdjacencyPhase
+{
+    AfterDescriptorInvalidated,
+    AfterRebuild,
+    AfterFinalDescriptorFlushed,
+}
+
+internal enum ScalarIndexRebuildPhase
+{
+    AfterArtifactBuilt,
+    BeforePublishCommit,
+    AfterPublishCommit,
 }

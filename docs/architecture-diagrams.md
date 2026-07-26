@@ -1,7 +1,7 @@
 # Quiver アーキテクチャ図
 
 用途別の Mermaid 図集。
-内部実装の図（書き込みフロー、リカバリ、クエリパイプライン、MVCC 可視性）は [内部実装の図](design/internals-diagrams.md) を参照。
+内部実装の契約は[現行仕様](spec/00_overview.md)を参照。
 
 ---
 
@@ -18,12 +18,12 @@ flowchart TB
     end
 
     subgraph core["Quiver（エンジン中核）"]
-        API["GraphDatabase / GraphTransaction<br/>Fluent Traversal / Match DSL"]
+        API["QuiverDatabase / IReadTransaction / IWriteTransaction<br/>Fluent Traversal / Match DSL"]
         Query["Query Engine"]
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
-        Index["B+Tree / FullTextIndex"]
-        Records["NodeStore / RelationshipStore<br/>PropertyStore"]
-        Vector["PersistentVectorStore + HNSW"]
+        Index["Scalar B+Tree / Immutable Full-Text Segments"]
+        Records["VertexStore / EdgeStore<br/>PropertyStore"]
+        Vector["Vector property + immutable HNSW segments"]
         WAL["Write-Ahead Log"]
         Storage["PagedFile / バッファプール"]
     end
@@ -83,14 +83,14 @@ sequenceDiagram
     participant Rag as RagStore
     participant Chk as Chunker
     participant Emb as IChunkEmbedder
-    participant DB as GraphTransaction
+    participant DB as IWriteTransaction
 
-    Ext->>Rag: IngestAsync(IngestedDocument)
+    Ext->>Rag: UpsertDocumentAsync(IngestedDocument)
     Rag->>Chk: ブロック列をチャンク分割
     Rag->>Emb: EmbedAsync(チャンクテキスト[])
     Emb-->>Rag: float[][]
-    Rag->>DB: Document ノード作成
-    Rag->>DB: Chunk ノード N 件作成
+    Rag->>DB: Document Vertex作成
+    Rag->>DB: Chunk Vertex N 件作成
     Rag->>DB: HAS_CHUNK / NEXT_CHUNK 作成
     Rag->>DB: 全文インデックス登録 + ベクトル登録
     Rag->>DB: Commit
@@ -128,7 +128,7 @@ flowchart LR
 
 ## 5. パッケージ依存関係
 
-NuGet パッケージとしての依存グラフ。破線は incubating（NuGet 非公開）を示す。
+NuGet パッケージとしての依存グラフ。矢印はパッケージ参照の向きを示す。
 
 ```mermaid
 flowchart LR
@@ -137,13 +137,8 @@ flowchart LR
     Rag["Quiver.Rag"]
     Host["Quiver.Hosting"]
     OTel["Quiver.OpenTelemetry"]
-    Emb["Quiver.Embedding<br/>(incubating)"]
-
     SG -- analyzer --> Core
-    Core --> Rag
-    Core --> Host
-    Core --> OTel
-    Core --> Emb
-
-    style Emb stroke-dasharray: 5 5
+    Rag --> Core
+    Host --> Core
+    OTel --> Core
 ```

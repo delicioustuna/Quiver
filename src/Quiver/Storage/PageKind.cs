@@ -1,10 +1,10 @@
-﻿namespace Quiver.Storage;
+namespace Quiver.Storage;
 
 internal enum PageKind : byte
 {
     Free = 0,
-    NodeRecord = 1,
-    RelationshipRecord = 2,
+    VertexRecord = 1,
+    EdgeRecord = 2,
     PropertyRecord = 3,
     BTreeInternal = 4,
     BTreeLeaf = 5,
@@ -16,5 +16,9 @@ internal enum PageKind : byte
     // 版チェーン付き可変長レコードの slotted ヒープ / ItemPointerMap エントリページ。
     SlottedHeap = 10,
     ItemPointerMap = 11,
+    // 固定長 slot を sequence 直引きで密配置する incidence ページ。
+    IncidenceRecord = 12,
+    // edge delta store の append-only ページ。
+    EdgeDeltaRecord = 13,
     Header = 0xFF,
 }

@@ -11,7 +11,7 @@
 
 1 つの DB はディレクトリ 1 つ。中には概ね以下が入る:
 
-- データファイル (nodes / relationships / properties / tokens の固定長レコードストア)
+- データファイル (vertices / edges / properties / tokens の固定長レコードストア)
 - 索引ファイル (`.idx` / `.idxmeta` / `.fileKinds`) — B+Tree 索引
 - 隣接ブロックストア
 - WAL セグメント (`*.wal`)
@@ -26,7 +26,7 @@
 書き込みを止めずに、整合したコピーを別ディレクトリに作る。本番で最も使うべき方法。
 
 ```csharp
-using var db = GraphDatabase.Open(@"C:\data\graph");
+using var db = QuiverDatabase.Open(@"C:\data\graph");
 
 // ライブ中に整合スナップショットを作成。並行 writer はごく短時間しか待たない。
 db.CreateSnapshot(@"C:\backup\graph-2026-05-30");
@@ -39,7 +39,7 @@ db.CreateSnapshot(@"C:\backup\graph-2026-05-30");
 3. WAL を末尾までフラッシュしてセグメントを複製
 
 並行する writer は **フレームレベルロックの粒度** でしか待たないので、長時間ブロックしない。
-target ディレクトリを後で `GraphDatabase.Open` で開くと recovery が走り、スナップショット時点までの
+target ディレクトリを後で `QuiverDatabase.Open` で開くと recovery が走り、スナップショット時点までの
 commit 群が redo され、in-flight だった tx は補償レコードで undo される。**結果として target は
 「スナップショットを取った瞬間に正常終了した DB」と等価**になる。
 
@@ -53,7 +53,7 @@ db.CreateSnapshot(@"C:\backup\graph", new SnapshotOptions
 ```
 
 - `IncludeIndexes = true` (既定): 索引ファイルもコピー。開いてすぐ使える。
-- `IncludeIndexes = false`: バックアップサイズを削るが、復元後に `db.Schema.CreateIndex(...)` で
+- `IncludeIndexes = false`: バックアップサイズを削るが、復元後に書き込みトランザクションの `EditSchema` で
   索引を張り直す必要がある。索引が巨大で再構築が許容できるときだけ。
 
 ### 注意
@@ -82,7 +82,7 @@ Copy-Item -Recurse "C:\data\graph" "C:\backup\graph-cold-2026-05-30"
 ## C. 論理エクスポート (移行・スキーマ変更を伴う場合)
 
 ファイル形式に依存しない移植が必要なとき (例: メジャーバージョン跨ぎの format 変更、
-別ストアへの移行) は、読み取りトランザクションで全ノード/エッジを走査して自前のフォーマット
+別ストアへの移行) は、読み取りトランザクションで全Vertex/エッジを走査して自前のフォーマット
 (JSON Lines など) に書き出す。復元は `BeginStreamingBulkLoad` で再投入する。
 
 - 利点: format 非依存、人間が読める、部分抽出ができる。
@@ -98,7 +98,7 @@ Copy-Item -Recurse "C:\data\graph" "C:\backup\graph-cold-2026-05-30"
 
 ```csharp
 // バックアップを本番パスへ配置してから開く
-using var db = GraphDatabase.Open(@"C:\data\graph");   // recovery が自動で走る
+using var db = QuiverDatabase.Open(@"C:\data\graph");   // recovery が自動で走る
 ```
 
 別マシンへの復元手順:
@@ -121,7 +121,7 @@ Generic Host / ASP.NET Core に組み込む場合、`BackgroundService` から `
 
 ```csharp
 public sealed class SnapshotBackupService(
-    GraphDatabase db, ILogger<SnapshotBackupService> log) : BackgroundService
+    QuiverDatabase db, ILogger<SnapshotBackupService> log) : BackgroundService
 {
     private const int RetainGenerations = 7;
     private static readonly string BackupRoot = @"D:\backup\graph";
@@ -207,7 +207,7 @@ Get-ChildItem "D:\backup" -Directory -Filter "graph-*" |
 バックアップは **復元できて初めて意味がある**。定期的に:
 
 1. 最新スナップショットを隔離ディレクトリへ復元
-2. `GraphDatabase.Open` で起動できることを確認
+2. `QuiverDatabase.Open` で起動できることを確認
 3. `GetStatistics()` の件数が想定どおりか
 4. `db.Diagnostics.CheckIndexConsistency()` で orphan が出ないか
 

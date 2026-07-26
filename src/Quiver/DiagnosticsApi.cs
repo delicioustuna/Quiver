@@ -9,13 +9,17 @@ namespace Quiver;
 
 internal sealed class DiagnosticsApi : IDiagnosticsApi
 {
-    private readonly INodeStore _nodeStore;
-    private readonly IRelationshipStore _relStore;
+    private readonly IVertexStore _vertexStore;
+    private readonly IEdgeStore _edgeStore;
+    private readonly INexusStore _nexusStore;
+    private readonly IPropertyStore _propertyStore;
+    private readonly IIncidenceStore _incidenceStore;
+    private readonly IVertexIncidenceHeadStore _vertexIncidenceHeads;
     private readonly IGraphAccessMethods _access;
     // orphan 検出は型を意識せずに全索引を走査する必要があるため
     // IIndexManager の non-generic 経路を直接持つ。
     private readonly IndexManager? _indexManager;
-    private readonly LabelNodeIndex? _labelIndex;
+    private readonly LabelVertexIndex? _labelIndex;
     // Adaptive checkpoint controller の現在 threshold と policy 切り替えを公開する経路。
     private readonly TransactionManager? _txManager;
     // SetCheckpointPolicy(Adaptive, ...) で新規 controller を構築するための保存値。
@@ -25,19 +29,27 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     private readonly int _adaptiveSampleWindow;
 
     internal DiagnosticsApi(
-        INodeStore nodeStore,
-        IRelationshipStore relStore,
+        IVertexStore vertexStore,
+        IEdgeStore edgeStore,
         IGraphAccessMethods access,
+        IPropertyStore propertyStore,
+        INexusStore? nexusStore = null,
+        IIncidenceStore? incidenceStore = null,
+        IVertexIncidenceHeadStore? vertexIncidenceHeads = null,
         IndexManager? indexManager = null,
-        LabelNodeIndex? labelIndex = null,
+        LabelVertexIndex? labelIndex = null,
         TransactionManager? txManager = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
         long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
         long adaptiveMaxThresholdBytes = 1024L * 1024 * 1024,
         int adaptiveSampleWindow = 1000)
     {
-        _nodeStore = nodeStore;
-        _relStore = relStore;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
+        _propertyStore = propertyStore;
+        _nexusStore = nexusStore ?? NullNexusStore.Instance;
+        _incidenceStore = incidenceStore ?? NullIncidenceStore.Instance;
+        _vertexIncidenceHeads = vertexIncidenceHeads ?? NullVertexIncidenceHeadStore.Instance;
         _access = access;
         _indexManager = indexManager;
         _labelIndex = labelIndex;
@@ -50,6 +62,17 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
 
     public long CurrentCheckpointThresholdBytes
         => _txManager?.CurrentCheckpointThresholdBytes ?? 0;
+
+    public SnapshotRuntimeDiagnostics GetSnapshotDiagnostics()
+    {
+        SnapshotDiagnostics diagnostics =
+            _txManager?.Snapshots.Diagnostics ?? default;
+        return new(
+            diagnostics.ActiveCount,
+            diagnostics.OldestAge,
+            diagnostics.OldestStartLocation,
+            diagnostics.OldestCommittedHighWater);
+    }
 
     public void SetCheckpointPolicy(CheckpointPolicy policy, long? fixedThresholdBytes = null)
     {
@@ -75,8 +98,10 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     }
 
     public DatabaseStatistics GetStatistics() => new(
-        NodeCount: _nodeStore.InUseCount,
-        RelationshipCount: _relStore.InUseCount,
+        VertexCount: _vertexStore.InUseCount,
+        EdgeCount: _edgeStore.InUseCount,
+        NexusCount: _nexusStore.InUseCount,
+        IncidenceCount: _incidenceStore.InUseCount,
         PropertyCount: 0,
         DataFileSize: 0,
         WalFileSize: 0,
@@ -84,11 +109,154 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         BufferPoolMisses: 0,
         AdjacencyFallbackCount: _access.AdjacencyFallbackCount);
 
-    public ConsistencyReport CheckConsistency() => new(true, []);
+    public ConsistencyReport CheckConsistency()
+    {
+        var issues = new List<string>();
+        var liveIncidences = ReadLiveIncidences(issues);
+        var reachedFromNexuses = CheckNexusChains(liveIncidences, issues);
+        var reachedFromVertices = CheckVertexChains(liveIncidences, issues);
+
+        foreach (var incidence in liveIncidences.Values)
+        {
+            if (!incidence.IsLive) continue;
+            if (!reachedFromNexuses.Contains(incidence.Id.Sequence))
+                issues.Add($"Incidence {incidence.Id.Sequence} is unreachable from its nexus chain.");
+            if (!reachedFromVertices.Contains(incidence.Id.Sequence))
+                issues.Add($"Incidence {incidence.Id.Sequence} is unreachable from its vertex chain.");
+        }
+
+        return new ConsistencyReport(issues.Count == 0, issues);
+    }
+
+    // incidence は独立した可視性を持たないため、slot の生存と参照先 header の生存を
+    // 分けて検査する。壊れた参照も後段の到達不能検査へ残すことで、一度の走査で根因と影響を示す。
+    private Dictionary<long, IncidenceSnapshot> ReadLiveIncidences(List<string> issues)
+    {
+        var result = new Dictionary<long, IncidenceSnapshot>();
+        for (long sequence = 0; sequence < _incidenceStore.SequenceHighWaterMark; sequence++)
+        {
+            using var handle = _incidenceStore.Read(new IncidenceId(sequence));
+            if (!handle.InUse) continue;
+
+            var incidence = new IncidenceSnapshot(
+                handle.Id,
+                handle.NexusId,
+                handle.VertexId,
+                handle.RoleId,
+                handle.NextInVertex,
+                handle.NextInNexus,
+                IsLive: false);
+            using var header = _nexusStore.Read(incidence.NexusId);
+            bool hasOwner = incidence.NexusId.IsValid
+                && _nexusStore.TryReadRawHeader(incidence.NexusId.Sequence, out _);
+            if (!hasOwner)
+                issues.Add($"Incidence {sequence} references an invalid nexus.");
+            else if (!header.InUse)
+            {
+                result[sequence] = incidence;
+                continue;
+            }
+
+            incidence = incidence with { IsLive = true };
+            result[sequence] = incidence;
+            if (!incidence.VertexId.IsValid || !_vertexStore.Read(incidence.VertexId).InUse)
+                issues.Add($"Incidence {sequence} references an invalid vertex.");
+            if (!incidence.RoleId.IsValid)
+                issues.Add($"Incidence {sequence} references an invalid role.");
+        }
+        return result;
+    }
+
+    private HashSet<long> CheckNexusChains(
+        IReadOnlyDictionary<long, IncidenceSnapshot> liveIncidences,
+        List<string> issues)
+    {
+        var reached = new HashSet<long>();
+        foreach (NexusId nexusId in _nexusStore.Scan())
+        {
+            using var header = _nexusStore.Read(nexusId);
+            var chain = new HashSet<long>();
+            var members = new HashSet<(long Vertex, int Role)>();
+            IncidenceId current = header.FirstIncidenceId;
+            int arity = 0;
+
+            while (current.IsValid)
+            {
+                if (!chain.Add(current.Sequence))
+                {
+                    issues.Add($"Nexus {nexusId.Sequence} incidence chain contains a cycle.");
+                    break;
+                }
+                if (!liveIncidences.TryGetValue(current.Sequence, out var incidence))
+                {
+                    issues.Add($"Nexus {nexusId.Sequence} chain references an unused incidence {current.Sequence}.");
+                    break;
+                }
+
+                reached.Add(current.Sequence);
+                arity++;
+                if (incidence.NexusId.Sequence != nexusId.Sequence)
+                    issues.Add($"Incidence {current.Sequence} is linked from the wrong nexus chain.");
+                if (!members.Add((incidence.VertexId.Sequence, incidence.RoleId.Value)))
+                    issues.Add($"Nexus {nexusId.Sequence} contains a duplicate role and vertex pair.");
+                current = incidence.NextInNexus;
+            }
+
+            if (arity < 2)
+                issues.Add($"Nexus {nexusId.Sequence} has arity {arity}; at least two members are required.");
+        }
+        return reached;
+    }
+
+    private HashSet<long> CheckVertexChains(
+        IReadOnlyDictionary<long, IncidenceSnapshot> liveIncidences,
+        List<string> issues)
+    {
+        var reached = new HashSet<long>();
+        foreach (VertexId vertexId in _vertexStore.Scan())
+        {
+            var chain = new HashSet<long>();
+            IncidenceId current = _vertexIncidenceHeads.Get(vertexId);
+            while (current.IsValid)
+            {
+                if (!chain.Add(current.Sequence))
+                {
+                    issues.Add($"Vertex {vertexId.Sequence} incidence chain contains a cycle.");
+                    break;
+                }
+                if (!liveIncidences.TryGetValue(current.Sequence, out var incidence))
+                {
+                    issues.Add($"Vertex {vertexId.Sequence} chain references an unused incidence {current.Sequence}.");
+                    break;
+                }
+
+                if (incidence.IsLive)
+                {
+                    reached.Add(current.Sequence);
+                // incidence の vertex 参照は physical Sequence、vertex scan は logical full ID。
+                // 診断の chain 整合性は物理 address を検査するため、Generation 込み equality を
+                // 使うと正常な chain を別Vertex扱いしてしまう。
+                if (incidence.VertexId.Sequence != vertexId.Sequence)
+                    issues.Add($"Incidence {current.Sequence} is linked from the wrong vertex chain.");
+                }
+                current = incidence.NextInVertex;
+            }
+        }
+        return reached;
+    }
+
+    private readonly record struct IncidenceSnapshot(
+        IncidenceId Id,
+        NexusId NexusId,
+        VertexId VertexId,
+        RoleId RoleId,
+        IncidenceId NextInVertex,
+        IncidenceId NextInNexus,
+        bool IsLive);
 
     /// <summary>
-    /// 全 B+Tree 索引を走査し、解放済みノード ID を指す orphan エントリを検出する。
-    /// の <c>LabelNodeIndex</c> も同じ live 判定で覆い、orphan 件数を返却する。
+    /// 全 B+Tree 索引を走査し、解放済みVertex ID を指す orphan エントリを検出する。
+    /// の <c>LabelVertexIndex</c> も同じ live 判定で覆い、orphan 件数を返却する。
     /// </summary>
     public IndexConsistencyReport CheckIndexConsistency()
     {
@@ -110,14 +278,14 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     /// <summary>
     /// orphan を実削除する。<see cref="IndexRepairMode.DryRun"/> 時は
     /// 検出した orphan 一覧のみ返す。<see cref="IndexRepairMode.Apply"/> 時は
-    /// <see cref="IndexManager.RemoveOrphans"/> で生キー削除し、<c>LabelNodeIndex</c> は
+    /// <see cref="IndexManager.RemoveOrphans"/> で生キー削除し、<c>LabelVertexIndex</c> は
     /// orphan が 1 件でもあれば <c>Invalidate()</c> して次回 lookup での再構築に委ねる
     /// (in-memory index なので部分削除より rebuild の方が簡潔)。
     /// </summary>
     /// <remarks>
     /// 削除は索引に格納された raw な packed 値 (<see cref="EntityRef"/>) で行う必要がある
     /// (<c>DeleteRawEntry</c> は値の完全一致で消すため)。公開 <see cref="OrphanIndexEntry.EntityId"/> は
-    /// unpacked な NodeId.Value なので、削除には内部 raw リストを使う。
+    /// unpacked な VertexId.Value なので、削除には内部 raw リストを使う。
     /// </remarks>
     public IndexRepairReport RepairIndexes(IndexRepairMode mode)
     {
@@ -151,54 +319,75 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         int indexCount = 0;
         long entryCount = 0;
         if (_indexManager != null)
-            (indexCount, entryCount) = _indexManager.CollectOrphans(IsLiveNode, raw);
+            (indexCount, entryCount) = _indexManager.CollectOrphans(
+                IsLiveIndexReference,
+                IsLiveEntityReference,
+                raw);
         return (indexCount, entryCount, raw, CountLabelIndexOrphans());
     }
 
-    /// <summary>raw orphan (packed 値) を公開 <see cref="OrphanIndexEntry"/> (unpacked NodeId.Value) へ変換。</summary>
-    private static List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
+    /// <summary>raw orphan (packed 値) を公開 <see cref="OrphanIndexEntry"/> (unpacked VertexId.Value) へ変換。</summary>
+    private List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
     {
-        var int64 = new Int64KeyCodec();
         var list = new List<OrphanIndexEntry>(raw.Count);
         foreach (var (name, key, value) in raw)
         {
-            int sep = name.IndexOf(IndexManager.FtLaneSep);
-            if (sep >= 0)
-            {
-                // 全文索引 lane。EntityId は value (tf/docLen) ではなく key 側に入っている
-                // (postings=末尾8B の packed ref / norms=Int64 key の packed ref)。表示名は lane タグを外す。
-                var lane = name[(sep + 1)..];
-                long packed = lane == IndexManager.PostingsLaneTag
-                    ? PostingsKey.DecodeEntityId(key)
-                    : int64.Decode(key);
-                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.Sequence(packed)));
-            }
-            else
-            {
-                list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
-            }
+            PropertyVersionRecord property = _propertyStore.Read(
+                new PropertyVersionRef(value));
+            long ownerSequence = property.Address.Owner.IsValid
+                ? property.Address.Owner.Sequence
+                : new PropertyVersionRef(value).Sequence;
+            list.Add(new OrphanIndexEntry(name, key, ownerSequence));
         }
         return list;
     }
 
-    private bool IsLiveNode(long packedValue)
+    private bool IsLiveIndexReference(long value)
     {
-        // /: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
-        // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
-        // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
-        if (EntityRef.UnpackKind(packedValue) != EntityKind.Node) return false;
-        long seq = EntityRef.Sequence(packedValue);
-        return _nodeStore.Read(new NodeId(seq)).InUse
-            && _nodeStore.CurrentGeneration(seq) == EntityRef.Generation(packedValue);
+        PropertyVersionRecord property = _propertyStore.Read(
+            new PropertyVersionRef(value));
+        if (!property.InUse)
+            return false;
+
+        EntityRef owner = property.Address.Owner;
+        return owner.Kind switch
+        {
+            EntityKind.Vertex => _vertexStore.Read(
+                new VertexId(owner.Value)).InUse,
+            EntityKind.Edge => _edgeStore.Read(
+                new EdgeId(owner.Value)).InUse,
+            EntityKind.Nexus => _nexusStore.Read(
+                new NexusId(owner.Value)).InUse,
+            _ => false,
+        };
+    }
+
+    private bool IsLiveEntityReference(long value)
+    {
+        EntityKind kind = EntityRef.UnpackKind(value);
+        EntityRef entity = EntityRef.Create(
+            kind,
+            EntityRef.UnpackSequence(value),
+            EntityRef.UnpackGeneration(value));
+        return entity.Kind switch
+        {
+            EntityKind.Vertex => _vertexStore.Read(
+                new VertexId(entity.Value)).InUse,
+            EntityKind.Edge => _edgeStore.Read(
+                new EdgeId(entity.Value)).InUse,
+            EntityKind.Nexus => _nexusStore.Read(
+                new NexusId(entity.Value)).InUse,
+            _ => false,
+        };
     }
 
     private long CountLabelIndexOrphans()
     {
         if (_labelIndex == null || !_labelIndex.IsBuilt) return 0;
         long count = 0;
-        foreach (var (_, node) in _labelIndex.EnumerateEntries())
+        foreach (var (_, vertex) in _labelIndex.EnumerateEntries())
         {
-            if (!_nodeStore.Read(node).InUse) count++;
+            if (!_vertexStore.Read(vertex).InUse) count++;
         }
         return count;
     }

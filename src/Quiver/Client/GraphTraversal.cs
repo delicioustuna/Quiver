@@ -13,15 +13,15 @@ namespace Quiver.Api;
 /// などのステップをチェーンして終端 (<see cref="ToList"/> / <see cref="Next"/> /
 /// <see cref="AsCursor"/> 等) で実行する。
 /// </summary>
-/// <typeparam name="T">現在のチェーンが放出する要素の型 (典型的には <see cref="NodeId"/> や <see cref="RelationshipId"/>)。</typeparam>
+/// <typeparam name="T">現在のチェーンが放出する要素の型 (典型的には <see cref="VertexId"/> や <see cref="EdgeId"/>)。</typeparam>
 /// <remarks>
 /// インスタンスは不変。各ステップは新しいインスタンスを返すため、中間結果を変数に保持して
 /// 分岐させても副作用は発生しない。所属トランザクションの境界を越えて利用しないこと。
 /// </remarks>
 public sealed class GraphTraversal<T>
 {
-    internal readonly IGraphTransaction _tx;
-    internal readonly ISchemaApi _schema;
+    internal readonly IReadTransaction _tx;
+    internal readonly ISchemaCatalog _schema;
     internal readonly LogicalOp _plan;
     internal readonly Func<QueryRow, T> _projection;
     internal readonly int _entityColumn;
@@ -29,38 +29,52 @@ public sealed class GraphTraversal<T>
     // バインドされていない (一般的なケース) 場合は null。不変として扱い、丸ごと
     // 差し替える運用。インプレース変更は行わない。
     internal readonly Dictionary<string, int>? _aliases;
+    // エンティティ alias の種別。Select<TEntity>(alias) が異なる ID 型で同じ
+    // 64-bit payload を読み違えないため、列位置とは別に保持する。
+    internal readonly Dictionary<string, EntityKind>? _aliasEntityKinds;
     // 任意で注入された GraphStats。KNN push-down 時に label cardinality が高ければ
     // vector-first にフォールバックさせる。null のときは構造ヒントのみで判定する。
     internal readonly GraphStats? _stats;
+    // vertex -> nexus 展開の起点列。公開 alias とは異なり OtherMembers 専用で、
+    // Members による通常展開やタプル形状のリセット時には破棄する。
+    internal readonly int? _hiddenNexusOriginColumn;
 
-    // この列が保持するエンティティ種別。T が RelationshipId なら
-    // エッジトラバーサル (OutRelationships<T>() 等) なので述語をリレーションシップ
-    // プロパティ読みに切り替える。それ以外 (NodeId / string 等) はノード。
+    // この列が保持するエンティティ種別。ID 型に応じて述語が読むプロパティストアを切り替える。
     private static readonly PredicateEntity EntityKindForT =
-        typeof(T) == typeof(RelationshipId) ? PredicateEntity.Relationship : PredicateEntity.Node;
+        typeof(T) == typeof(EdgeId) ? PredicateEntity.Edge :
+        typeof(T) == typeof(NexusId) ? PredicateEntity.Nexus :
+        PredicateEntity.Vertex;
 
     internal GraphTraversal(
-        IGraphTransaction tx,
-        ISchemaApi schema,
+        IReadTransaction tx,
+        ISchemaCatalog schema,
         LogicalOp plan,
         Func<QueryRow, T> projection,
         int entityColumn,
         Dictionary<string, int>? aliases = null,
-        GraphStats? stats = null)
+        GraphStats? stats = null,
+        int? hiddenNexusOriginColumn = null,
+        Dictionary<string, EntityKind>? aliasEntityKinds = null)
     {
         _tx = tx; _schema = schema; _plan = plan; _projection = projection;
         _entityColumn = entityColumn;
         _aliases = (aliases is { Count: > 0 }) ? aliases : null;
+        _aliasEntityKinds = (aliasEntityKinds is { Count: > 0 }) ? aliasEntityKinds : null;
         _stats = stats;
+        _hiddenNexusOriginColumn = hiddenNexusOriginColumn;
     }
 
     /// <summary>同じエイリアスセットを引き継いだ後続トラバーサルを構築する内部ヘルパ。</summary>
     private GraphTraversal<U> Chain<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn)
-        => new(_tx, _schema, plan, projection, entityColumn, _aliases, _stats);
+        => new(
+            _tx, _schema, plan, projection, entityColumn, _aliases, _stats,
+            _hiddenNexusOriginColumn, _aliasEntityKinds);
 
     /// <summary>alias を持ち越さない (= タプル形状をリセットする) 新規 traversal を構築する内部ヘルパ。stats だけは引き継ぐ。</summary>
     private GraphTraversal<U> Rebase<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn, Dictionary<string, int>? aliases = null)
-        => new(_tx, _schema, plan, projection, entityColumn, aliases, _stats);
+        => new(
+            _tx, _schema, plan, projection, entityColumn, aliases, _stats,
+            aliasEntityKinds: aliases is null ? null : _aliasEntityKinds);
 
     /// <summary>論理プランを最適化 (KNN 押し下げ等) してから物理オペレータへ落とす。</summary>
     private IPhysicalOperator Compile() => CompilePlan(_plan);
@@ -76,20 +90,23 @@ public sealed class GraphTraversal<T>
     /// <paramref name="label"/> ラベル名と等しい要素のみを通す。
     /// </summary>
     /// <param name="label">ラベル名</param>
-    // 起点が <c>AllNodesScan</c> の場合は <c>NodeByLabelScan</c> に置き換える最適化を行い、
+    // 起点が <c>AllVerticesScan</c> の場合は <c>VertexByLabelScan</c> に置き換える最適化を行い、
     // それ以外はラベル述語のフィルタとして連結する。
-    public GraphTraversal<NodeId> HasLabel(string label)
+    public GraphTraversal<VertexId> HasLabel(string label)
     {
         LogicalOp next;
-        if (_plan is ScanOp { Kind: EntityKind.Node })
-            next = new ScanOp(EntityKind.Node, _schema.GetOrCreateLabel(label));
+        if (_plan is ScanOp { Kind: EntityKind.Vertex })
+            next = new ScanOp(EntityKind.Vertex, _schema.ResolveLabel(label));
         else
         {
-            var labelId = _schema.GetOrCreateLabel(label);
+            var labelId = _schema.ResolveLabel(label);
             var col = _entityColumn;
             next = new FilterOp(_plan, _ => new LabelPredicate(labelId, col));
         }
-        return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn, _aliases, _stats);
+        return new GraphTraversal<VertexId>(
+            _tx, _schema, next, row => row.GetVertexId(_entityColumn),
+            next.CurrentEntityColumn, _aliases, _stats,
+            _hiddenNexusOriginColumn, _aliasEntityKinds);
     }
 
     /// <summary>
@@ -97,20 +114,20 @@ public sealed class GraphTraversal<T>
     /// 対象列番号を受け取り、predicate ファクトリを返す。KNN 押し下げ (candidate-side rewrite) は
     /// 終端で <see cref="LogicalOptimizer"/> が <see cref="FilterOp"/> 連鎖から再構成する。
     /// </summary>
-    private GraphTraversal<T> ApplyPureFilter(Func<int, Func<ISchemaApi, IPredicate>> factoryWithCol)
+    private GraphTraversal<T> ApplyPureFilter(Func<int, Func<ISchemaCatalog, IPredicate>> factoryWithCol)
         => Chain(new FilterOp(_plan, factoryWithCol(_entityColumn)), _projection, _entityColumn);
 
     /// <summary>プロパティ <paramref name="key"/> が文字列 <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, string value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyEqStringPredicate(col, keyId, value) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="int"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, int value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var pred  = P.Eq((long)value);
         return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
@@ -118,7 +135,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="long"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, long value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var pred  = P.Eq(value);
         return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
@@ -126,7 +143,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="double"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, double value)
     {
-        var keyId   = _schema.GetOrCreatePropertyKey(key);
+        var keyId   = _schema.ResolvePropertyKey(key);
         var encoded = BitConverter.DoubleToInt64Bits(value);
         return ApplyPureFilter(col => _ => new PropertyDoublePredicate(col, keyId, encoded) { Entity = EntityKindForT });
     }
@@ -134,7 +151,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="bool"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, bool value)
     {
-        var keyId  = _schema.GetOrCreatePropertyKey(key);
+        var keyId  = _schema.ResolvePropertyKey(key);
         var scalar = value ? 1L : 0L;
         return ApplyPureFilter(col => _ => new PropertyBoolPredicate(col, keyId, scalar) { Entity = EntityKindForT });
     }
@@ -144,29 +161,29 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public GraphTraversal<T> Has(string key, PropertyPredicate pred)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => PredicateDispatch.Build(col, keyId, pred, EntityKindForT));
     }
 
-    /// <summary>外向きにリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> Out(string? type = null) => Expand(Direction.Outgoing, type);
+    /// <summary>外向きにEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> Out(string? type = null) => Expand(Direction.Outgoing, type);
 
-    /// <summary>外向きにリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel> => Out(TRel.GraphType);
+    /// <summary>外向きにEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> Out<TEdge>() where TEdge : IGraphEdge<TEdge> => Out(TEdge.GraphType);
 
-    /// <summary>内向きにリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> In(string? type = null) => Expand(Direction.Incoming, type);
+    /// <summary>内向きにEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> In(string? type = null) => Expand(Direction.Incoming, type);
 
-    /// <summary>内向きにリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel> => In(TRel.GraphType);
+    /// <summary>内向きにEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> In<TEdge>() where TEdge : IGraphEdge<TEdge> => In(TEdge.GraphType);
 
-    /// <summary>向きを指定せずリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> Both(string? type = null) => Expand(Direction.Both, type);
+    /// <summary>向きを指定せずEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> Both(string? type = null) => Expand(Direction.Both, type);
 
-    /// <summary>向きを指定せずリレーションシップを辿り、接続された隣接ノードを返す。</summary>
-    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel> => Both(TRel.GraphType);
+    /// <summary>向きを指定せずEdgeを辿り、接続された隣接Vertexを返す。</summary>
+    public GraphTraversal<VertexId> Both<TEdge>() where TEdge : IGraphEdge<TEdge> => Both(TEdge.GraphType);
 
-    private GraphTraversal<NodeId> Expand(Direction direction, string? type)
+    private GraphTraversal<VertexId> Expand(Direction direction, string? type)
     {
         // エイリアスが生きているときは展開を通してそれらをコピーし、
         // 下流の .Select(alias) が元のエンティティを引けるようにする。
@@ -176,50 +193,50 @@ public sealed class GraphTraversal<T>
         if (_aliases is null)
         {
             var fast = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborOnly, null);
-            return Rebase<NodeId>(fast, row => row.GetNodeId(fast.CurrentEntityColumn), fast.CurrentEntityColumn);
+            return Rebase<VertexId>(fast, row => row.GetVertexId(fast.CurrentEntityColumn), fast.CurrentEntityColumn);
         }
 
         var (carry, newAliases) = RemapForExpand(baseColumnCount: 1);
         var expand = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborOnly, carry);
-        return Rebase<NodeId>(expand, row => row.GetNodeId(0), 0, newAliases);
+        return Rebase<VertexId>(expand, row => row.GetVertexId(0), 0, newAliases);
     }
 
-    /// <summary>外向きリレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> OutRelationships(string? type = null) => ExpandRelationship(Direction.Outgoing, type);
+    /// <summary>外向きEdgeを返す。</summary>
+    public GraphTraversal<EdgeId> OutEdges(string? type = null) => ExpandEdge(Direction.Outgoing, type);
 
-    /// <summary>外向きリレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> OutRelationships<TRel>() where TRel : IGraphRelationship<TRel> => OutRelationships(TRel.GraphType);
+    /// <summary>外向きEdgeを返す。</summary>
+    public GraphTraversal<EdgeId> OutEdges<TEdge>() where TEdge : IGraphEdge<TEdge> => OutEdges(TEdge.GraphType);
 
-    /// <summary>内向きリレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> InRelationships(string? type = null) => ExpandRelationship(Direction.Incoming, type);
+    /// <summary>内向きEdgeを返す。</summary>
+    public GraphTraversal<EdgeId> InEdges(string? type = null) => ExpandEdge(Direction.Incoming, type);
 
-    /// <summary>内向きリレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> InRelationships<TRel>() where TRel : IGraphRelationship<TRel> => InRelationships(TRel.GraphType);
+    /// <summary>内向きEdgeを返す。</summary>
+    public GraphTraversal<EdgeId> InEdges<TEdge>() where TEdge : IGraphEdge<TEdge> => InEdges(TEdge.GraphType);
 
-    /// <summary>双方向リレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> BothRelationships(string? type = null) => ExpandRelationship(Direction.Both, type);
+    /// <summary>双方向Edgeを返す。</summary>
+    public GraphTraversal<EdgeId> BothEdges(string? type = null) => ExpandEdge(Direction.Both, type);
 
-    /// <summary>双方向リレーションシップを返す。</summary>
-    public GraphTraversal<RelationshipId> BothRelationships<TRel>() where TRel : IGraphRelationship<TRel> => BothRelationships(TRel.GraphType);
+    /// <summary>双方向Edgeを返す。</summary>
+    public GraphTraversal<EdgeId> BothEdges<TEdge>() where TEdge : IGraphEdge<TEdge> => BothEdges(TEdge.GraphType);
 
-    private GraphTraversal<RelationshipId> ExpandRelationship(Direction direction, string? type)
+    private GraphTraversal<EdgeId> ExpandEdge(Direction direction, string? type)
     {
         if (_aliases is null)
         {
-            var fast = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborAndRel, null);
-            return Rebase<RelationshipId>(fast, row => row.GetRelationshipId(0), 0);
+            var fast = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborAndEdge, null);
+            return Rebase<EdgeId>(fast, row => row.GetEdgeId(0), 0);
         }
 
-        // NeighborAndRel は 2 列 (rel@0, neighbor@1) を放出する。連鎖する
-        // .SourceNode() / .TargetNode() のための「カレント」列は 0 (rel) のままなので、
+        // NeighborAndEdge は 2 列 (edge@0, neighbor@1) を放出する。連鎖する
+        // .SourceVertex() / .TargetVertex() のための「カレント」列は 0 (edge) のままなので、
         // carry は 2 から始まる。
         var (carry, newAliases) = RemapForExpand(baseColumnCount: 2);
-        var e = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborAndRel, carry);
-        return Rebase<RelationshipId>(e, row => row.GetRelationshipId(0), 0, newAliases);
+        var e = new ExpandOp(_plan, _entityColumn, direction, type, ExpandOutputMode.NeighborAndEdge, carry);
+        return Rebase<EdgeId>(e, row => row.GetEdgeId(0), 0, newAliases);
     }
 
     /// <summary>
-    /// Out/In/Both と OutRelationships/InRelationships/BothRelationships の共通ヘルパ。
+    /// Out/In/Both と OutEdges/InEdges/BothEdges の共通ヘルパ。
     /// 持ち越し対象の上流列リスト (重複排除 + ソート済み) と、新しい末尾位置を指す
     /// 書き換え済みのエイリアスマップを返す。
     /// </summary>
@@ -241,7 +258,7 @@ public sealed class GraphTraversal<T>
     /// </summary>
     /// <param name="innerTraversal">外側の現在エンティティを起点とする内部トラバーサル</param>
     // (Cypher の <c>WHERE EXISTS{...}</c> 相当)。
-    // 例: <c>.Where(t =&gt; t.Out("KNOWS"))</c> — KNOWS エッジを持つノードのみを通す。
+    // 例: <c>.Where(t =&gt; t.Out("KNOWS"))</c> — KNOWS エッジを持つVertexのみを通す。
     public GraphTraversal<T> Where(Func<SubTraversal, SubTraversal> innerTraversal)
     {
         var capturedInner = innerTraversal;
@@ -259,7 +276,7 @@ public sealed class GraphTraversal<T>
     /// </summary>
     /// <param name="innerTraversal">外側の現在エンティティを起点とする内部トラバーサル</param>
     // Cypher の WHERE NOT EXISTS{...} 相当。
-    // 例: .Not(t => t.Out("KNOWS")) — KNOWS エッジを持たないノードのみを通す。
+    // 例: .Not(t => t.Out("KNOWS")) — KNOWS エッジを持たないVertexのみを通す。
     public GraphTraversal<T> Not(Func<SubTraversal, SubTraversal> innerTraversal)
     {
         var capturedInner = innerTraversal;
@@ -277,17 +294,14 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> を保持する要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> を持たない要素のみを通す。</summary>
     public GraphTraversal<T> HasNot(string key)
     {
-        // TryGet があれば不要なトークン ID 割り当てを避けられるが、ISchemaApi.TryGet は
-        // 現状公開されていない。最悪ケースで初回呼び出し時にトークン 1 個を割り当てるだけで
-        // 動作は正しい — 新規作成されたキーには観測値が 0 件のため。
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: false) { Entity = EntityKindForT });
     }
 
@@ -401,52 +415,56 @@ public sealed class GraphTraversal<T>
 
     // ── エッジ端点解決 ──────────────────────────────────────
 
-    /// <summary>現在のエッジのソース (起点) ノードに解決する。</summary>
-    public GraphTraversal<NodeId> SourceNode()
+    /// <summary>現在のエッジのソース (起点) Vertexに解決する。</summary>
+    public GraphTraversal<VertexId> SourceVertex()
     {
-        // RelationshipEndpointOp は単一 NodeId のタプルを放出し、上流を破棄する。
+        // EdgeEndpointOp は単一 VertexId のタプルを放出し、上流を破棄する。
         // そのため生きていたエイリアスはすべて失われる。暗黙にドロップする既知制限。
-        var rep = new RelationshipEndpointOp(_plan, _entityColumn, RelationshipEndpoint.Source);
-        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
+        var rep = new EdgeEndpointOp(_plan, _entityColumn, EdgeEndpoint.Source);
+        return Rebase<VertexId>(rep, row => row.GetVertexId(0), 0);
     }
 
-    /// <summary>現在のエッジのターゲット (終点) ノードに解決する。</summary>
-    public GraphTraversal<NodeId> TargetNode()
+    /// <summary>現在のエッジのターゲット (終点) Vertexに解決する。</summary>
+    public GraphTraversal<VertexId> TargetVertex()
     {
-        var rep = new RelationshipEndpointOp(_plan, _entityColumn, RelationshipEndpoint.Target);
-        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
+        var rep = new EdgeEndpointOp(_plan, _entityColumn, EdgeEndpoint.Target);
+        return Rebase<VertexId>(rep, row => row.GetVertexId(0), 0);
     }
 
     /// <summary>進入方向に対する「向こう側」の端点に解決する。</summary>
-    public GraphTraversal<NodeId> OtherNode()
+    public GraphTraversal<VertexId> OtherVertex()
     {
-        var rep = new RelationshipEndpointOp(_plan, _entityColumn, RelationshipEndpoint.Other);
-        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
+        var rep = new EdgeEndpointOp(_plan, _entityColumn, EdgeEndpoint.Other);
+        return Rebase<VertexId>(rep, row => row.GetVertexId(0), 0);
     }
 
     /// <summary>
-    /// graph-first KNN。上流の各ノードを candidate set として KnnSearchFiltered を呼ぶ。
+    /// graph-first KNN。上流の各Vertexを candidate set として KnnSearchFiltered を呼ぶ。
     /// 通常は <c>g.Knn(...).HasLabel(...).Has(...)</c> チェーンが LogicalOptimizer の KnnPushdown で
     /// 自動的にこの形に変換される。本メソッドは明示的に graph-first を選びたい (例: 二段 KNN や
     /// 複雑な candidate を作る場合) のエスケープハッチとして残す。詳細セマンティクスはクラスドキュメント参照。
     /// </summary>
-    public GraphTraversal<NodeId> FilterByKnn(string indexName, ReadOnlySpan<float> query, int k)
+    public GraphTraversal<VertexId> FilterByKnn(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         // Candidate を上流 plan に固定した graph-first KnnOp。Candidate != null のため
         // LogicalOptimizer は押し下げ判定をスキップし、そのまま FilteredKnn に物理化される。
-        var filtered = new KnnOp(_plan, indexName, query.ToArray(), k, Dim: 0);
-        return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
+        var filtered = new KnnOp(_plan, indexName, query.ToArray(), k, Dim: 0, options);
+        return Rebase<VertexId>(filtered, row => row.GetVertexId(0), 0);
     }
 
     /// <summary>
-    /// graph-first dyadic scoring。上流の候補ノードからベクトルを gather し、
+    /// graph-first dyadic scoring。上流の候補Vertexからベクトルを gather し、
     /// ユーザー定義演算子でスコアリングして上位 k 件を放出する。
     /// </summary>
-    internal GraphTraversal<NodeId> ApplyDyadicInternal(ApplyDyadicOp op)
-        => Rebase<NodeId>(op, static row => row.GetNodeId(0), 0);
+    internal GraphTraversal<VertexId> ApplyDyadicInternal(ApplyDyadicOp op)
+        => Rebase<VertexId>(op, static row => row.GetVertexId(0), 0);
 
     /// <summary>
-    /// graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各ノードを candidate set として
+    /// graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各Vertexを candidate set として
     /// その中だけで BM25 top-k を求める。通常は <c>g.Search(...).HasLabel(...).Has(...)</c> チェーンが
     /// LogicalOptimizer の FullTextPushdown で自動的にこの形へ倒れるため、本メソッドは明示的に
     /// graph-first を選びたいときのエスケープハッチ。df / idf は全 postings から取るので候補ドキュメントの
@@ -455,12 +473,12 @@ public sealed class GraphTraversal<T>
     /// <param name="indexName">対象の全文索引名。</param>
     /// <param name="queryText">検索クエリ文字列。</param>
     /// <param name="k">取得する上位件数。</param>
-    public GraphTraversal<NodeId> FilterByText(string indexName, string queryText, int k)
+    public GraphTraversal<VertexId> FilterByText(string indexName, string queryText, int k)
     {
         // Candidate を上流 plan に固定した graph-first FullTextScanOp。Candidate != null のため
         // optimizer は押し下げ判定をスキップし、そのまま FilteredFullTextScan に物理化される。
         var filtered = new FullTextScanOp(_plan, indexName, queryText, k, _stats?.FullTextCorpus(indexName));
-        return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
+        return Rebase<VertexId>(filtered, row => row.GetVertexId(0), 0);
     }
 
     // ── 並び替え ───────────────────────────────────────
@@ -489,82 +507,33 @@ public sealed class GraphTraversal<T>
 
     /// <summary>プロパティ <paramref name="key"/> の <see cref="double"/> 合計を返す。空集合では 0 を返す。</summary>
     public double Sum(string key)
-    {
-        // full-scan + 数値列なら列スキャンで集計 (row path と同値、桁違いに高速)。
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? 0.0 : agg.Sum;
-        return AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
-    }
+        => AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
 
     /// <summary>プロパティ <paramref name="key"/> の <see cref="long"/> 合計を返す。空集合では 0 を返す。</summary>
     public long SumLong(string key)
-    {
-        // 整数列のみ列スキャン (row path の SumLong も Int64 スロットのみ合計するため同値)。
-        if (TryFullScanColumnAggregate(key, out var agg) && IsIntegralColumn(agg.ValueType))
-            return agg.LongSum;
-        return (long)(AggregateLongSum(key) ?? 0L);
-    }
+        => AggregateLongSum(key) ?? 0L;
 
     /// <summary>プロパティ <paramref name="key"/> の最大値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Max(string key)
-    {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Max;
-        return AggregateNumeric(key, AggregateKind.Max);
-    }
+        => AggregateNumeric(key, AggregateKind.Max);
 
     /// <summary>プロパティ <paramref name="key"/> の最小値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Min(string key)
-    {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Min;
-        return AggregateNumeric(key, AggregateKind.Min);
-    }
+        => AggregateNumeric(key, AggregateKind.Min);
 
     /// <summary>プロパティ <paramref name="key"/> の平均値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Mean(string key)
     {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Sum / agg.Count;
         double sum = 0; long count = 0;
         ForEachNumeric(key, v => { sum += v; count++; });
         return count == 0 ? null : sum / count;
     }
 
-    // row path が数値集約する型 (Int32/Int64 は Int64 スロット, Double) と合わせる。
-    private static bool IsNumericColumn(Storage.Records.PropertyValueType t)
-        => t is Storage.Records.PropertyValueType.Int32
-             or Storage.Records.PropertyValueType.Int64
-             or Storage.Records.PropertyValueType.Double;
-
-    private static bool IsIntegralColumn(Storage.Records.PropertyValueType t)
-        => t is Storage.Records.PropertyValueType.Int32
-             or Storage.Records.PropertyValueType.Int64;
-
-    /// <summary>
-    /// チェーンが「ある kind の全件 full scan」なら、対象 <paramref name="key"/> が
-    /// 列化済みかを backend に問い合わせ、列スキャンの集約結果を得る。full scan でない / 列が無い /
-    /// mixed のときは false で、呼び出し側が row path にフォールバックする。
-    /// </summary>
-    private bool TryFullScanColumnAggregate(string key, out Quiver.ColumnAggregate agg)
-    {
-        agg = default;
-        if (!TryDetectFullScanKind(out var kind)) return false;
-        return _tx.AsInternal().TryColumnAggregate(kind, key, out agg);
-    }
-
-    /// <summary>チェーン起点が無フィルタの全件スキャン (全ノード / 全リレーション) かを判定する。</summary>
-    private bool TryDetectFullScanKind(out Core.EntityKind kind)
-    {
-        if (_plan is ScanOp { Kind: EntityKind.Node, Label: null }) { kind = Core.EntityKind.Node; return true; }
-        if (_plan is ScanOp { Kind: EntityKind.Relationship }) { kind = Core.EntityKind.Relationship; return true; }
-        kind = default;
-        return false;
-    }
-
-    /// <summary>row path のプロパティ参照対象が rel か node か (g.Relationships() 起点なら rel)。</summary>
+    /// <summary>row path のプロパティ参照対象を現在の ID 型から決定する。</summary>
     private Core.EntityKind RowLookupKind()
-        => _plan is ScanOp { Kind: EntityKind.Relationship } ? Core.EntityKind.Relationship : Core.EntityKind.Node;
+        => typeof(T) == typeof(EdgeId) ? Core.EntityKind.Edge :
+           typeof(T) == typeof(NexusId) ? Core.EntityKind.Nexus :
+           Core.EntityKind.Vertex;
 
     private enum AggregateKind { Sum, Max, Min }
 
@@ -627,7 +596,7 @@ public sealed class GraphTraversal<T>
     {
         ArgumentNullException.ThrowIfNull(key);
         var dict = new Dictionary<string, long>(StringComparer.Ordinal);
-        var plan = CompilePlan(new PropertyLookupOp(_plan, key, EntityKind.Node));
+        var plan = CompilePlan(new PropertyLookupOp(_plan, key, EntityKind.Vertex));
         using var cursor = _tx.ExecuteCursor(plan);
         int valueCol = cursor.Schema.Columns.Count - 1;
         while (cursor.MoveNext())
@@ -662,7 +631,7 @@ public sealed class GraphTraversal<T>
     /// <param name="step">繰り返すステップを記述するアクション (例: <c>s => s.Out("KNOWS")</c>)。</param>
     /// <param name="times">繰り返し回数 (1 以上)。</param>
     /// <param name="emit">中間ホップを放出するかどうか。</param>
-    public GraphTraversal<NodeId> Repeat(Action<RepeatStep> step, int times, bool emit = false)
+    public GraphTraversal<VertexId> Repeat(Action<RepeatStep> step, int times, bool emit = false)
     {
         ArgumentNullException.ThrowIfNull(step);
         if (times < 1) throw new ArgumentOutOfRangeException(nameof(times), "Repeat には times >= 1 が必要です。");
@@ -671,21 +640,21 @@ public sealed class GraphTraversal<T>
         int minHops = emit ? 1 : times;
         var b = new VarLenExpandOp(_plan, rs.Direction, rs.TypeFilter, minHops, times);
         int endCol = b.CurrentEntityColumn;
-        return Rebase<NodeId>(b, row => row.GetNodeId(endCol), endCol);
+        return Rebase<VertexId>(b, row => row.GetVertexId(endCol), endCol);
     }
 
     // ── 最短経路 ─────────────────────────────────────
 
     /// <summary>
-    /// 現在のノードから <paramref name="target"/> までの最短ホップ数を返す。
+    /// 現在のVertexから <paramref name="target"/> までの最短ホップ数を返す。
     /// 到達不能な要素は放出しない。
     /// </summary>
-    /// <param name="target">終点ノード。</param>
+    /// <param name="target">終点Vertex。</param>
     /// <param name="direction">辿る方向。</param>
-    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="type">辿るEdge型 (null なら全型)。</param>
     /// <param name="maxDistance">探索の上限ホップ数。</param>
     public GraphTraversal<long> ShortestPathTo(
-        NodeId target,
+        VertexId target,
         Direction direction = Direction.Outgoing,
         string? type = null,
         long maxDistance = long.MaxValue)
@@ -698,24 +667,24 @@ public sealed class GraphTraversal<T>
     // ── union / coalesce / optional ──────────────────
 
     /// <summary>複数の分岐をすべて連結して放出する。</summary>
-    public GraphTraversal<NodeId> Union(params Func<SubTraversal, SubTraversal>[] branches)
+    public GraphTraversal<VertexId> Union(params Func<SubTraversal, SubTraversal>[] branches)
         => BuildBranched(branches, LogicalBranchKind.Union);
 
     /// <summary>左から順に評価し、最初にマッチした分岐の結果だけを放出する。</summary>
-    public GraphTraversal<NodeId> Coalesce(params Func<SubTraversal, SubTraversal>[] branches)
+    public GraphTraversal<VertexId> Coalesce(params Func<SubTraversal, SubTraversal>[] branches)
         => BuildBranched(branches, LogicalBranchKind.Coalesce);
 
     /// <summary>
-    /// 分岐がマッチすれば結果を放出し、マッチしなければ元のノードをそのまま通す
+    /// 分岐がマッチすれば結果を放出し、マッチしなければ元のVertexをそのまま通す
     /// (Cypher の <c>OPTIONAL MATCH</c>)。
     /// </summary>
-    public GraphTraversal<NodeId> Optional(Func<SubTraversal, SubTraversal> branch)
+    public GraphTraversal<VertexId> Optional(Func<SubTraversal, SubTraversal> branch)
     {
         ArgumentNullException.ThrowIfNull(branch);
         return BuildBranched(new[] { branch }, LogicalBranchKind.Optional);
     }
 
-    private GraphTraversal<NodeId> BuildBranched(Func<SubTraversal, SubTraversal>[] branches, LogicalBranchKind kind)
+    private GraphTraversal<VertexId> BuildBranched(Func<SubTraversal, SubTraversal>[] branches, LogicalBranchKind kind)
     {
         if (branches is null || branches.Length == 0)
             throw new ArgumentException("少なくとも 1 つの分岐が必要です。", nameof(branches));
@@ -738,13 +707,13 @@ public sealed class GraphTraversal<T>
             }
             return (probes, ops);
         }, kind);
-        return Rebase<NodeId>(b, row => row.GetNodeId(0), 0);
+        return Rebase<VertexId>(b, row => row.GetVertexId(0), 0);
     }
 
     /// <summary>プロパティ <paramref name="key"/> の文字列値だけを取り出す。</summary>
     public GraphTraversal<string> Values(string key)
     {
-        var lookup = new PropertyLookupOp(_plan, key, EntityKind.Node);
+        var lookup = new PropertyLookupOp(_plan, key, RowLookupKind());
         int propCol = lookup.PredictedOutputColumnCount - 1;
         return Chain(lookup, row => row.GetString(propCol), _entityColumn);
     }
@@ -752,7 +721,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> の <see cref="float"/>[] 値を取り出す。</summary>
     internal GraphTraversal<float[]> ValuesFloatArray(string key)
     {
-        var lookup = new PropertyLookupOp(_plan, key, EntityKind.Node);
+        var lookup = new PropertyLookupOp(_plan, key, EntityKind.Vertex);
         int propCol = lookup.PredictedOutputColumnCount - 1;
         return Chain(lookup, row =>
             System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(row.GetBytes(propCol).AsSpan()).ToArray(),
@@ -764,13 +733,13 @@ public sealed class GraphTraversal<T>
     /// <summary>
     /// 現在のエンティティ列を <paramref name="label"/> にピン留めし、
     /// 下流の <see cref="Select(string)"/> から復元できるようにする。
-    /// 後続の <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutRelationships</c>/<c>InRelationships</c>/<c>BothRelationships</c>
+    /// 後続の <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutEdges</c>/<c>InEdges</c>/<c>BothEdges</c>
     /// は pin した列を持ち越す (operator の末尾タプルスロットに保持) ため、
     /// メモリはエイリアス数 × 出力行数に比例して増える。
     /// </summary>
     /// <remarks>
     /// 制限: Repeat / ShortestPathTo / Union / Coalesce / Optional /
-    /// SourceNode/TargetNode/OtherNode / FilterByKnn はタプル形状を作り直すため、
+    /// SourceVertex/TargetVertex/OtherVertex / FilterByKnn はタプル形状を作り直すため、
     /// エイリアスは暗黙にドロップされる。必要なら下流で <c>.As</c> を再バインドすること。
     /// </remarks>
     public GraphTraversal<T> As(string label)
@@ -780,22 +749,108 @@ public sealed class GraphTraversal<T>
             ? new Dictionary<string, int>(capacity: 1)
             : new Dictionary<string, int>(_aliases);
         next[label] = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema, _plan, _projection, _entityColumn, next, _stats);
+
+        var nextKinds = _aliasEntityKinds is null
+            ? new Dictionary<string, EntityKind>(capacity: 1)
+            : new Dictionary<string, EntityKind>(_aliasEntityKinds);
+        if (TryGetEntityKind<T>(out var entityKind))
+            nextKinds[label] = entityKind;
+        else
+            nextKinds.Remove(label);
+
+        return new GraphTraversal<T>(
+            _tx, _schema, _plan, _projection, _entityColumn, next, _stats,
+            _hiddenNexusOriginColumn, nextKinds);
     }
 
     /// <summary>
     /// 以前 <see cref="As"/> で pin した列からトラバーサルを続行する。
     /// pin 先は常にエンティティ列のため、戻り値は
-    /// <typeparamref name="T"/> によらず <see cref="NodeId"/> となる。以後のステップを通常通り連結できる。
+    /// <typeparamref name="T"/> によらず <see cref="VertexId"/> となる。以後のステップを通常通り連結できる。
     /// </summary>
-    public GraphTraversal<NodeId> Select(string label)
+    public GraphTraversal<VertexId> Select(string label)
+        => Select<VertexId>(label);
+
+    /// <summary>
+    /// 以前 <see cref="As"/> で pin したエンティティ列へ戻り、
+    /// 指定した ID 型のトラバーサルとして続行する。
+    /// </summary>
+    /// <typeparam name="TEntity">
+    /// <see cref="VertexId"/>、<see cref="EdgeId"/>、<see cref="NexusId"/> のいずれか。
+    /// </typeparam>
+    /// <param name="label">復元する alias。</param>
+    /// <exception cref="InvalidOperationException">
+    /// alias が未定義、または alias のエンティティ種別と <typeparamref name="TEntity"/> が一致しない場合。
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// <typeparamref name="TEntity"/> がサポート対象の ID 型ではない場合。
+    /// </exception>
+    public GraphTraversal<TEntity> Select<TEntity>(string label)
+        where TEntity : struct
     {
         ArgumentException.ThrowIfNullOrEmpty(label);
         if (_aliases is null || !_aliases.TryGetValue(label, out var col))
             throw new InvalidOperationException($"エイリアス '{label}' は未定義です。先に .As(\"{label}\") で pin してください。");
+
+        if (!TryGetEntityKind<TEntity>(out var requestedKind))
+        {
+            throw new NotSupportedException(
+                $"Select<TEntity>(alias) は {nameof(VertexId)}、{nameof(EdgeId)}、"
+                + $"{nameof(NexusId)} のみをサポートします。");
+        }
+        if (_aliasEntityKinds is null
+            || !_aliasEntityKinds.TryGetValue(label, out var actualKind)
+            || actualKind != requestedKind)
+        {
+            throw new InvalidOperationException(
+                $"エイリアス '{label}' は {typeof(TEntity).Name} を保持していません。");
+        }
+
         // plan / schema は変更しない。射影とエンティティ列を pin スロットに
         // 向け直すだけ。エイリアスは生きたままなので連鎖 .Select もそのまま機能する。
-        return new GraphTraversal<NodeId>(_tx, _schema, _plan, row => row.GetNodeId(col), col, _aliases, _stats);
+        return new GraphTraversal<TEntity>(
+            _tx, _schema, _plan, row => ReadEntity<TEntity>(row, col), col,
+            _aliases, _stats, aliasEntityKinds: _aliasEntityKinds);
+    }
+
+    private static bool TryGetEntityKind<TEntity>(out EntityKind kind)
+    {
+        if (typeof(TEntity) == typeof(VertexId))
+        {
+            kind = EntityKind.Vertex;
+            return true;
+        }
+        if (typeof(TEntity) == typeof(EdgeId))
+        {
+            kind = EntityKind.Edge;
+            return true;
+        }
+        if (typeof(TEntity) == typeof(NexusId))
+        {
+            kind = EntityKind.Nexus;
+            return true;
+        }
+
+        kind = default;
+        return false;
+    }
+
+    private static TEntity ReadEntity<TEntity>(QueryRow row, int column)
+        where TEntity : struct
+    {
+        if (typeof(TEntity) == typeof(VertexId))
+        {
+            VertexId value = row.GetVertexId(column);
+            return System.Runtime.CompilerServices.Unsafe.As<VertexId, TEntity>(ref value);
+        }
+        if (typeof(TEntity) == typeof(EdgeId))
+        {
+            EdgeId value = row.GetEdgeId(column);
+            return System.Runtime.CompilerServices.Unsafe.As<EdgeId, TEntity>(ref value);
+        }
+
+        NexusId nexus = row.GetNexusId(column);
+        return System.Runtime.CompilerServices.Unsafe.As<NexusId, TEntity>(ref nexus);
     }
 
     /// <summary>
@@ -805,8 +860,8 @@ public sealed class GraphTraversal<T>
     /// </summary>
     /// <example>
     /// <code>
-    /// var pairs = g.Nodes().As("a").Out("KNOWS").As("b")
-    ///    .Select(t => (t.Node("a"), t.Node("b")));
+    /// var pairs = g.Vertices().As("a").Out("KNOWS").As("b")
+    ///    .Select(t => (t.Vertex("a"), t.Vertex("b")));
     /// </code>
     /// </example>
     public List<TResult> Select<TResult>(Func<MatchTuple, TResult> projection)
@@ -830,6 +885,87 @@ public sealed class GraphTraversal<T>
         foreach (var row in result.Rows())
             results.Add(_projection(row));
         return results;
+    }
+
+    /// <summary>
+    /// 現在のVertexが指定条件で参加するNexusへ展開する。
+    /// </summary>
+    /// <param name="type">Nexus型。null は全型。</param>
+    /// <param name="role">現在のVertexが担うロール。null は全ロール。</param>
+    /// <returns>参加Nexus ID のトラバーサル。</returns>
+    /// <remarks>
+    /// Vertexごとの incidence チェーンを走査するため、計算量は対象Vertexの参加数に比例する。
+    /// 展開元Vertexは <see cref="OtherMembers"/> が除外に使う内部文脈として保持される。
+    /// </remarks>
+    public GraphTraversal<NexusId> Nexuses(string? type = null, string? role = null)
+    {
+        int[]? carry = null;
+        Dictionary<string, int>? aliases = null;
+        if (_aliases is not null)
+        {
+            (carry, aliases) = RemapForExpand(baseColumnCount: 2);
+        }
+
+        var expand = new ExpandToNexusOp(_plan, _entityColumn, type, role, carry);
+        return new GraphTraversal<NexusId>(
+            _tx, _schema, expand, row => row.GetNexusId(1), 1,
+            aliases, _stats, hiddenNexusOriginColumn: 0,
+            aliasEntityKinds: aliases is null ? null : _aliasEntityKinds);
+    }
+
+    /// <summary>現在のNexusを構成するメンバーVertexへ展開する。</summary>
+    /// <param name="role">返すメンバーのロール。null は全ロール。</param>
+    /// <returns>メンバーVertex ID のトラバーサル。</returns>
+    /// <remarks>
+    /// Nexusごとの incidence チェーンを走査するため、計算量はアリティに比例する。
+    /// 通常の全メンバー展開なので、以前の vertex → nexus 展開元は結果に含まれ得る。
+    /// </remarks>
+    public GraphTraversal<VertexId> Members(string? role = null)
+        => ExpandNexusMembers(role, excludeOrigin: false);
+
+    /// <summary>
+    /// 現在のNexusのメンバーから、このNexusへ到達した起点Vertexを除いて返す。
+    /// </summary>
+    /// <param name="role">返すメンバーのロール。null は全ロール。</param>
+    /// <returns>起点以外のメンバーVertex ID のトラバーサル。</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <c>g.Nexuses()</c> や <c>g.Nexus(id)</c> のように、展開元Vertexを持たない起点から呼び出した場合。
+    /// </exception>
+    /// <remarks>
+    /// <c>g.Vertex(person).Nexuses("Meeting").OtherMembers("attendee")</c> のような
+    /// co-membership 走査に使う。起点Vertexが複数ロールで参加していても、そのVertex ID は全ロールから除外する。
+    /// </remarks>
+    public GraphTraversal<VertexId> OtherMembers(string? role = null)
+    {
+        if (!_hiddenNexusOriginColumn.HasValue)
+        {
+            throw new InvalidOperationException(
+                "OtherMembers() は vertex traversal の Nexuses() に続けて使用してください。"
+                + " Nexus起点から全メンバーを取得する場合は Members() を使用してください。");
+        }
+        return ExpandNexusMembers(role, excludeOrigin: true);
+    }
+
+    private GraphTraversal<VertexId> ExpandNexusMembers(string? role, bool excludeOrigin)
+    {
+        int[]? carry = null;
+        Dictionary<string, int>? aliases = null;
+        if (_aliases is not null)
+        {
+            (carry, aliases) = RemapForExpand(baseColumnCount: 2);
+        }
+
+        var expand = new ExpandMembersOp(
+            _plan,
+            _entityColumn,
+            role,
+            excludeOrigin ? _hiddenNexusOriginColumn : null,
+            carry);
+        // Members の結果は (nexus, member) に形を作り直す。vertex -> nexus の
+        // hidden origin はここで意図的に破棄し、次の Nexuses が新しい起点を設定する。
+        return new GraphTraversal<VertexId>(
+            _tx, _schema, expand, row => row.GetVertexId(1), 1, aliases, _stats,
+            aliasEntityKinds: aliases is null ? null : _aliasEntityKinds);
     }
 
     /// <summary>最初の 1 件を返す。結果が空のときは <see cref="InvalidOperationException"/> を投げる。</summary>
@@ -881,4 +1017,5 @@ public sealed class GraphTraversal<T>
         while (cursor.MoveNext())
             yield return _projection(cursor.Current);
     }
+
 }

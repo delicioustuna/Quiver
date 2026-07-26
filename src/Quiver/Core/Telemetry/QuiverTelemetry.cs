@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Collections.Concurrent;
 
 namespace Quiver.Telemetry;
 
@@ -13,6 +14,8 @@ namespace Quiver.Telemetry;
 /// </summary>
 public static class QuiverTelemetry
 {
+    private static readonly ConcurrentDictionary<object, SnapshotMetricProvider>
+        SnapshotMetricProviders = new();
     /// <summary>本ライブラリのアセンブリバージョン (Activity / Meter のタグ用)。</summary>
     public const string Version = "1.0.0";
 
@@ -102,13 +105,6 @@ public static class QuiverTelemetry
             unit: "ms",
             description: "Duration of a single query pipeline execution。");
 
-    /// <summary>ロック取得待ち時間 (ms)。</summary>
-    public static readonly Histogram<double> LockWaitMs =
-        Meter.CreateHistogram<double>(
-            name: "quiver.lock.wait.duration",
-            unit: "ms",
-            description: "Time spent waiting for a node / relationship / index lock。");
-
     /// <summary>WAL に書き込んだバイト数 (累計)。</summary>
     public static readonly Counter<long> WalBytesWritten =
         Meter.CreateCounter<long>(
@@ -143,4 +139,136 @@ public static class QuiverTelemetry
             name: "quiver.tx.abort.count",
             unit: "{tx}",
             description: "Total number of transactions that aborted (rollback or error)。");
+
+    /// <summary>writer lease の取得待ち時間 (ミリ秒)。競合した取得だけを記録する。</summary>
+    public static readonly Histogram<double> WriterWaitDurationMs =
+        Meter.CreateHistogram<double>(
+            name: "quiver.writer.wait.duration",
+            unit: "ms",
+            description: "Duration spent waiting for the database writer lease。");
+
+    /// <summary>writer lease の競合を検出した回数。</summary>
+    public static readonly Counter<long> WriterContentionCount =
+        Meter.CreateCounter<long>(
+            name: "quiver.writer.contention.count",
+            unit: "{contention}",
+            description: "Total writer lease acquisition attempts that observed contention。");
+
+    /// <summary>プロセス内で active な reader snapshot 数。</summary>
+    public static readonly ObservableGauge<long> ActiveSnapshotCount =
+        Meter.CreateObservableGauge(
+            name: "quiver.snapshot.active.count",
+            observeValue: ObserveActiveSnapshotCount,
+            unit: "{snapshot}",
+            description: "Current number of active reader snapshots。");
+
+    /// <summary>プロセス内で最も古い reader snapshot の経過時間 (秒)。</summary>
+    public static readonly ObservableGauge<double> OldestSnapshotAgeSeconds =
+        Meter.CreateObservableGauge(
+            name: "quiver.snapshot.oldest.age",
+            observeValue: ObserveOldestSnapshotAge,
+            unit: "s",
+            description: "Age of the oldest active reader snapshot。");
+
+    /// <summary>実行中の derived index rebuild 数。</summary>
+    public static readonly UpDownCounter<long> MaintenanceRebuildActive =
+        Meter.CreateUpDownCounter<long>(
+            name: "quiver.maintenance.rebuild.active",
+            unit: "{operation}",
+            description: "Current number of derived index rebuild operations。");
+
+    /// <summary>実行中の garbage collection 数。</summary>
+    public static readonly UpDownCounter<long> MaintenanceGarbageCollectionActive =
+        Meter.CreateUpDownCounter<long>(
+            name: "quiver.maintenance.gc.active",
+            unit: "{operation}",
+            description: "Current number of maintenance garbage collection operations。");
+
+    internal static IDisposable RegisterSnapshotProvider(
+        Func<long> activeCount,
+        Func<double> oldestAgeSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(activeCount);
+        ArgumentNullException.ThrowIfNull(oldestAgeSeconds);
+        var key = new object();
+        SnapshotMetricProviders[key] = new(activeCount, oldestAgeSeconds);
+        return new ProviderRegistration(key);
+    }
+
+    internal static IDisposable TrackRebuild()
+        => new MaintenanceRegistration(rebuild: true);
+
+    internal static IDisposable TrackGarbageCollection()
+        => new MaintenanceRegistration(rebuild: false);
+
+    private static long ObserveActiveSnapshotCount()
+        => SnapshotMetricProviders.Values.Sum(static provider =>
+        {
+            try { return provider.ActiveCount(); }
+            catch { return 0; }
+        });
+
+    private static double ObserveOldestSnapshotAge()
+    {
+        double oldest = 0;
+        foreach (SnapshotMetricProvider provider in SnapshotMetricProviders.Values)
+        {
+            try { oldest = Math.Max(oldest, provider.OldestAgeSeconds()); }
+            catch { }
+        }
+        return oldest;
+    }
+
+    private sealed record SnapshotMetricProvider(
+        Func<long> ActiveCount,
+        Func<double> OldestAgeSeconds);
+
+    private sealed class ProviderRegistration(object key) : IDisposable
+    {
+        private object? _key = key;
+
+        public void Dispose()
+        {
+            object? keyToRemove = Interlocked.Exchange(ref _key, null);
+            if (keyToRemove is not null)
+                SnapshotMetricProviders.TryRemove(keyToRemove, out _);
+        }
+    }
+
+    private sealed class MaintenanceRegistration : IDisposable
+    {
+        private readonly bool _rebuild;
+        private int _active = 1;
+
+        internal MaintenanceRegistration(bool rebuild)
+        {
+            _rebuild = rebuild;
+            if (rebuild)
+            {
+                MaintenanceRebuildActive.Add(1);
+                QuiverEventSource.Log.RebuildStarted();
+            }
+            else
+            {
+                MaintenanceGarbageCollectionActive.Add(1);
+                QuiverEventSource.Log.GarbageCollectionStarted();
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _active, 0) == 0)
+                return;
+            if (_rebuild)
+            {
+                MaintenanceRebuildActive.Add(-1);
+                QuiverEventSource.Log.RebuildCompleted();
+            }
+            else
+            {
+                MaintenanceGarbageCollectionActive.Add(-1);
+                QuiverEventSource.Log.GarbageCollectionCompleted();
+            }
+        }
+    }
 }

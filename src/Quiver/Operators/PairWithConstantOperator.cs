@@ -4,26 +4,26 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// <c>.ShortestPathTo(target)</c> 用のヘルパー。上流オペレータの各行の NodeId に定数
-/// NodeId を組み合わせ、<see cref="ShortestPathOperator"/> が消費する 2 列タプル
+/// <c>.ShortestPathTo(target)</c> 用のヘルパー。上流オペレータの各行の VertexId に定数
+/// VertexId を組み合わせ、<see cref="ShortestPathOperator"/> が消費する 2 列タプル
 /// <c>(source, target)</c> を生成する。
 /// </summary>
 internal sealed class PairWithConstantOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sourceColumn;
-    private readonly long _constantValue;
+    private readonly VertexId _constant;
     private readonly TupleSlot[] _buffer = new TupleSlot[2];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("source", TupleSlotType.NodeId),
-        new ColumnDefinition("target", TupleSlotType.NodeId)]);
+        new ColumnDefinition("source", TupleSlotType.VertexId),
+        new ColumnDefinition("target", TupleSlotType.VertexId)]);
 
-    public PairWithConstantOperator(IPhysicalOperator source, int sourceColumn, NodeId constant)
+    public PairWithConstantOperator(IPhysicalOperator source, int sourceColumn, VertexId constant)
     {
         _source = source;
         _sourceColumn = sourceColumn;
-        _constantValue = constant.Sequence; // seed の gen を剥がしてパイプラインを Sequence 空間に保つ
+        _constant = constant;
     }
 
     public TupleSchema Schema => s_schema;
@@ -35,8 +35,8 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
     public bool MoveNext()
     {
         if (!_source.MoveNext()) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _source.Current[_sourceColumn].LongValue };
-        _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _constantValue };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _source.Current[_sourceColumn].LongValue };
+        _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _constant.Value };
         var s = Statistics; s.RowsProduced++; Statistics = s;
         return true;
     }

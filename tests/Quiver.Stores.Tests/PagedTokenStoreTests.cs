@@ -98,4 +98,68 @@ public class PagedTokenStoreTests : IDisposable
             store.TryGet("OldName", out _).Should().BeFalse();
         }
     }
+
+    [Fact]
+    public void Nexus_type_and_role_tokens_have_independent_persistent_spaces()
+    {
+        string path = DbFile();
+        NexusTypeId factType;
+        RoleId factRole;
+        using (var c = new SingleFileContainer(path))
+        {
+            using var types = new NexusTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantNexusTypeToken, PageKind.TokenRecord));
+            using var roles = new RoleTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
+
+            factType = types.GetOrCreate("Fact");
+            factRole = roles.GetOrCreate("Fact");
+            types.GetOrCreate("Purchase").Value.Should().Be(1);
+            roles.GetOrCreate("buyer").Value.Should().Be(1);
+            factType.Value.Should().Be(0);
+            factRole.Value.Should().Be(0);
+            c.Flush();
+        }
+
+        using (var c = new SingleFileContainer(path))
+        {
+            using var types = new NexusTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantNexusTypeToken, PageKind.TokenRecord));
+            using var roles = new RoleTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
+
+            types.TryGet("Fact", out var reopenedType).Should().BeTrue();
+            roles.TryGet("Fact", out var reopenedRole).Should().BeTrue();
+            reopenedType.Should().Be(factType);
+            reopenedRole.Should().Be(factRole);
+            types.TryGet("buyer", out _).Should().BeFalse();
+            roles.TryGet("Purchase", out _).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void Binary_backend_reserves_fixed_nexus_tenants()
+    {
+        string path = DbFile();
+        using (QuiverDatabase.Open(path)) { }
+
+        // incidence は間接マップを持たない直接アドレスストアなので tenant 22 は欠番。
+        // 番号は詰め直さないため 22 だけを飛ばして 18..25 の在籍を確かめる。
+        const byte vacantIncidenceMapTenant = 22;
+
+        using var container = new SingleFileContainer(path);
+        for (byte tenant = BinaryGraphStorageBackendFactory.TenantNexusHeap;
+             tenant <= BinaryGraphStorageBackendFactory.TenantVertexIncidenceHead;
+             tenant++)
+        {
+            if (tenant == vacantIncidenceMapTenant)
+            {
+                container.HasTenant(tenant).Should().BeFalse(
+                    $"tenant {tenant} is a vacant slot left after removing the incidence map");
+                continue;
+            }
+
+            container.HasTenant(tenant).Should().BeTrue($"tenant {tenant} is a fixed nexus tenant");
+        }
+    }
 }

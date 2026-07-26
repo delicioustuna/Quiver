@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -8,10 +8,10 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-7: Sequential BfsOperator vs ParallelBfsOperator for multi-source 2-hop / 3-hop traversal.
+/// Sequential BfsOperator vs ParallelBfsOperator for multi-source 2-hop / 3-hop traversal.
 ///
-/// Graph shape: <paramref name="Sources"/> independent hub nodes, each connected to
-/// <paramref name="Degree"/> L1 nodes. L1 nodes each connect to <paramref name="Degree"/> L2 nodes.
+/// Graph shape: <paramref name="Sources"/> independent hub vertices, each connected to
+/// <paramref name="Degree"/> L1 vertices. L1 vertices each connect to <paramref name="Degree"/> L2 vertices.
 /// ParallelBfsOperator fans out one BFS task per source hub and runs them in parallel.
 /// </summary>
 [MemoryDiagnoser]
@@ -23,56 +23,56 @@ public class ParallelBenchmarks
     [Params(10)]
     public int Degree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private NodeId[] _sourceNodes = [];
-    private IGraphTransaction _readTx = null!;
+    private VertexId[] _sourceVertices = [];
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("par");
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
-            long nodeId = 0;
-            long relId = 0;
+            long vertexId = 0;
+            long edgeId = 0;
             var hubIds = new long[Sources];
 
             for (int s = 0; s < Sources; s++)
             {
-                hubIds[s] = nodeId;
-                loader.AppendNode(new NodeId(nodeId++), new LabelId(0));
+                hubIds[s] = vertexId;
+                loader.AppendVertex(new VertexId(vertexId++), new LabelId(0));
 
-                long l1Start = nodeId;
+                long l1Start = vertexId;
                 for (int i = 0; i < Degree; i++)
-                    loader.AppendNode(new NodeId(nodeId++), new LabelId(1));
+                    loader.AppendVertex(new VertexId(vertexId++), new LabelId(1));
                 for (int i = 0; i < Degree; i++)
-                    loader.AppendRelationship(new RelationshipId(relId++),
-                        new NodeId(hubIds[s]), new NodeId(l1Start + i), new RelationshipTypeId(0));
+                    loader.AppendEdge(new EdgeId(edgeId++),
+                        new VertexId(hubIds[s]), new VertexId(l1Start + i), new EdgeTypeId(0));
 
-                long l2Start = nodeId;
+                long l2Start = vertexId;
                 for (int i = 0; i < Degree; i++)
                     for (int j = 0; j < Degree; j++)
-                        loader.AppendNode(new NodeId(nodeId++), new LabelId(2));
+                        loader.AppendVertex(new VertexId(vertexId++), new LabelId(2));
                 for (int i = 0; i < Degree; i++)
                     for (int j = 0; j < Degree; j++)
-                        loader.AppendRelationship(new RelationshipId(relId++),
-                            new NodeId(l1Start + i), new NodeId(l2Start + i * Degree + j), new RelationshipTypeId(0));
+                        loader.AppendEdge(new EdgeId(edgeId++),
+                            new VertexId(l1Start + i), new VertexId(l2Start + i * Degree + j), new EdgeTypeId(0));
             }
 
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _sourceNodes = new NodeId[Sources];
-        // hub nodes are at stride = 1 + Degree + Degree*Degree per source
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _sourceVertices = new VertexId[Sources];
+        // hub vertices are at stride = 1 + Degree + Degree*Degree per source
         long stride = 1 + Degree + (long)Degree * Degree;
         for (int s = 0; s < Sources; s++)
-            _sourceNodes[s] = new NodeId(s * stride);
+            _sourceVertices[s] = new VertexId(s * stride);
 
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -90,10 +90,10 @@ public class ParallelBenchmarks
     public long TwoHopSequential()
     {
         long total = 0;
-        foreach (var hub in _sourceNodes)
+        foreach (var hub in _sourceVertices)
         {
             var plan = new BfsOperator(
-                new SingleNodeSource(hub), sourceNodeColumn: 0,
+                new SingleVertexSource(hub), sourceVertexColumn: 0,
                 Direction.Outgoing, typeFilter: null, maxDepth: 2);
             using var result = _readTx.Execute(plan);
             total += result.Statistics.RowsProduced;
@@ -105,7 +105,7 @@ public class ParallelBenchmarks
     public long TwoHopParallel()
     {
         var plan = new BfsOperator(
-            new MultiNodeSource(_sourceNodes), sourceNodeColumn: 0,
+            new MultiVertexSource(_sourceVertices), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, maxDepth: 2, maxParallelism: -1);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
@@ -117,10 +117,10 @@ public class ParallelBenchmarks
     public long ThreeHopSequential()
     {
         long total = 0;
-        foreach (var hub in _sourceNodes)
+        foreach (var hub in _sourceVertices)
         {
             var plan = new BfsOperator(
-                new SingleNodeSource(hub), sourceNodeColumn: 0,
+                new SingleVertexSource(hub), sourceVertexColumn: 0,
                 Direction.Outgoing, typeFilter: null, maxDepth: 3);
             using var result = _readTx.Execute(plan);
             total += result.Statistics.RowsProduced;
@@ -132,24 +132,24 @@ public class ParallelBenchmarks
     public long ThreeHopParallel()
     {
         var plan = new BfsOperator(
-            new MultiNodeSource(_sourceNodes), sourceNodeColumn: 0,
+            new MultiVertexSource(_sourceVertices), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, maxDepth: 3, maxParallelism: -1);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
     }
 }
 
-/// <summary>複数 NodeId を順番に1行ずつ出力する source operator。</summary>
-internal sealed class MultiNodeSource : IPhysicalOperator
+/// <summary>複数 VertexId を順番に1行ずつ出力する source operator。</summary>
+internal sealed class MultiVertexSource : IPhysicalOperator
 {
-    private readonly NodeId[] _ids;
+    private readonly VertexId[] _ids;
     private int _idx;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
+        new ColumnDefinition("vertexId", TupleSlotType.VertexId)]);
 
-    public MultiNodeSource(NodeId[] ids) => _ids = ids;
+    public MultiVertexSource(VertexId[] ids) => _ids = ids;
 
     public TupleSchema Schema => s_schema;
     public OperatorStatistics Statistics => default;
@@ -160,7 +160,7 @@ internal sealed class MultiNodeSource : IPhysicalOperator
     public bool MoveNext()
     {
         if (_idx >= _ids.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _ids[_idx++].Value };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _ids[_idx++].Value };
         return true;
     }
 

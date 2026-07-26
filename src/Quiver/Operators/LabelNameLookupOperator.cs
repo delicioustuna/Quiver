@@ -4,8 +4,8 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// 各行のノードラベルを読み取り、
-/// 呼び出し側が渡す lookup (通常 <c>ISchemaApi.GetLabelName</c>) でラベル名を解決して
+/// 各行のVertexラベルを読み取り、
+/// 呼び出し側が渡す lookup (通常 <c>ISchemaEditor.GetLabelName</c>) でラベル名を解決して
 /// UTF-8 文字列列を末尾に付加する。
 /// </summary>
 /// <remarks>
@@ -15,7 +15,7 @@ namespace Quiver.Query.Physical;
 internal sealed class LabelNameLookupOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly Func<LabelId, string?> _labelNameLookup;
     private ITransaction? _tx;
     private TupleSlot[]? _buffer;
@@ -24,11 +24,11 @@ internal sealed class LabelNameLookupOperator : IPhysicalOperator
 
     public LabelNameLookupOperator(
         IPhysicalOperator source,
-        int nodeColumn,
+        int vertexColumn,
         Func<LabelId, string?> labelNameLookup)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
-        _nodeColumn = nodeColumn;
+        _vertexColumn = vertexColumn;
         _labelNameLookup = labelNameLookup ?? throw new ArgumentNullException(nameof(labelNameLookup));
     }
 
@@ -55,8 +55,8 @@ internal sealed class LabelNameLookupOperator : IPhysicalOperator
         int srcCols = _source.Schema.Columns.Count;
         for (int i = 0; i < srcCols; i++) _buffer![i] = cur[i];
 
-        var nodeId = new NodeId(cur[_nodeColumn].LongValue);
-        var labelId = _tx!.Nodes.Read(nodeId).Label;
+        var vertexId = new VertexId(cur[_vertexColumn].LongValue);
+        var labelId = _tx!.Vertices.Read(vertexId).Label;
         var name = _labelNameLookup(labelId) ?? string.Empty;
         _currentBytes = System.Text.Encoding.UTF8.GetBytes(name);
         _buffer![srcCols] = new TupleSlot

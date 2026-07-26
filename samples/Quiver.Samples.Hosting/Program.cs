@@ -22,34 +22,34 @@ app.MapGet("/", () => Results.Ok(new
     service = "Quiver Hosting Sample",
     endpoints = new[]
     {
-        "POST /nodes { label, name? }",
-        "GET  /nodes/{id}",
-        "DELETE /nodes/{id}",
-        "POST /nodes/{id}/properties { key, value }",
-        "POST /relationships { source, target, type }",
-        "GET  /relationships/{id}",
+        "POST /vertices { label, name? }",
+        "GET  /vertices/{id}",
+        "DELETE /vertices/{id}",
+        "POST /vertices/{id}/properties { key, value }",
+        "POST /edges { source, target, type }",
+        "GET  /edges/{id}",
         "GET  /stats",
     },
 }));
 
-app.MapPost("/nodes", (CreateNodeRequest? req, GraphDatabase db) =>
+app.MapPost("/vertices", (CreateVertexRequest? req, QuiverDatabase db) =>
 {
     if (req is null || string.IsNullOrEmpty(req.Label))
         return Results.BadRequest(new { error = "label is required" });
-    using var tx = db.BeginTransaction();
-    var id = tx.CreateNode(req.Label);
+    using var tx = db.BeginWriteTransaction();
+    var id = tx.CreateVertex(req.Label);
     if (!string.IsNullOrEmpty(req.Name))
         tx.SetProperty(id, "name", PropertyValue.FromString(req.Name));
     tx.Commit();
-    return Results.Created($"/nodes/{id.Value}", new { id = id.Value, label = req.Label, name = req.Name });
+    return Results.Created($"/vertices/{id.Value}", new { id = id.Value, label = req.Label, name = req.Name });
 });
 
-app.MapGet("/nodes/{id:long}", (long id, GraphDatabase db) =>
+app.MapGet("/vertices/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginReadOnlyTransaction();
-    var nid = new NodeId(id);
+    using var tx = db.BeginReadTransaction();
+    var nid = new VertexId(id);
     // HWM 超 / 負 ID は安全にreturn される。
-    if (!tx.NodeExists(nid))
+    if (!tx.VertexExists(nid))
         return Results.NotFound();
     var name = tx.HasProperty(nid, "name")
         ? System.Text.Encoding.UTF8.GetString(tx.GetProperty(nid, "name").Utf8StringValue)
@@ -57,67 +57,67 @@ app.MapGet("/nodes/{id:long}", (long id, GraphDatabase db) =>
     return Results.Ok(new { id, name });
 });
 
-app.MapDelete("/nodes/{id:long}", (long id, GraphDatabase db) =>
+app.MapDelete("/vertices/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginTransaction();
-    var nid = new NodeId(id);
-    if (!tx.NodeExists(nid))
+    using var tx = db.BeginWriteTransaction();
+    var nid = new VertexId(id);
+    if (!tx.VertexExists(nid))
         return Results.NotFound();
-    tx.DeleteNode(nid);
+    tx.DeleteVertex(nid);
     tx.Commit();
     return Results.NoContent();
 });
 
-app.MapPost("/nodes/{id:long}/properties", (long id, SetPropertyRequest? req, GraphDatabase db) =>
+app.MapPost("/vertices/{id:long}/properties", (long id, SetPropertyRequest? req, QuiverDatabase db) =>
 {
     if (req is null || string.IsNullOrEmpty(req.Key))
         return Results.BadRequest(new { error = "key is required" });
-    using var tx = db.BeginTransaction();
-    var nid = new NodeId(id);
-    if (!tx.NodeExists(nid))
+    using var tx = db.BeginWriteTransaction();
+    var nid = new VertexId(id);
+    if (!tx.VertexExists(nid))
         return Results.NotFound();
     tx.SetProperty(nid, req.Key, PropertyValue.FromString(req.Value ?? string.Empty));
     tx.Commit();
     return Results.NoContent();
 });
 
-app.MapPost("/relationships", (CreateRelationshipRequest? req, GraphDatabase db) =>
+app.MapPost("/edges", (CreateEdgeRequest? req, QuiverDatabase db) =>
 {
     if (req is null || string.IsNullOrEmpty(req.Type))
         return Results.BadRequest(new { error = "type is required" });
-    using var tx = db.BeginTransaction();
-    var src = new NodeId(req.Source);
-    var tgt = new NodeId(req.Target);
-    if (!tx.NodeExists(src) || !tx.NodeExists(tgt))
-        return Results.NotFound(new { error = "source or target node does not exist" });
-    var rid = tx.CreateRelationship(src, tgt, req.Type);
+    using var tx = db.BeginWriteTransaction();
+    var src = new VertexId(req.Source);
+    var tgt = new VertexId(req.Target);
+    if (!tx.VertexExists(src) || !tx.VertexExists(tgt))
+        return Results.NotFound(new { error = "source or target vertex does not exist" });
+    var rid = tx.CreateEdge(src, tgt, req.Type);
     tx.Commit();
-    return Results.Created($"/relationships/{rid.Value}",
+    return Results.Created($"/edges/{rid.Value}",
         new { id = rid.Value, source = req.Source, target = req.Target, type = req.Type });
 });
 
-app.MapGet("/relationships/{id:long}", (long id, GraphDatabase db) =>
+app.MapGet("/edges/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginReadOnlyTransaction();
-    // GraphTransaction には RelationshipExists が無いので Stats / NodeExists 系のみ。
-    // ここではノードと同じ HWM 安全契約を期待するが、現状の IGraphTransaction には
-    // RelationshipExists API が無いので存在チェックは sample 範囲では省略する。
+    using var tx = db.BeginReadTransaction();
+    // GraphTransaction には EdgeExists が無いので Stats / VertexExists 系のみ。
+    // ここではVertexと同じ HWM 安全契約を期待するが、現状の IWriteTransaction には
+    // EdgeExists API が無いので存在チェックは sample 範囲では省略する。
     // (将来 API 追加時にここを補強する)
     _ = tx;
     return Results.Ok(new { id });
 });
 
-app.MapGet("/stats", (GraphDatabase db) =>
+app.MapGet("/stats", (QuiverDatabase db) =>
 {
     var stats = db.Diagnostics.GetStatistics();
-    return Results.Ok(new { nodeCount = stats.NodeCount, relationshipCount = stats.RelationshipCount });
+    return Results.Ok(new { vertexCount = stats.VertexCount, edgeCount = stats.EdgeCount });
 });
 
 app.Run();
 
-internal sealed record CreateNodeRequest(string Label, string? Name);
+internal sealed record CreateVertexRequest(string Label, string? Name);
 internal sealed record SetPropertyRequest(string Key, string? Value);
-internal sealed record CreateRelationshipRequest(long Source, long Target, string Type);
+internal sealed record CreateEdgeRequest(long Source, long Target, string Type);
 
 // Quiver.Hosting.Tests から WebApplicationFactory<Program> で起動するために
 // 暗黙の Program クラスを public partial として公開する。

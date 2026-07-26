@@ -11,12 +11,12 @@ namespace Quiver.Tests;
 public sealed class BitmapFilterOperatorTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public BitmapFilterOperatorTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_pw12_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -27,26 +27,26 @@ public sealed class BitmapFilterOperatorTests : IDisposable
 
     private sealed class CountingPredicate : IPredicate
     {
-        private readonly Func<NodeId, ITransaction, bool> _impl;
+        private readonly Func<VertexId, ITransaction, bool> _impl;
         public int Calls;
-        public CountingPredicate(Func<NodeId, ITransaction, bool> impl) { _impl = impl; }
+        public CountingPredicate(Func<VertexId, ITransaction, bool> impl) { _impl = impl; }
         public bool Evaluate(in TupleRef tuple, ITransaction tx)
         {
             Calls++;
-            var nid = new NodeId(tuple[0].LongValue);
+            var nid = new VertexId(tuple[0].LongValue);
             return _impl(nid, tx);
         }
     }
 
     private void Seed(int total, int matchA, int matchB, int matchBoth)
     {
-        // matchA: first 'matchA' nodes get tag=A. matchB: first 'matchB' nodes get hot=true.
+        // matchA: first 'matchA' vertices get tag=A. matchB: first 'matchB' vertices get hot=true.
         // matchBoth = min(matchA, matchB).
-        using var tx = _db.BeginTransaction();
-        _db.Schema.GetOrCreateLabel("N");
+        _db.EditSchema(schema => schema.GetOrCreateLabel("N"));
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < total; i++)
         {
-            var nid = tx.CreateNode("N");
+            var nid = tx.CreateVertex("N");
             tx.SetProperty(nid, "tag", PropertyValue.FromString(i < matchA ? "A" : "B"));
             tx.SetProperty(nid, "hot", PropertyValue.FromBool(i < matchB));
         }
@@ -57,10 +57,10 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void Yields_same_rows_as_chained_FilterOperator()
     {
         Seed(total: 200, matchA: 50, matchB: 80, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         IPredicate tagIsA = new TagEqPredicate(tagKey, "A");
         IPredicate hotIsTrue = new HotEqPredicate(hotKey, true);
@@ -68,18 +68,18 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         // Reference: chained FilterOperator.
         using var refResult = tx.Execute(
             new FilterOperator(
-                new FilterOperator(new NodeByLabelScanOperator(label), tagIsA),
+                new FilterOperator(new VertexByLabelScanOperator(label), tagIsA),
                 hotIsTrue));
-        var refIds = refResult.Rows().Select(r => r.GetNodeId(0).Value).OrderBy(v => v).ToList();
+        var refIds = refResult.Rows().Select(r => r.GetVertexId(0).Value).OrderBy(v => v).ToList();
 
         // Bitmap variant.
         IPredicate tagIsA2 = new TagEqPredicate(tagKey, "A");
         IPredicate hotIsTrue2 = new HotEqPredicate(hotKey, true);
         using var bmResult = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { tagIsA2, hotIsTrue2 }));
-        var bmIds = bmResult.Rows().Select(r => r.GetNodeId(0).Value).OrderBy(v => v).ToList();
+        var bmIds = bmResult.Rows().Select(r => r.GetVertexId(0).Value).OrderBy(v => v).ToList();
 
         bmIds.Should().BeEquivalentTo(refIds);
         bmIds.Count.Should().Be(50); // matchBoth
@@ -89,17 +89,17 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     [Fact]
     public void Most_selective_first_reduces_second_predicate_calls()
     {
-        // 1000 nodes: 50 with tag=A, 500 with hot=true, 50 with both.
+        // 1000 vertices: 50 with tag=A, 500 with hot=true, 50 with both.
         Seed(total: 1000, matchA: 50, matchB: 500, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         var tagSelective = new CountingPredicate((nid, t) =>
         {
-            using var h = t.Nodes.Read(nid);
-            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
+            using var h = t.Vertices.Read(nid);
+            var en = t.Vertices.EnumerateProperties(nid, t.Properties); // inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -107,8 +107,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         });
         var hotBroad = new CountingPredicate((nid, t) =>
         {
-            using var h = t.Nodes.Read(nid);
-            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
+            using var h = t.Vertices.Read(nid);
+            var en = t.Vertices.EnumerateProperties(nid, t.Properties); // inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == hotKey)
                     return en.Current.Value.BoolValue;
@@ -118,9 +118,9 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         // Selective first.
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { tagSelective, hotBroad }));
-        var ids = result.Rows().Select(r => r.GetNodeId(0).Value).ToList();
+        var ids = result.Rows().Select(r => r.GetVertexId(0).Value).ToList();
         ids.Count.Should().Be(50);
 
         // First predicate ran for every input row, second predicate only for survivors of first.
@@ -134,15 +134,15 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void Least_selective_first_evaluates_more_predicates()
     {
         Seed(total: 1000, matchA: 50, matchB: 500, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         var tagSelective = new CountingPredicate((nid, t) =>
         {
-            using var h = t.Nodes.Read(nid);
-            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
+            using var h = t.Vertices.Read(nid);
+            var en = t.Vertices.EnumerateProperties(nid, t.Properties); // inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -150,8 +150,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         });
         var hotBroad = new CountingPredicate((nid, t) =>
         {
-            using var h = t.Nodes.Read(nid);
-            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
+            using var h = t.Vertices.Read(nid);
+            var en = t.Vertices.EnumerateProperties(nid, t.Properties); // inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == hotKey)
                     return en.Current.Value.BoolValue;
@@ -161,9 +161,9 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         // Broad first.
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { hotBroad, tagSelective }));
-        var ids = result.Rows().Select(r => r.GetNodeId(0).Value).ToList();
+        var ids = result.Rows().Select(r => r.GetVertexId(0).Value).ToList();
         ids.Count.Should().Be(50);
 
         hotBroad.Calls.Should().Be(1000);
@@ -175,13 +175,13 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     [Fact]
     public void Empty_source_yields_no_rows()
     {
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("Missing");
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Missing"));
+        using var tx = _db.BeginWriteTransaction();
 
         var always = new CountingPredicate((_, _) => true);
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { always }));
         result.Rows().Count().Should().Be(0);
         always.Calls.Should().Be(0);
@@ -192,12 +192,12 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void All_pass_yields_every_input_row()
     {
         Seed(total: 70, matchA: 70, matchB: 70, matchBoth: 70);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
         var alwaysTrue = new CountingPredicate((_, _) => true);
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { alwaysTrue }));
         result.Rows().Count().Should().Be(70);
         alwaysTrue.Calls.Should().Be(70);
@@ -208,13 +208,13 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void All_fail_yields_zero_rows()
     {
         Seed(total: 70, matchA: 70, matchB: 70, matchBoth: 70);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
         var alwaysFalse = new CountingPredicate((_, _) => false);
         var alsoAlwaysFalse = new CountingPredicate((_, _) => false);
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { alwaysFalse, alsoAlwaysFalse }));
         result.Rows().Count().Should().Be(0);
         alwaysFalse.Calls.Should().Be(70);
@@ -229,14 +229,14 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     {
         // BatchSize = 64. Feed 200 rows so we cross batch boundaries.
         Seed(total: 200, matchA: 30, matchB: 200, matchBoth: 30);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
 
         var pickA = new CountingPredicate((nid, t) =>
         {
-            using var h = t.Nodes.Read(nid);
-            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
+            using var h = t.Vertices.Read(nid);
+            var en = t.Vertices.EnumerateProperties(nid, t.Properties); // inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -245,7 +245,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
 
         using var result = tx.Execute(
             new BitmapFilterOperator(
-                new NodeByLabelScanOperator(label),
+                new VertexByLabelScanOperator(label),
                 new IPredicate[] { pickA }));
         result.Rows().Count().Should().Be(30);
         pickA.Calls.Should().Be(200);
@@ -255,7 +255,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     [Fact]
     public void Constructor_rejects_empty_predicate_list()
     {
-        Action act = () => _ = new BitmapFilterOperator(new AllNodesScanOperator(), Array.Empty<IPredicate>());
+        Action act = () => _ = new BitmapFilterOperator(new AllVerticesScanOperator(), Array.Empty<IPredicate>());
         act.Should().Throw<ArgumentException>();
     }
 
@@ -348,9 +348,9 @@ file sealed class TagEqPredicate : IPredicate
     public TagEqPredicate(PropertyKeyId key, string expected) { _key = key; _expected = expected; }
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nid = new NodeId(tuple[0].LongValue);
-        using var h = tx.Nodes.Read(nid);
-        var en = tx.Nodes.EnumerateProperties(nid, tx.Properties); // ARCH-5c: inline + overflow
+        var nid = new VertexId(tuple[0].LongValue);
+        using var h = tx.Vertices.Read(nid);
+        var en = tx.Vertices.EnumerateProperties(nid, tx.Properties); // inline + overflow
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;
@@ -368,9 +368,9 @@ file sealed class HotEqPredicate : IPredicate
     public HotEqPredicate(PropertyKeyId key, bool expected) { _key = key; _expected = expected; }
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nid = new NodeId(tuple[0].LongValue);
-        using var h = tx.Nodes.Read(nid);
-        var en = tx.Nodes.EnumerateProperties(nid, tx.Properties); // ARCH-5c: inline + overflow
+        var nid = new VertexId(tuple[0].LongValue);
+        using var h = tx.Vertices.Read(nid);
+        var en = tx.Vertices.EnumerateProperties(nid, tx.Properties); // inline + overflow
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;

@@ -2,7 +2,7 @@
 
 > **いつ読むか** — 挿入が遅い、検索が遅い、メモリやディスクが想定より使われている、と感じたとき。
 > チューニングノブを回す前に、まず最上段の「鉄則」を満たしているか確認すること。
-> 設定ノブは [`GraphDatabaseOptions`](../../src/Quiver/GraphDatabase.cs) / appsettings の
+> 設定ノブは [`QuiverDatabaseOptions`](../../src/Quiver/QuiverDatabase.cs) / appsettings の
 > [`QuiverConfigurationOptions`](../../src/Quiver.Hosting/QuiverConfigurationOptions.cs)。
 
 ---
@@ -12,7 +12,7 @@
 **bulk パス (まとめて 1 tx) は ~69 B/entry、per-tx パターン (1 件 1 commit) は約 100 倍遅い。**
 
 これは Quiver で最も効く一手であり、他のどのノブよりも先に守るべき。
-根拠は [索引付き書き込みの WAL 増幅](../benchmark-results.md#索引付き書き込みの-wal-増幅):
+根拠は[索引付き書き込みのWAL増幅](../benchmark-results.md#索引付き書き込みのwal増幅)を参照。
 
 | パス | EntryCount | WAL bytes/entry | wall time | スループット |
 |---|---:|---:|---:|---:|
@@ -22,7 +22,7 @@
 
 なぜこうなるか:
 
-- 各 commit は変更したページ (NodeStore ページ + 索引ページ + meta ページ) の **PageImage** を WAL に書く。
+- 各 commit は変更したページ (VertexStore ページ + 索引ページ + meta ページ) の **PageImage** を WAL に書く。
 - bulk パスでは同一ページへの複数変更が **1 つの PageImage に coalesce** されるので、
   entry 数に対してほぼフラットな ~69 B/entry に収まる。
 - per-tx パスでは毎 commit ごとに同じページの PageImage を丸ごと書き直すため、小規模では entry あたり
@@ -32,16 +32,16 @@
 
 ```csharp
 // ✅ GOOD: まとめて 1 tx
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     foreach (var row in rows)
-        tx.SetProperty(tx.CreateNode("Item"), "sku", PropertyValue.FromString(row.Sku));
+        tx.SetProperty(tx.CreateVertex("Item"), "sku", PropertyValue.FromString(row.Sku));
     tx.Commit();
 }
 
 // ❌ BAD: 1 件ごとに commit (約 100× 遅い)
 foreach (var row in rows)
-    using (var tx = db.BeginTransaction()) { /* 1 件 */ tx.Commit(); }
+    using (var tx = db.BeginWriteTransaction()) { /* 1 件 */ tx.Commit(); }
 ```
 
 - 1 tx が大きすぎてメモリが厳しい場合は、**数千〜数万件単位のチャンク commit** に分ける
@@ -69,6 +69,44 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 
 ---
 
+## KNN 探索幅 (`VectorSearchOptions`)
+
+HNSW の検索精度とレイテンシは `VectorSearchOptions.EfSearch` で調整できる。
+既定値は従来互換の 200。値を下げると探索候補が減って高速になるが、近傍の取りこぼしが増える。
+
+```csharp
+var searchOptions = new VectorSearchOptions
+{
+    EfSearch = 100,
+    FilteredOversampleFactor = 8,
+};
+
+using var cursor = tx.KnnSearch("embedding", query, k: 10, searchOptions);
+var batch = tx.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
+
+var traversal = tx.Query
+    .Knn("embedding", query, k: 10, searchOptions);
+```
+
+固定 corpus（N=10,000、dim=384、cosine、20 queries、旧構成 M=16、Mmax0=32、efConstruction=200）
+での実測は次のとおり。latency は HNSW カーソル生成と全件列挙だけを warmup 後に計測した平均値。
+
+| EfSearch | recall@10 | 平均 latency |
+|---:|---:|---:|
+| 32 | 0.245 | 0.281 ms |
+| 64 | 0.435 | 0.431 ms |
+| 100 | 0.570 | 0.649 ms |
+| 200（既定） | 0.825 | 1.023 ms |
+
+この sweep は構築品質が低い旧構成で、efSearch だけでは 0.95 に届かないことを示す。
+現行既定は M=32 / Mmax0=64 / efConstruction=400（recall 0.950）。
+latency は payload cache 導入後の値。この corpus では低い `EfSearch` の recall 低下が大きい。
+精度要件を測らずに既定値を下げないこと。
+`FilteredOversampleFactor` はフィルタ付き HNSW の探索幅を `k × 係数` まで広げる。
+候補集合が小さく exact gather 経路を選ぶ場合、この値は結果や計算量に影響しない。
+
+---
+
 ## WAL とチェックポイント
 
 ### `CheckpointThresholdBytes` (既定 64 MB)
@@ -87,7 +125,7 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 直近 `AdaptiveSampleWindow` 件 (既定 1000) の bytes/tx 移動平均から、`TargetRecoveryTime` (既定 5 秒) を満たす threshold を周期的に再計算する。
 
 ```csharp
-var opts = new GraphDatabaseOptions
+var opts = new QuiverDatabaseOptions
 {
     CheckpointPolicy = CheckpointPolicy.Adaptive,
     TargetRecoveryTime = TimeSpan.FromSeconds(3),     // 起動を 3 秒以内に抑えたい
@@ -99,50 +137,26 @@ var opts = new GraphDatabaseOptions
 - 「recovery 時間を SLA に収めたい」ときは Adaptive + `TargetRecoveryTime` が素直。
 - ワークロードが安定していて手で測れるなら `Fixed` + 実測値でも良い。
 
-### `WalSegmentSize` (既定 64 MB)
+## writer lease の競合
 
-WAL 1 セグメントのサイズ。極端に小さくするとセグメントローテーションが頻発する。通常は既定で良い。
-
----
-
-## グループコミット (`GroupCommitWindow`, 既定 0 = 無効)
-
-**多数のスレッドが並列に commit する** ワークロード (Web API で各リクエストが小さな tx を commit する等)
-で効く。最初の commit 到着からこの window 経過まで待って後続 commit を貯め、まとめて 1 回の fsync で処理する。
+Quiver は一つの writer と任意数の snapshot reader を並走させる。
+複数の書き込み要求が同時に到着しても writer は並走せず、database instance ごとの lease が直列化する。
+reader は writer lease を取得せず、writer の終了を待たない。
 
 ```csharp
-var opts = new GraphDatabaseOptions
+var opts = new QuiverDatabaseOptions
 {
-    GroupCommitWindow = TimeSpan.FromMicroseconds(500)   // 推奨 100µs〜1ms
+    WriterContentionMode = WriterContentionMode.Wait,
+    WriterWaitTimeout = TimeSpan.FromSeconds(2),
 };
 ```
 
-- 効果: fsync 回数が激減し IOPS を節約。並列度が高いほど効く。
-- 代償: 単一 commit のレイテンシが (fsync 時間 + window) まで増える。
-- **単一スレッドで逐次 commit するワークロードでは効果が無い** (貯める相手がいない) のでむしろ有害。
-  並列 writer がいるときだけ有効化する。
-- 内部は Stopwatch + SpinWait の busy-wait で sub-ms 精度を確保 (Windows の `Task.Delay` ~15ms 解像度を回避)。
+`WriterContentionMode.Wait` は `WriterWaitTimeout` まで先行 writer を待つ。
+`WriterContentionMode.FailFast` は待機せず `WriterBusyException` を送出する。
+待機時間を伸ばしても書き込み処理能力は増えないため、競合が続く場合は書き込みキューで mutation をまとめ、トランザクション数と fsync 回数を減らす。
 
----
-
-## ロック戦略 (`LockingMode`, 既定 `ExclusiveOnly`)
-
-- `ExclusiveOnly` (既定): 読み取りロックを取らない現挙動。read-heavy でも reader 同士が
-  X ロックを取り合うと並列度が出ない。
-- `ReaderWriter`: 読み取りを Shared、書き込みを Exclusive ロックにする。**複数 reader が同時に進める** ので、
-  read が支配的なワークロードでスループットが上がる。
-
-```csharp
-var opts = new GraphDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
-```
-
-関連ノブ:
-
-- `LockTimeout` (既定 5 秒): ロック取得の上限。短くすると詰まりを早く検知できるが、正常な待ちも
-  打ち切ってしまう。
-- `DeadlockDetectionInterval` (既定 null = 無効): 設定すると wait-for graph を周期的に取り Tarjan SCC で
-  デッドロックを検出し、最も若い tx を犠牲にして `DeadlockException` で中断する。推奨 **100ms**
-  (検出遅延が短く CPU オーバーヘッドも 1% 未満を狙える)。無効のままだと `LockTimeout` でしか抜けられない。
+`quiver.writer.wait.duration` と `quiver.writer.contention.count` を観測すると、競合した取得だけの待機時間と回数を判別できる。
+reader 側は `quiver.snapshot.active.count` と `quiver.snapshot.oldest.age` で、長時間 snapshot が GC horizon を固定していないか確認する。
 
 ---
 
@@ -159,11 +173,18 @@ var opts = new GraphDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
 検索や MERGE が遅いとき、まず該当プロパティに索引があるか確認する。
 
 ```csharp
-db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 ```
 
-- 索引が無いプロパティ等価検索はラベル内全スキャン。ノード数に比例して遅くなる。
-- `MergeNode` も索引が無いと全スキャンに落ちる。業務キーには必ず索引を ([docs/cookbook.md](../cookbook.md) §2)。
+- 索引が無いプロパティ等価検索はラベル内全スキャン。Vertex数に比例して遅くなる。
+- `MergeVertex` も索引が無いと全スキャンに落ちる。業務キーには必ず索引を ([docs/cookbook.md](../cookbook.md) §2)。
 - ただし索引は書き込みコスト (WAL 増幅・更新) を増やす。**検索する列にだけ** 張る。
 
 ---
@@ -172,8 +193,8 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 
 推測で回さない。Quiver は観測手段を持っている:
 
-- `db.Diagnostics.GetStatistics()` — ノード/エッジ数、バッファプール hit/miss
-- `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、lock、index、vacuum を
+- `db.Diagnostics.GetStatistics()` — Vertex/エッジ数、バッファプール hit/miss
+- `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、writer、snapshot、maintenance を
   1 秒粒度でライブ観測 ([docs/cookbook.md](../cookbook.md) §9)
 - `Quiver.OpenTelemetry` の `AddQuiverInstrumentation()` — OTel でメトリクスとトレースを送る
 
@@ -188,7 +209,7 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 | 一括挿入が異常に遅い | **per-tx になっていないか** (鉄則) → 1 tx / チャンク commit に |
 | 読み取りが遅い・ディスク I/O 多い | `BufferPoolSize` を増やす / 索引を張る |
 | 起動 (recovery) が遅い | `CheckpointThresholdBytes` を下げる / `Adaptive` + `TargetRecoveryTime` |
-| 並列 commit で fsync が頭打ち | `GroupCommitWindow` を 100µs〜1ms |
-| read 並列が出ない | `LockingMode = ReaderWriter` |
-| ロックで詰まる・デッドロック疑い | `DeadlockDetectionInterval = 100ms`、`LockTimeout` 見直し |
-| 特定プロパティ検索が遅い | `Schema.CreateIndex` |
+| writer 待機が増える | mutation を一つの writer queue へ集約し、複数件を 1 tx にまとめる |
+| KNN の latency / recall を調整したい | `VectorSearchOptions.EfSearch` を実測しながら変更 |
+| writer を待たせたくない | `WriterContentionMode = FailFast` と `WriterBusyException` の再試行方針を組み合わせる |
+| 特定プロパティ検索が遅い | `EditSchema` でスカラ索引を作成 |

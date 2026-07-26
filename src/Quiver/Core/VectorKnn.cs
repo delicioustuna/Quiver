@@ -1,9 +1,8 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// KNN スコアリングの共有ヘルパ。<see cref="InMemoryVectorStore"/> (test fixture) と
-/// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> (本番) が同一の bounded top-k /
-/// 決定的順序 / metric 解釈を共有するために切り出した。
+/// KNN スコアリングの共有ヘルパ。primary scan と immutable segment が同一の
+/// bounded top-k / 決定的順序 / metric 解釈を共有するために切り出した。
 /// </summary>
 internal static class VectorMetrics
 {

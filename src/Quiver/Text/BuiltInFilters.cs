@@ -50,6 +50,8 @@ public sealed class StopWordFilter : ITokenFilter
 {
     private readonly HashSet<string> _stopWords;
 
+    internal IReadOnlyCollection<string> StopWords => _stopWords;
+
     /// <summary>明示的な単語セットからストップワードフィルタを生成する。</summary>
     public StopWordFilter(IEnumerable<string> stopWords)
     {

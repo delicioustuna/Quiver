@@ -1,27 +1,37 @@
 # Quiver
 
+> 日本語のREADMEは [README_ja.md](README_ja.md) をご覧ください。
+
 [![CI](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml)
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
 
-Quiver は組み込みのグラフデータベース + ベクトル検索 + 全文検索の統合エンジンです。
-ノードとリレーションシップをプロパティ付きで単一ファイルに永続化し、Source Generator による型安全な CRUD と
-Fluent な API　によるグラフトラバーサルが実行可能です。 
-純 C# によるアンマネージド依存のない実装のため、NativeAOT に対応します。
+Quiver is an embedded graph database engine for .NET with integrated vector and full-text search.
+It stores property graphs in a single file and provides type-safe CRUD through a source generator, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
 
-## クイックスタート
+The core engine is implemented in pure C#, has no third-party package or unmanaged dependency, and supports NativeAOT.
+
+## Features
+
+- Embedded, in-process operation with no server process
+- Single-file property graph storage
+- Type-safe APIs generated from `[Vertex]`, `[Edge]`, and `[Property]` models
+- Fluent graph traversal and declarative pattern matching
+- Single Writer with concurrent Snapshot Readers
+- Redo-only WAL recovery and durable commits
+- B+Tree scalar indexes
+- KNN vector search with immutable HNSW segments
+- BM25 full-text search with immutable index segments
+- Hybrid retrieval for local RAG backends
+
+## Quick start
+
+Define a typed graph model.
 
 ```csharp
-var g = tx.G(db.Schema);
-var known = g.Nodes<Person>()
-             .Has(p => p.Name, "Alice")
-             .Knows()
-             .Has(p => p.Age, P.Lt(30L))
-             .ToList();
-```
+using Quiver.Api;
 
-```csharp
-[Node]
-public partial class Person // Source Generator を使う場合 partial 指定が必須です。
+[Vertex]
+public partial class Person
 {
     [Indexed]
     [Property]
@@ -31,7 +41,7 @@ public partial class Person // Source Generator を使う場合 partial 指定�
     public int Age { get; set; }
 }
 
-[Relationship<Person, Person>]
+[Edge<Person, Person>]
 public partial class Knows
 {
     [Property]
@@ -39,90 +49,75 @@ public partial class Knows
 }
 ```
 
-* `Quiver` パッケージを参照すると、属性と Source Generator も同梱されます。
-* `ImplicitUsings` が有効なプロジェクト（新規テンプレート既定）では `Quiver` / `Quiver.Api` の `using` も自動で入るため、 `using` を省略できます（ドロップイン）。
-* 個人利用が目的のため公開バージョンは v0.1.0 (pre-release) としています。
+Query it through a snapshot-bound read transaction.
 
-> 文字列キー指定のローレベル / 型なしトラバーサル、Match DSL（宣言的パターンマッチ）、
-> `tx.CreateNode` などの低レイヤ API は [docs/development.md](docs/design/development.md#ローレベル--型なし-api) を参照。
+```csharp
+using var tx = db.BeginReadTransaction();
 
-## 特徴
+var known = tx.Query.Vertices<Person>()
+    .Has(p => p.Name, "Alice")
+    .Knows()
+    .Has(p => p.Age, P.Lt(30L))
+    .ToList();
+```
 
-- 純C#
-- サーバープロセス不要
-- Source Generatorによる型安全なAPI生成
-- NativeAOT 対応
-- KNN（ベクトル検索）とグラフトラバーサル・BM25 全文検索を組み合わせたハイブリッド検索
+The `Quiver` package includes the model attributes and source generator.
+Projects with `ImplicitUsings` enabled receive the `Quiver` and `Quiver.Api` namespaces automatically.
 
-## ユースケース: ローカル RAG バックエンド
+The public version is currently `0.2.0` and remains pre-1.0.
 
-ベクトル検索（KNN）・BM25 全文検索とのハイブリッド検索・グラフ走査（ヒットしたチャンクの
-前後文脈や親文書への連結）・メタデータフィルタを 1 ファイル・1 プロセス・外部依存なしで
-組み合わせられるため、ローカル RAG（検索拡張生成）のバックエンドに適しています。
+## Local RAG
 
-> RAG 用スキーマ層 [`Quiver.Rag`](src/Quiver.Rag/)（文書取込・チャンキング・再取込・hybrid 検索 + 
-> graph expansion）を同梱しています。利用例は [`samples/Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/)、
-> レシピは [cookbook の「ローカル RAG」](docs/cookbook.md) を参照してください。
+`Quiver.Rag` provides Document and Chunk ingestion, chunking, re-ingestion, metadata filtering, vector and BM25 fusion, and graph expansion for surrounding context and parent documents.
 
+Embedding generation stays in the calling application and is injected through `IChunkEmbedder`.
 
-## ベンチマーク（参考値）
+See the [RAG sample](samples/Quiver.Samples.Rag/) and the [local RAG cookbook](docs/cookbook.md).
 
-| 操作 | 実測 |
+## Reference performance
+
+| Operation | Measured result |
+|---|---:|
+| Vertex insert, amortized in one transaction | ~3.5–4 µs/op |
+| Vertex insert with properties | ~6 µs/op |
+| Edge insert | ~7 µs/op |
+| Durable single-operation commit | ~1.0 ms/commit |
+| One-hop scan, degree 100, adjacency segment | ~0.35 µs |
+| One-hop fluent query, degree 100 | ~4.2 µs/query |
+| BulkLoader, 100,000 edges | ~11.8× regular batched transactions |
+| HNSW true recall@10, N=10,000, dim=384 | 0.950 |
+
+Results were measured in process on an AMD Ryzen 7 5700X with .NET 10.
+They are reference values rather than cross-machine guarantees.
+See the [benchmark summary](docs/benchmark-results.md) for details.
+
+## Limitations
+
+| Constraint | Behavior |
 |---|---|
-| ノード作成（単一 tx 償却） | ~3.5–4 µs/op（~250K ops/s） |
-| ノード作成 + プロパティ設定（同上） | ~6 µs/op |
-| リレーション作成（同上） | ~7 µs/op（~140K ops/s） |
-| 単発 durable commit（1 op = 1 commit、単一スレッド） | ~1.0 ms/commit（WAL flush 律速） |
-| 1-hop scan（degree 100、隣接ブロック） | ~0.35 µs（~3.5 ns/edge） |
-| 1-hop scan（degree 100、索引なし linked-list） | ~11 µs（~0.11 µs/edge） |
-| BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | ~0.037 ms |
-| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
-| BulkLoader（10 万 edge） | 通常 TX（batch 1000）比 ~11.8× |
+| Single writer | One write transaction runs at a time; readers continue on independent snapshots |
+| In-process only | One process opens a database file exclusively; no network protocol is included |
+| No automatic physical format migration | Databases with an incompatible format must be rebuilt from source data |
+| Derived vector rebuild | Exact scan is used while immutable HNSW state is unavailable or being rebuilt |
 
-> AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値。
-> 計測条件・詳細・追加ベンチは [docs/development.md](docs/design/development.md#性能詳細計測) を参照。
+See the [known limits](docs/spec/08_known_limits.md) for the complete contract.
 
-## 制限事項 (Limitations)
+## Documentation
 
-Quiver は組み込み用途に最適化されたエンジンであり、以下の制限があります。
-詳細は [docs/spec/08_known_limits.md](docs/spec/08_known_limits.md) を参照してください。
-
-| 制限 | 概要 | 緩和策 |
-|---|---|---|
-| **単一ライタ** | 書き込みトランザクションは同時に 1 つのみ。トランザクションはスレッドアフィン | アプリ側で書き込みゲート (`SemaphoreSlim(1,1)`) または専用ライタスレッドを使用 |
-| **In-Process のみ** | サーバモード・ネットワークアクセスなし。1 プロセスが排他的にファイルを開く | マルチプロセスが必要なら上位に gRPC/HTTP ラッパを配置 |
-| **自動マイグレーションなし** | フォーマットバージョン不一致で例外スロー。in-place 自動変換パスは存在しない | ソースデータから再構築。1.x 内ではフォーマット固定 |
-| **HNSW 上書き** | ベクトル上書き時にグラフトポロジを再リンクしない（検索品質がわずかに劣化しうる） | tombstone 超過で自動 rebuild。頻繁更新時はノード削除→再作成 |
-
-## その他の資料
-
-### 詳細ドキュメント
-
-| 資料 | 説明 |
+| Document | Contents |
 |---|---|
-| [Getting Started](docs/api/getting-started.md) | まずはここから |
-| [Concepts](docs/api/concepts/index.md) | Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends など |
-| [Tutorials](docs/api/tutorials/index.md) | チュートリアル |
-| [Cookbook](docs/cookbook.md)| 典型ユースケースのレシピ集 |
-| [運用ガイド](docs/operations/README.md)| quickstart, backup/restore, performance tuning, recoveryなど |
-| [用語辞書](docs/glossary.md) | API に登場する概念の定義・用語集 |
-| [アーキテクチャ概要](docs/architecture.md) | 全体構成、データフロー、運用上の注意 |
-| [アーキテクチャ図](docs/architecture-diagrams.md)| Mermaid による本プロジェクトの構成図集 |
+| [Getting Started](docs/api/getting-started.md) | Installation and first database |
+| [Concepts](docs/api/concepts/index.md) | Transactions, traversal, matching, indexes, and search |
+| [Tutorials](docs/api/tutorials/index.md) | Task-oriented examples |
+| [Cookbook](docs/cookbook.md) | Common graph and RAG recipes |
+| [Operations](docs/operations/README.md) | Backup, recovery, and performance tuning |
+| [Architecture](docs/architecture.md) | System structure and data flow |
+| [As-built specification](docs/spec/00_overview.md) | Current storage and execution contracts |
 
-### 実装サンプル
+## Samples
 
-| サンプル | 内容 |
-|---|---|
-| [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD（ノード / リレーション / プロパティ） |
-| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[Node]` / `[Relationship]` 属性ベースの型付き CRUD |
-| [`Quiver.Samples.Traversal`](samples/Quiver.Samples.Traversal/) | 多段トラバーサル、フィルタ、可変長 repeat、集約、cursor |
-| [`Quiver.Samples.Match`](samples/Quiver.Samples.Match/) | Match DSL によるパターンマッチと MERGE / UPSERT |
-| [`Quiver.Samples.Vector`](samples/Quiver.Samples.Vector/) | KNN 起点トラバーサル + graph-first ハイブリッド検索 |
-| [`Quiver.Samples.Hosting`](samples/Quiver.Samples.Hosting/) | `Microsoft.Extensions.Hosting` 連携（DI） |
-| [`Quiver.Samples.Observability`](samples/Quiver.Samples.Observability/) | OpenTelemetry による計測 |
-| [`Quiver.Samples.Migration`](samples/Quiver.Samples.Migration/) | スキーマ / データマイグレーション |
-| [`Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/) | `Quiver.Rag` で文書取込 → hybrid 検索 → graph expansion |
+Samples are available under [`samples/`](samples/), including CRUD, typed models, traversal, pattern matching, vector search, RAG, hosting, observability, and migrations.
 
-## ライセンス
+## License
 
-[MIT License](LICENSE) です。
+[MIT License](LICENSE)

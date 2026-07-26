@@ -8,14 +8,14 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-18: GC-6 で導入された <c>.As("a") / .Select("a") / .Select&lt;T&gt;(...)</c> の
+/// <c>.As("a") / .Select("a") / .Select&lt;T&gt;(...)</c> の
 /// carry-column overhead を計測。
 ///
 /// 形:
-///   g.Nodes().HasLabel("Person").As("a")
+///   g.Vertices().HasLabel("Person").As("a")
 ///     .Out("KNOWS").As("b")
 ///     .Out("KNOWS").As("c")
-///     .Select&lt;(NodeId,NodeId,NodeId)&gt;(t => (t.Node("a"), t.Node("b"), t.Node("c")))
+///     .Select&lt;(VertexId,VertexId,VertexId)&gt;(t => (t.Vertex("a"), t.Vertex("b"), t.Vertex("c")))
 ///
 /// ベースライン: 同形のチェーンを <c>.As</c> 無しで実行 (最終 .Count() のみ)。
 /// 計測対象: alias を維持するための tuple slot 拡張・projection lambda の overhead。
@@ -25,47 +25,47 @@ namespace Quiver.Benchmarks;
 public class AsSelectProjectionBenchmarks
 {
     [Params(1_000, 10_000)]
-    public int NodeCount { get; set; }
+    public int VertexCount { get; set; }
 
     [Params(4)]
     public int AvgDegree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("assel");
         var rnd = new Random(11);
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
-            _ = db.Schema.GetOrCreateLabel("Person");
-            _ = db.Schema.GetOrCreateRelationshipType("KNOWS");
-            var ids = new NodeId[NodeCount];
-            using (var tx = db.BeginTransaction())
+            _ = db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+            _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+            var ids = new VertexId[VertexCount];
+            using (var tx = db.BeginWriteTransaction())
             {
-                for (int i = 0; i < NodeCount; i++) ids[i] = tx.CreateNode("Person");
+                for (int i = 0; i < VertexCount; i++) ids[i] = tx.CreateVertex("Person");
                 tx.Commit();
             }
             const int batchSize = 50_000;
             int written = 0;
-            IGraphTransaction? tx2 = null;
+            IWriteTransaction? tx2 = null;
             try
             {
-                tx2 = db.BeginTransaction();
-                for (int i = 0; i < NodeCount; i++)
+                tx2 = db.BeginWriteTransaction();
+                for (int i = 0; i < VertexCount; i++)
                 {
                     for (int d = 0; d < AvgDegree; d++)
                     {
-                        tx2.CreateRelationship(ids[i], ids[rnd.Next(NodeCount)], "KNOWS");
+                        tx2.CreateEdge(ids[i], ids[rnd.Next(VertexCount)], "KNOWS");
                         written++;
                         if (written >= batchSize)
                         {
                             tx2.Commit();
                             tx2.Dispose();
-                            tx2 = db.BeginTransaction();
+                            tx2 = db.BeginWriteTransaction();
                             written = 0;
                         }
                     }
@@ -78,8 +78,8 @@ public class AsSelectProjectionBenchmarks
             }
         }
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _readTx = _db.BeginReadOnlyTransaction();
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -94,8 +94,8 @@ public class AsSelectProjectionBenchmarks
     [Benchmark(Baseline = true, Description = "Baseline: chain without As/Select")]
     public int BaselineNoAlias()
     {
-        var g = _readTx.G(_db.Schema);
-        return g.Nodes().HasLabel("Person")
+        var g = _readTx.Query;
+        return g.Vertices().HasLabel("Person")
                     .Out("KNOWS")
                     .Out("KNOWS")
                     .ToList().Count;
@@ -104,8 +104,8 @@ public class AsSelectProjectionBenchmarks
     [Benchmark(Description = "As(a).Out.As(b): alias maintained, terminal Count")]
     public int AsAliasCount()
     {
-        var g = _readTx.G(_db.Schema);
-        return (int)g.Nodes().HasLabel("Person").As("a")
+        var g = _readTx.Query;
+        return (int)g.Vertices().HasLabel("Person").As("a")
                     .Out("KNOWS").As("b")
                     .Out("KNOWS").As("c")
                     .Count();
@@ -114,19 +114,19 @@ public class AsSelectProjectionBenchmarks
     [Benchmark(Description = "Select<(a,b,c)>: tuple materialize per row")]
     public int SelectTuple3()
     {
-        var g = _readTx.G(_db.Schema);
-        var result = g.Nodes().HasLabel("Person").As("a")
+        var g = _readTx.Query;
+        var result = g.Vertices().HasLabel("Person").As("a")
                     .Out("KNOWS").As("b")
                     .Out("KNOWS").As("c")
-                    .Select(t => (t.Node("a"), t.Node("b"), t.Node("c")));
+                    .Select(t => (t.Vertex("a"), t.Vertex("b"), t.Vertex("c")));
         return result.Count;
     }
 
     [Benchmark(Description = "Select(\"a\"): pin then continue traversal")]
     public int SelectPinContinue()
     {
-        var g = _readTx.G(_db.Schema);
-        return g.Nodes().HasLabel("Person").As("a")
+        var g = _readTx.Query;
+        return g.Vertices().HasLabel("Person").As("a")
                     .Out("KNOWS")
                     .Out("KNOWS")
                     .Select("a")

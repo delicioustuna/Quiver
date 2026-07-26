@@ -19,7 +19,7 @@ var dbPath = config.Databases.GetValueOrDefault("default")
     ?? throw new InvalidOperationException("No 'default' database configured in quiver-mcp.json.");
 
 // DB はプロセス起動時に 1 度だけ Open し、全リクエストで共有する (in-process 組み込み DB)
-var db = GraphDatabase.Open(dbPath);
+var db = QuiverDatabase.Open(dbPath);
 
 OpenAiEmbedder? embedder = null;
 if (config.Embedding is { } embConfig)

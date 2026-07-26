@@ -5,18 +5,18 @@ namespace Quiver.Migrations;
 
 internal sealed class MigrationContext : IMigrationContext
 {
-    public IGraphTransaction Transaction { get; }
-    public ISchemaApi Schema { get; }
+    public IWriteTransaction Transaction { get; }
+    public ISchemaEditor Schema { get; }
     public string MigrationId { get; }
 
     // スキーマミューテーションを <see cref="Transaction"/> の rollback と整合させるための
     // 逆操作キュー。各 schema mutation を行うたびにその逆操作を append し、OnRolledBack で
-    // 逆順 (LIFO) に再生する。TokenStore / IndexManager は ARIES tx に乗らないが、
+    // 逆順 (LIFO) に再生する。TokenStore / IndexManager の非ページ操作は write set に乗らないが、
     // この hook で論理的な巻き戻しを実現する。
     private readonly List<Action> _undoActions = [];
     private bool _hooksRegistered;
 
-    internal MigrationContext(IGraphTransaction tx, ISchemaApi schema, string migrationId)
+    internal MigrationContext(IWriteTransaction tx, ISchemaEditor schema, string migrationId)
     {
         Transaction = tx;
         Schema = schema;
@@ -71,12 +71,12 @@ internal sealed class MigrationContext : IMigrationContext
         return ok;
     }
 
-    public bool RenameRelationshipType(string oldName, string newName)
+    public bool RenameEdgeType(string oldName, string newName)
     {
         EnsureRollbackHook();
-        bool willMutate = Schema.TryGetRelationshipTypeId(oldName, out _) && !Schema.TryGetRelationshipTypeId(newName, out _);
-        var ok = Schema.RenameRelationshipType(oldName, newName);
-        if (ok && willMutate) _undoActions.Add(() => Schema.RenameRelationshipType(newName, oldName));
+        bool willMutate = Schema.TryGetEdgeTypeId(oldName, out _) && !Schema.TryGetEdgeTypeId(newName, out _);
+        var ok = Schema.RenameEdgeType(oldName, newName);
+        if (ok && willMutate) _undoActions.Add(() => Schema.RenameEdgeType(newName, oldName));
         return ok;
     }
 
@@ -95,27 +95,23 @@ internal sealed class MigrationContext : IMigrationContext
         // 既存索引に対する AddIndex は no-op。その場合 DropIndex undo を
         // 登録すると rollback で pre-existing な索引が消える corruption になる。
         bool existedBefore = Schema.IndexExists(indexName);
-        Schema.CreateIndex(indexName, label, propertyKey, kind);
+        Schema.CreateIndex(new ScalarIndexDefinition(
+            indexName,
+            new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, label),
+            kind));
         if (!existedBefore) _undoActions.Add(() => Schema.DropIndex(indexName));
     }
 
     public void DropIndex(string indexName)
-    {
-        // DropIndex は索引ファイルを物理削除するため transactional rollback できない。
-        // migrations を書く側で「失敗しうる重い処理の後」に置く / または rebuild migration として
-        // 設計する責任がある点を IMigrationContext.DropIndex の doc で明記。
-        Schema.DropIndex(indexName);
-    }
+        => Schema.DropIndex(indexName);
 
-    public void ForEachNode(string label, Action<NodeId> action)
+    public void ForEachVertex(string label, Action<VertexId> action)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentException.ThrowIfNullOrEmpty(label);
         var labelId = Schema.GetOrCreateLabel(label);
-        if (Transaction is not GraphTransaction gtx)
-            throw new InvalidOperationException(
-                "MigrationContext.ForEachNode requires the default GraphTransaction implementation.");
-        foreach (var nodeId in gtx.Access.ScanNodes(gtx.Inner, labelId))
-            action(nodeId);
+        IReadTransactionInternal transaction = Transaction.AsInternal();
+        foreach (var vertexId in transaction.Access.ScanVertices(transaction.Inner, labelId))
+            action(vertexId);
     }
 }

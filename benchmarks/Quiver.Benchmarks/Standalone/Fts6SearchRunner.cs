@@ -7,15 +7,17 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// FTS-6: BenchmarkDotNet を経由しない短時間ランナーで、設計書 13 §9 の 3 つの
-/// 目標値を実測する:
+/// BenchmarkDotNet を経由せず、大規模 corpus の全文検索 ingest と latency の
+/// 情報値を実測する:
 /// <list type="bullet">
-///   <item><b>検索 p50/p90/p99</b>: N チャンク・2〜5 term クエリ (バッファプール常駐)。目標 p50 &lt; 10ms。</item>
-///   <item><b>取込増幅</b>: 全文索引維持込みの WAL バイト数 ÷ 素の SetProperty の WAL バイト数。目標 5× 以内。</item>
+///   <item><b>検索 p50/p90/p99</b>: N チャンク・2〜5 term クエリ (バッファプール常駐)。</item>
+///   <item><b>取込増幅</b>: 全文索引維持込みの WAL バイト数 ÷ 素の SetProperty の WAL バイト数。</item>
 ///   <item><b>WAL bytes/chunk</b>: 索引維持込みでチャンク 1 件あたりの WAL バイト数 (回帰 sentinel 値)。</item>
 /// </list>
+/// product の合否は segment runner が strict top-k、merge equivalence、4 segment p50、
+/// write amplification を同じ workload で検査するため、本 runner の値では判定しない。
 /// checkpoint は閾値を最大化して WAL truncate を止め、取込で発生した物理ログを
-/// 全量計測する。WAL は単一サイドカー <c>graph.quiver-wal</c> (ARCH-4)。
+/// 全量計測する。WAL は単一サイドカー <c>graph.quiver-wal</c> ()。
 ///
 /// 起動方法: <c>dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --fts6 [chunkCount] [queryCount]</c>
 /// </summary>
@@ -24,10 +26,11 @@ public static class Fts6SearchRunner
     private const string Index = "idx_body";
     private const int BatchSize = 200;     // realistic batch ingest (design §4: 1 tx = 複数チャンク)
     private const int AmpSampleChunks = 5_000;  // bounded sample for the WAL amplification ratio
+    private const int MaintenanceIntervalChunks = 10_000;
 
     public static int Run(int searchChunks, int queryCount)
     {
-        Console.WriteLine("=== FTS-6: Full-Text Search / Ingest Amplification ===");
+        Console.WriteLine("=== Full-Text Search / Ingest Amplification ===");
         Console.WriteLine($"searchChunks={searchChunks}, queryCount={queryCount}, batchSize={BatchSize}");
         Console.WriteLine();
 
@@ -47,7 +50,7 @@ public static class Fts6SearchRunner
         long walPlain = MeasureWal(vocab, ampChunks, withIndex: false, out double ampMsPlain);
         double amplification = walPlain > 0 ? walWithFt / (double)walPlain : double.NaN;
 
-        Console.WriteLine($"--- ingest WAL amplification over {ampChunks:N0} chunks, checkpoint OFF (design 13 §9: target ≤ 5×) ---");
+        Console.WriteLine($"--- ingest WAL amplification over {ampChunks:N0} chunks, checkpoint OFF (informational) ---");
         Console.WriteLine($"WAL with FT:        {walWithFt,12:N0} bytes  ({walWithFt / (double)ampChunks,8:F1} bytes/chunk)  ingest {ampMsFt,7:F0} ms");
         Console.WriteLine($"WAL plain:          {walPlain,12:N0} bytes  ({walPlain / (double)ampChunks,8:F1} bytes/chunk)  ingest {ampMsPlain,7:F0} ms");
         Console.WriteLine($"amplification:      {amplification,12:F2}×");
@@ -60,8 +63,8 @@ public static class Fts6SearchRunner
         var dirFt = BenchTempDir.Create("fts6_search");
         try
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
-            db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
+            db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
             double ingestMs = IngestCorpus(db, vocab, searchChunks, seed: 11);
             Console.WriteLine($"built search corpus: {searchChunks:N0} chunks in {ingestMs,7:F0} ms ({searchChunks / (ingestMs / 1000.0),8:F0} chunks/s)");
             Console.WriteLine();
@@ -87,10 +90,10 @@ public static class Fts6SearchRunner
         var dir = BenchTempDir.Create(withIndex ? "fts6_amp_ft" : "fts6_amp_plain");
         try
         {
-            using var db = GraphDatabase.Open(
+            using var db = QuiverDatabase.Open(
                 System.IO.Path.Combine(dir, "graph.quiver"),
-                new GraphDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
-            if (withIndex) db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+                new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
+            if (withIndex) db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
             ingestMs = IngestCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);
         }
@@ -100,7 +103,7 @@ public static class Fts6SearchRunner
         }
     }
 
-    private static double IngestCorpus(GraphDatabase db, ZipfVocabulary vocab, int chunkCount, int seed)
+    private static double IngestCorpus(QuiverDatabase db, ZipfVocabulary vocab, int chunkCount, int seed)
     {
         var rng = new Random(seed);
         var sw = Stopwatch.StartNew();
@@ -108,29 +111,45 @@ public static class Fts6SearchRunner
         while (written < chunkCount)
         {
             int batch = Math.Min(BatchSize, chunkCount - written);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int b = 0; b < batch; b++)
             {
-                var n = tx.CreateNode("Doc");
+                var n = tx.CreateVertex("Doc");
                 tx.SetProperty(n, "body", PropertyValue.FromString(MakeChunk(vocab, rng)));
             }
             tx.Commit();
             written += batch;
+
+            // Durable segment bodies are append-only until vacuum retires manifests that no
+            // reader can observe. A scale benchmark must exercise that production maintenance
+            // path, otherwise repeated merges retain O(N^2) historical artifacts and measure
+            // temporary disk exhaustion instead of steady-state ingest/search behavior.
+            if (chunkCount > AmpSampleChunks
+                && written % MaintenanceIntervalChunks == 0)
+            {
+                var backend = (BinaryGraphStorageBackend)db.BackendInternal;
+                backend.WaitForFullTextSegmentMergeForTest();
+                if (backend.FullTextSegmentMergeErrorForTest is Exception mergeError)
+                    throw new InvalidOperationException(
+                        "Full-text segment merge failed during benchmark maintenance.",
+                        mergeError);
+                db.Vacuum();
+            }
         }
         sw.Stop();
         return sw.Elapsed.TotalMilliseconds;
     }
 
     private static List<double> MeasureSearchLatencies(
-        GraphDatabase db, ZipfVocabulary vocab, int queryCount, int seed)
+        QuiverDatabase db, ZipfVocabulary vocab, int queryCount, int seed)
     {
         var rng = new Random(seed);
-        // FTS-8: collect stats so the per-term (df, maxTf) snapshot is available and the
+        // collect stats so the per-term (df, maxTf) snapshot is available and the
         // text-first operator takes the WAND pruning path (G(schema) without stats stays on
-        // the full term-at-a-time scan — the FTS-6 baseline).
+        // the full term-at-a-time scan — the  baseline).
         var stats = db.CollectStats();
-        using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema, stats);
+        using var rtx = db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         // Warmup so the buffer pool is resident before timing (design §9 premise).
         for (int i = 0; i < Math.Min(20, queryCount); i++)
@@ -153,7 +172,7 @@ public static class Fts6SearchRunner
 
     private static void ReportSearch(List<double> sortedMs, int chunkCount)
     {
-        Console.WriteLine($"--- search latency over {chunkCount:N0} chunks (design 13 §9: target p50 < 10ms) ---");
+        Console.WriteLine($"--- search latency over {chunkCount:N0} chunks (informational) ---");
         Console.WriteLine($"queries:            {sortedMs.Count}");
         Console.WriteLine($"p50:                {Percentile(sortedMs, 0.50),9:F3} ms");
         Console.WriteLine($"p90:                {Percentile(sortedMs, 0.90),9:F3} ms");

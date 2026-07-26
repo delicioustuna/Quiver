@@ -23,8 +23,9 @@ public class SingleFileContainerRecoveryTests : IDisposable
 {
     private const byte DataFileKind = 1;
     // カタログ内のテナント ID (WAL fileKind とは別空間)。
-    private const byte NodesTenant = (byte)WalFileKind.Nodes;
-    private const byte NodeVerTenant = (byte)WalFileKind.NodeVersionMeta;
+    private const byte VerticesTenant = (byte)WalFileKind.Vertices;
+    private const byte VertexVerTenant = (byte)WalFileKind.VertexVersionMeta;
+    private const byte VertexMapTenant = 14;
 
     private readonly string _walDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
     private readonly string _srcPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".quiver");
@@ -44,12 +45,13 @@ public class SingleFileContainerRecoveryTests : IDisposable
         if (File.Exists(_crashPath)) File.Delete(_crashPath);
     }
 
-    private static NodeStore OpenNodeStore(SingleFileContainer c)
+    private static VersionedVertexStore OpenVertexStore(SingleFileContainer c)
     {
-        var nodeT = c.OpenTenant(NodesTenant, PageKind.Header);
-        var verT = c.OpenTenant(NodeVerTenant, PageKind.Header);
+        var vertexT = c.OpenTenant(VerticesTenant, PageKind.Header);
+        var verT = c.OpenTenant(VertexVerTenant, PageKind.Header);
+        var mapT = c.OpenTenant(VertexMapTenant, PageKind.Header);
         var versions = new EntityVersionStore(verT);
-        return new NodeStore(nodeT, labelIndex: null, versions);
+        return new VersionedVertexStore(vertexT, new ItemPointerMap(mapT), labelIndex: null, versions);
     }
 
     /// <summary>ストアを init してデータファイルへフラッシュし、その時点を crashPath へスナップショットする。</summary>
@@ -58,32 +60,33 @@ public class SingleFileContainerRecoveryTests : IDisposable
         using (var src = new SingleFileContainer(_srcPath))
         {
             src.EnableWalLogging(DataFileKind, _wal);
-            OpenNodeStore(src); // ctor がヘッダ/カタログ/page-table を init (tx 外 = WAL 非対象)
+            OpenVertexStore(src); // ctor がヘッダ/カタログ/page-table を init (tx 外 = WAL 非対象)
             src.Flush();
         }
         File.Copy(_srcPath, _crashPath, overwrite: true);
     }
 
     [Fact]
-    public void Committed_node_is_recovered()
+    public void Committed_vertex_is_recovered()
     {
         InitAndSnapshot();
 
-        NodeId id;
+        VertexId id;
         // 再オープンして committed tx を 1 件流す。tx 中のページ変更だけが WAL に乗る。
         using (var src = new SingleFileContainer(_srcPath))
         {
             src.EnableWalLogging(DataFileKind, _wal);
-            var store = OpenNodeStore(src);
+            var store = OpenVertexStore(src);
 
             var txId = new TransactionId(42);
-            _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
-            WalPageContext.Begin(_wal, txId);
+            _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+            var writeSet = new WalWriteSet(_wal, txId);
+            _wal.ActiveWriteSet = writeSet;
             id = store.Allocate(new LabelId(7));
-            WalPageContext.FlushPending();
+            writeSet.FlushPending();
             long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(commitLsn);
-            WalPageContext.End();
+            _wal.ActiveWriteSet = null;
         }
 
         // pre-tx スナップショット (crashPath) へ WAL を recover。
@@ -92,32 +95,33 @@ public class SingleFileContainerRecoveryTests : IDisposable
         new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
         dst.ReloadAll();
 
-        var recovered = OpenNodeStore(dst);
+        var recovered = OpenVertexStore(dst);
         using var h = recovered.Read(id);
         h.InUse.Should().BeTrue();
         h.Label.Value.Should().Be(7);
     }
 
     [Fact]
-    public void Aborted_node_is_not_recovered()
+    public void Aborted_vertex_is_not_recovered()
     {
         InitAndSnapshot();
 
-        NodeId id;
+        VertexId id;
         using (var src = new SingleFileContainer(_srcPath))
         {
             src.EnableWalLogging(DataFileKind, _wal);
-            var store = OpenNodeStore(src);
+            var store = OpenVertexStore(src);
 
             var txId = new TransactionId(99);
-            _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
-            WalPageContext.Begin(_wal, txId);
+            _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+            var writeSet = new WalWriteSet(_wal, txId);
+            _wal.ActiveWriteSet = writeSet;
             id = store.Allocate(new LabelId(7));
-            WalPageContext.FlushPending();
+            writeSet.FlushPending();
             // Commit ではなく Abort。recovery は committed でないページイメージを redo しない。
             long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(abortLsn);
-            WalPageContext.End();
+            _wal.ActiveWriteSet = null;
         }
 
         using var dst = new SingleFileContainer(_crashPath);
@@ -125,8 +129,8 @@ public class SingleFileContainerRecoveryTests : IDisposable
         new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
         dst.ReloadAll();
 
-        // 中断 tx のレコード / ヘッダ更新は redo されないため、ノードは存在しない (hwm は pre-tx のまま)。
-        var recovered = OpenNodeStore(dst);
+        // 中断 tx のレコード / ヘッダ更新は redo されないため、Vertexは存在しない (hwm は pre-tx のまま)。
+        var recovered = OpenVertexStore(dst);
         using var h = recovered.Read(id);
         h.InUse.Should().BeFalse();
     }

@@ -6,8 +6,8 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// 全文検索インデックスから BM25 関連度降順で top-<c>k</c> ノード ID を放出するリーフ演算子。
-/// <see cref="KnnNodeSourceOperator"/> と同様にフィルタ / 展開チェーンと合成できる。
+/// 全文検索インデックスから BM25 関連度降順で top-<c>k</c> Vertex ID を放出するリーフ演算子。
+/// <see cref="KnnVertexSourceOperator"/> と同様にフィルタ / 展開チェーンと合成できる。
 /// </summary>
 /// <remarks>
 /// 共有 <see cref="Bm25Scorer"/> による term-at-a-time BM25: インデックス記録済みトークナイザで
@@ -24,7 +24,7 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
     private readonly string _queryText;
     private readonly int _k;
     private readonly Bm25CorpusStats? _corpus;
-    private NodeId[] _results = Array.Empty<NodeId>();
+    private VertexId[] _results = Array.Empty<VertexId>();
     private int _pos = -1;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
@@ -41,19 +41,20 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         _corpus = corpus;
     }
 
-    public TupleSchema Schema { get; } = new([new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
+    public TupleSchema Schema { get; } = new([new ColumnDefinition("vertexId", TupleSlotType.VertexId)]);
     public OperatorStatistics Statistics { get; private set; }
     public TupleRef Current => new(_buffer);
 
     public void Open(ITransaction tx)
     {
-        if (!tx.Indexes.TryGetFullTextIndex(_indexName, out var ft))
+        if (tx.FullTextSegments is null
+            || !tx.FullTextSegments.TryOpen(tx, _indexName, out var ft))
             throw new ConstraintException($"Full-text index '{_indexName}' does not exist.");
-        var tokenizer = tx.Indexes.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
 
-        var nodes = tx.Nodes;
+        var vertices = tx.Vertices;
         var termStats = _corpus?.Terms;
         List<long>? ranked;
 
@@ -67,7 +68,7 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
             var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
             ranked = termStats is not null
                 ? Bm25Scorer.RankWandTerms(ft, terms, n, avgdl, termStats, _k,
-                    isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
+                    isLive: packed => ft.IsVisibleVertexCandidate(packed, tx))
                 : null;
             ranked ??= Bm25Scorer.RankTerms(ft, terms, n, avgdl, candidateSequences: null, termStats);
         }
@@ -75,12 +76,16 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         {
             ranked = termStats is not null
                 ? Bm25Scorer.RankWand(ft, tokenizer, _queryText, n, avgdl, termStats, _k,
-                    isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
+                    isLive: packed => ft.IsVisibleVertexCandidate(packed, tx))
                 : null;
             ranked ??= Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null, termStats);
         }
 
-        _results = IndexValueResolver.ResolveLiveNodeIds(ranked, nodes).Take(_k).ToArray();
+        _results = IndexValueResolver.ResolveLiveVertexIds(
+                ranked.Where(packed => ft.IsVisibleVertexCandidate(packed, tx)),
+                vertices)
+            .Take(_k)
+            .ToArray();
         _pos = -1;
     }
 
@@ -88,7 +93,7 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
     {
         if (_pos + 1 >= _results.Length) return false;
         _pos++;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _results[_pos].Value };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _results[_pos].Value };
         var s = Statistics;
         s.RowsProduced++;
         Statistics = s;

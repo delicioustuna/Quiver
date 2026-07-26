@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 
 namespace Quiver.Storage.Records;
 
@@ -10,52 +10,58 @@ namespace Quiver.Storage.Records;
 /// </summary>
 public sealed class BulkLoader : IDisposable
 {
-    private readonly VersionedNodeStore _nodeStore;
-    private readonly VersionedRelationshipStore _relStore;
-    private readonly PropertyStore _propStore;
+    private readonly VersionedVertexStore _vertexStore;
+    private readonly VersionedEdgeStore _edgeStore;
+    private readonly PropertyVersionStore _propStore;
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
+    private IDisposable? _writerLease;
+    private readonly Action? _afterCommit;
 
-    private readonly List<PendingNode> _nodes = new();
-    private readonly List<PendingRel> _rels = new();
-    private readonly Dictionary<long, List<PendingProp>> _propsByNode = new();
-    // リレーションシップごとの V2 payload lane 用 raw 値を収集する。
-    // (RelationshipId, PropertyKeyId) でキーイングしているため同一ローダが複数の payload キー
+    private readonly List<PendingVertex> _vertices = new();
+    private readonly List<PendingEdge> _edges = new();
+    private readonly Dictionary<long, List<PendingProp>> _propsByVertex = new();
+    // Edgeごとの payload lane 用 raw 値を収集する。
+    // (EdgeId, PropertyKeyId) でキーイングしているため同一ローダが複数の payload キー
     // 候補を受けられるが、実際に inline されるのは WithPayloadLane で指定されたもののみ。
-    private readonly Dictionary<(long RelId, int KeyId), long> _relPayloads = new();
+    private readonly Dictionary<(long EdgeId, int KeyId), long> _edgePayloads = new();
     private PayloadLaneSpec? _payloadSpec;
     private bool _committed;
 
-    private record struct PendingNode(long Id, int LabelId);
-    private record struct PendingRel(long Id, long Src, long Tgt, int TypeId);
+    private record struct PendingVertex(long Id, int LabelId);
+    private record struct PendingEdge(long Id, long Src, long Tgt, int TypeId);
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
-    internal BulkLoader(VersionedNodeStore nodeStore, VersionedRelationshipStore relStore, PropertyStore propStore,
-        Quiver.Storage.SingleFileContainer? container = null)
+    internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
+        Quiver.Storage.SingleFileContainer? container = null,
+        IDisposable? writerLease = null,
+        Action? afterCommit = null)
     {
-        _nodeStore = nodeStore;
-        _relStore = relStore;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
         _propStore = propStore;
         _container = container;
+        _writerLease = writerLease;
+        _afterCommit = afterCommit;
     }
 
-    /// <summary>ノードを追加する (ラベル付き)。</summary>
-    public void AppendNode(NodeId id, LabelId label)
+    /// <summary>Vertexを追加する (ラベル付き)。</summary>
+    public void AppendVertex(VertexId id, LabelId label)
     {
         ThrowIfCommitted();
         // 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
-        _nodes.Add(new PendingNode(id.Sequence, label.Value));
+        _vertices.Add(new PendingVertex(id.Sequence, label.Value));
     }
 
-    /// <summary>リレーションシップを追加する (順不同で可)。</summary>
-    public void AppendRelationship(RelationshipId id, NodeId from, NodeId to, RelationshipTypeId type)
+    /// <summary>Edgeを追加する (順不同で可)。</summary>
+    public void AppendEdge(EdgeId id, VertexId from, VertexId to, EdgeTypeId type)
     {
         ThrowIfCommitted();
-        _rels.Add(new PendingRel(id.Sequence, from.Sequence, to.Sequence, type.Value));
+        _edges.Add(new PendingEdge(id.Sequence, from.Sequence, to.Sequence, type.Value));
     }
 
-    /// <summary>ノードにプロパティを追加する。</summary>
-    public void AppendProperty(NodeId nodeId, PropertyKeyId key, in PropertyValue value)
+    /// <summary>Vertexにプロパティを追加する。</summary>
+    public void AppendProperty(VertexId vertexId, PropertyKeyId key, in PropertyValue value)
     {
         ThrowIfCommitted();
         byte[]? data = null;
@@ -64,15 +70,15 @@ public sealed class BulkLoader : IDisposable
         else if (value.Type is PropertyValueType.Bytes)
             data = value.BytesValue.ToArray();
 
-        if (!_propsByNode.TryGetValue(nodeId.Sequence, out var props))
-            _propsByNode[nodeId.Sequence] = props = new();
+        if (!_propsByVertex.TryGetValue(vertexId.Sequence, out var props))
+            _propsByVertex[vertexId.Sequence] = props = new();
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
     }
 
     /// <summary>
-    /// inline payload lane を設定し、<see cref="Commit"/> で指定したリレーションシッププロパティを
-    /// エッジエントリ毎に inline 格納した <c>AdjacencyBlockStoreV2</c> を構築させる
-    /// 。以後の <see cref="AppendRelationshipPayload"/> で lane を埋め、
+    /// inline payload lane を設定し、<see cref="Commit"/> で指定したEdgeプロパティを
+    /// エッジエントリ毎に inline 格納した <c>AdjacencySegmentStore</c> を構築させる
+    /// 。以後の <see cref="AppendEdgePayload"/> で lane を埋め、
     /// 値の無いエッジには <c>spec.DefaultRaw</c> が入る。
     /// </summary>
     public void WithPayloadLane(PayloadLaneSpec spec)
@@ -84,76 +90,90 @@ public sealed class BulkLoader : IDisposable
     }
 
     /// <summary>
-    /// リレーションシップの inline payload 値を記録する。<see cref="WithPayloadLane"/> の spec と
-    /// キーが一致する値のみが V2 ビューに inline され、他キーは破棄される。生の long は lane の
+    /// Edgeの inline payload 値を記録する。<see cref="WithPayloadLane"/> の spec と
+    /// キーが一致する値のみが adjacency segment に inline され、他キーは破棄される。生の long は lane の
     /// 種別に応じて Int64 値または <c>BitConverter.DoubleToInt64Bits(d)</c>。
     /// </summary>
-    public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
+    public void AppendEdgePayload(EdgeId edgeId, PropertyKeyId key, long rawValue)
     {
         ThrowIfCommitted();
-        _relPayloads[(relId.Sequence, key.Value)] = rawValue;
+        _edgePayloads[(edgeId.Sequence, key.Value)] = rawValue;
     }
 
-    /// <summary>溜めたノード / リレーションシップ / プロパティを 1 回のフラッシュで書き出し確定する。</summary>
+    /// <summary>溜めたVertex / Edge / プロパティを 1 回のフラッシュで書き出し確定する。</summary>
     public void Commit()
     {
         ThrowIfCommitted();
         _committed = true;
+        bool succeeded = false;
 
-        CommitNodes();
-        CommitRelationships();
-        CommitProperties();
-        if (_container != null)
-            BuildAdjacencyIndex(_container);
+        try
+        {
+            CommitVertices();
+            CommitEdges();
+            CommitProperties();
+            if (_container != null)
+                BuildAdjacencyIndex(_container);
+            succeeded = true;
+        }
+        finally
+        {
+            ReleaseWriterLease();
+        }
+        if (succeeded)
+            _afterCommit?.Invoke();
     }
 
-    /// <summary>ローダを破棄する (現状は no-op)。</summary>
-    public void Dispose() { }
+    /// <summary>ローダを破棄し、未使用の writer lease を解放する。</summary>
+    public void Dispose() => ReleaseWriterLease();
+
+    private void ReleaseWriterLease()
+        => Interlocked.Exchange(ref _writerLease, null)?.Dispose();
 
     // -----------------------------------------------------------------------
 
-    private void CommitNodes()
+    private void CommitVertices()
     {
         long hwm = 0;
-        foreach (var node in _nodes)
+        foreach (var vertex in _vertices)
         {
-            _nodeStore.BulkWrite(node.Id, node.LabelId);
-            if (node.Id >= hwm) hwm = node.Id + 1;
+            _vertexStore.BulkWrite(vertex.Id, vertex.LabelId);
+            if (vertex.Id >= hwm) hwm = vertex.Id + 1;
         }
-        _nodeStore.BulkSetHeaders(hwm, _nodes.Count);
+        _vertexStore.BulkSetHeaders(hwm, _vertices.Count);
     }
 
     // 単一パス dense-array ポインタ計算。従来の 2 パス
     // Dictionary<long, List<(long, bool)>> + Dictionary<long, (long, long, long, long)>
     // 方式 (10M エッジで ~700+ MB 割り当て) を置き換える。アルゴリズム:
     //
-    //   RelId 昇順で各 rel r について、各接触ノードのチェーンは src 側と tgt 側の rel を
-    //   交互配置する。ノードごとに直近の rel と側を追跡し、同一ノードに新しい rel が来たら
+    //   EdgeId 昇順で各 edge r について、各接触Vertexのチェーンは src 側と tgt 側の edge を
+    //   交互配置する。Vertexごとに直近の edge と側を追跡し、同一Vertexに新しい edge が来たら
     //   (1) Next フィールドを前の末尾に向け、(2) 前の末尾の Prev フィールドを適切な側で
-    //   パッチする。各ノードの FirstRelId は最終的な lastByNode[node] (最大 RelId)。
+    //   パッチする。各Vertexの FirstEdgeId は最終的な lastByVertex[vertex] (最大 EdgeId)。
     //
     // Self-loop: src 側のみをチェーンに記録する。書き込み時 tgt 側のフィールドは src を
     // ミラーする — 従来の実装と同じセマンティクス。
-    private void CommitRelationships()
+    private void CommitEdges()
     {
-        if (_rels.Count == 0)
+        if (_edges.Count == 0)
         {
-            _relStore.BulkSetHeaders(0, 0);
+            _edgeStore.BulkSetHeaders(0, 0);
             return;
         }
 
-        long relHwm = 0, nodeHwm = 0;
-        foreach (var r in _rels)
+        long relHwm = 0, vertexHwm = 0;
+        foreach (var r in _edges)
         {
             if (r.Id  >= relHwm)  relHwm  = r.Id  + 1;
-            if (r.Src >= nodeHwm) nodeHwm = r.Src + 1;
-            if (r.Tgt >= nodeHwm) nodeHwm = r.Tgt + 1;
+            if (r.Src >= vertexHwm) vertexHwm = r.Src + 1;
+            if (r.Tgt >= vertexHwm) vertexHwm = r.Tgt + 1;
         }
 
-        // チェーンポインタを正しい方向にパッチするため、RelId 昇順で処理する必要がある。
+        // チェーンポインタを正しい方向にパッチするため、EdgeId 昇順で処理する必要がある。
         // 呼び出し側は通常シーケンシャルに append するのでソートはほぼ no-op だが、
         // 防御的にソートする。
-        _rels.Sort((a, b) => a.Id.CompareTo(b.Id));
+        _edges.Sort((a, b) => a.Id.CompareTo(b.Id));
 
         var srcPrev = new long[relHwm];
         var srcNext = new long[relHwm];
@@ -164,95 +184,97 @@ public sealed class BulkLoader : IDisposable
         Array.Fill(tgtPrev, -1L);
         Array.Fill(tgtNext, -1L);
 
-        var lastByNode = new long[nodeHwm];
-        var lastSide   = new byte[nodeHwm]; // 0 = src at this node, 1 = tgt
-        Array.Fill(lastByNode, -1L);
+        var lastByVertex = new long[vertexHwm];
+        var lastSide   = new byte[vertexHwm]; // 0 = src at this vertex, 1 = tgt
+        Array.Fill(lastByVertex, -1L);
 
-        foreach (var r in _rels)
+        foreach (var r in _edges)
         {
-            long prev = lastByNode[r.Src];
+            long prev = lastByVertex[r.Src];
             if (prev >= 0)
             {
                 if (lastSide[r.Src] == 0) srcPrev[prev] = r.Id;
                 else                      tgtPrev[prev] = r.Id;
             }
             srcNext[r.Id] = prev;
-            lastByNode[r.Src] = r.Id;
+            lastByVertex[r.Src] = r.Id;
             lastSide[r.Src] = 0;
 
             if (r.Tgt != r.Src)
             {
-                long prevT = lastByNode[r.Tgt];
+                long prevT = lastByVertex[r.Tgt];
                 if (prevT >= 0)
                 {
                     if (lastSide[r.Tgt] == 0) srcPrev[prevT] = r.Id;
                     else                      tgtPrev[prevT] = r.Id;
                 }
                 tgtNext[r.Id] = prevT;
-                lastByNode[r.Tgt] = r.Id;
+                lastByVertex[r.Tgt] = r.Id;
                 lastSide[r.Tgt] = 1;
             }
         }
 
         long hwm = 0;
-        foreach (var r in _rels)
+        foreach (var r in _edges)
         {
             long sp = srcPrev[r.Id], sn = srcNext[r.Id];
             long tp, tn;
             if (r.Src == r.Tgt) { tp = sp; tn = sn; }
             else                { tp = tgtPrev[r.Id]; tn = tgtNext[r.Id]; }
 
-            _relStore.BulkWrite(r.Id, r.Src, r.Tgt, r.TypeId, sp, sn, tp, tn);
+            _edgeStore.BulkWrite(r.Id, r.Src, r.Tgt, r.TypeId, sp, sn, tp, tn);
             if (r.Id >= hwm) hwm = r.Id + 1;
         }
-        _relStore.BulkSetHeaders(hwm, _rels.Count);
+        _edgeStore.BulkSetHeaders(hwm, _edges.Count);
 
-        for (long n = 0; n < nodeHwm; n++)
+        for (long n = 0; n < vertexHwm; n++)
         {
-            long head = lastByNode[n];
+            long head = lastByVertex[n];
             if (head >= 0)
-                _nodeStore.UpdateFirstRelId(new NodeId(n), new RelationshipId(head));
+                _vertexStore.UpdateFirstEdgeId(new VertexId(n), new EdgeId(head));
         }
     }
 
     private void CommitProperties()
     {
-        foreach (var (nodeId, props) in _propsByNode)
+        foreach (var (vertexId, props) in _propsByVertex)
         {
             // tail-to-head でチェーンを構築する。最後に書き込まれたプロパティが head になる。
-            long nextPropId = -1L;
+            long nextPropertySequence = -1L;
+            var owner = EntityRef.From(VertexId.Create(vertexId, _vertexStore.CurrentGeneration(vertexId)));
             foreach (var prop in props)
             {
-                var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Sequence; // Int48 NextPropId は Sequence
+                var propertyVersion = _propStore.BulkCreate(
+                    owner, prop.KeyId, PropertyCardinality.Single, prop.Type, prop.Scalar, prop.Data, nextPropertySequence);
+                nextPropertySequence = propertyVersion.Sequence; // Int48 chain link は Sequence
             }
-            _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
+            _vertexStore.BulkUpdateFirstPropertyRef(vertexId, nextPropertySequence);
         }
         _propStore.BulkFlushMeta();
     }
 
     private void BuildAdjacencyIndex(Quiver.Storage.SingleFileContainer container)
     {
-        long nodeHwm = _nodes.Count > 0 ? _nodes.Max(n => n.Id) + 1 : 0L;
-        long relHwm = _rels.Count > 0 ? _rels.Max(r => r.Id) + 1 : 0L;
-        var relData = _rels.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
+        long vertexHwm = _vertices.Count > 0 ? _vertices.Max(n => n.Id) + 1 : 0L;
+        long relHwm = _edges.Count > 0 ? _edges.Max(r => r.Id) + 1 : 0L;
+        var relData = _edges.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
 
         Dictionary<long, long>? weights = null;
         if (_payloadSpec is { } spec)
         {
-            // V2 ビルド。設定されたキーに payload をフィルタする。raw 値はそのまま渡される
-            // (double<->long の再解釈は AppendRelationshipPayload 経由で呼び出し側の責任)。
-            weights = new Dictionary<long, long>(_relPayloads.Count);
-            foreach (var ((relId, keyId), raw) in _relPayloads)
+            // 設定されたキーに payload をフィルタする。raw 値はそのまま渡される
+            // (double<->long の再解釈は AppendEdgePayload 経由で呼び出し側の責任)。
+            weights = new Dictionary<long, long>(_edgePayloads.Count);
+            foreach (var ((edgeId, keyId), raw) in _edgePayloads)
             {
                 if (keyId == spec.PropertyKeyId)
-                    weights[relId] = raw;
+                    weights[edgeId] = raw;
             }
         }
 
         // relHwm を base watermark として記録し、post-bulk-load の delta
         // (id >= relHwm) を読み取り時に base ビューへ二重計上せず merge できるようにする。
-        AdjacencyContainer.Build(container, relData, nodeHwm, relHwm, _payloadSpec, weights);
+        AdjacencyContainer.Build(container, relData, vertexHwm, relHwm, _payloadSpec, weights);
     }
 
     private void ThrowIfCommitted()

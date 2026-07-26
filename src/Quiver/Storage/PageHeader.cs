@@ -1,29 +1,29 @@
-﻿using System.Buffers.Binary;
-using System.IO.Hashing;
+using System.Buffers.Binary;
 using Quiver.Core;
 
 namespace Quiver.Storage;
 
 /// <summary>
-/// 各ページ先頭 32 バイトのヘッダ定義。
+/// 各ページ先頭 40 バイトのヘッダ定義。
 /// </summary>
 internal static class PageHeader
 {
-    public const int Size = 32;
-    public const uint Magic = 0x47445042; // "GDPB"
-    public const byte LayoutVersion = 1;
+    private static ReadOnlySpan<byte> FamilyMagic => "QUIVER-SW"u8;
+
+    public const int Size = 40;
+    public const byte FamilyVersion = StorageFormatVersion.Current;
 
     private const int OffsetMagic = 0;
-    private const int OffsetVersion = 4;
-    private const int OffsetKind = 5;
-    private const int OffsetPageId = 8;
-    private const int OffsetLsn = 16;
-    private const int OffsetChecksum = 24;
+    private const int OffsetVersion = 9;
+    private const int OffsetKind = 10;
+    private const int OffsetPageId = 16;
+    private const int OffsetLsn = 24;
+    private const int OffsetChecksum = 32;
 
     public static void Write(Span<byte> page, PageId pageId, PageKind kind, long lsn)
     {
-        BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetMagic..], Magic);
-        page[OffsetVersion] = LayoutVersion;
+        FamilyMagic.CopyTo(page[OffsetMagic..]);
+        page[OffsetVersion] = FamilyVersion;
         page[OffsetKind] = (byte)kind;
         BinaryPrimitives.WriteInt64LittleEndian(page[OffsetPageId..], pageId.Value);
         BinaryPrimitives.WriteInt64LittleEndian(page[OffsetLsn..], lsn);
@@ -41,9 +41,12 @@ internal static class PageHeader
 
     public static void Validate(ReadOnlySpan<byte> page, PageId expectedPageId)
     {
-        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(page[OffsetMagic..]);
-        if (magic != Magic)
-            throw new CorruptionException($"Invalid page magic: 0x{magic:X8}");
+        if (!page[OffsetMagic..(OffsetMagic + FamilyMagic.Length)].SequenceEqual(FamilyMagic))
+            throw new StorageFormatMismatchException("database", 0, FamilyVersion);
+
+        byte version = page[OffsetVersion];
+        if (version != FamilyVersion)
+            throw new StorageFormatMismatchException("database", version, FamilyVersion);
 
         long pageId = BinaryPrimitives.ReadInt64LittleEndian(page[OffsetPageId..]);
         if (pageId != expectedPageId.Value)

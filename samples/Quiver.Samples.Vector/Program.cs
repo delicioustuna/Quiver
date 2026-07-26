@@ -9,40 +9,42 @@ using Quiver.Core;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_vec_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     // ── インデックス定義 ──
     const string indexName = "person_bio_v1";
-    var bioKey = db.Schema.GetOrCreatePropertyKey("bio");
-    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-        Name: indexName,
-        EntityKind: EntityKind.Node,
-        SourcePropertyKeyId: bioKey,
-        Dimensions: 4,
-        Metric: DistanceMetric.Cosine,
-        ProviderId: "sample-static"));
+    using (var schemaTx = db.BeginWriteTransaction())
+    {
+        schemaTx.EditSchema.GetOrCreatePropertyKey("bio");
+        schemaTx.EditSchema.CreateIndex(new VectorIndexDefinition(
+            indexName,
+            new PropertyTarget(PropertyOwnerKind.Vertex, "bio", "Person"),
+            Dimensions: 4,
+            Metric: DistanceMetric.Cosine));
+        schemaTx.Commit();
+    }
 
-    NodeId aliceId, bobId, carolId;
+    VertexId aliceId, bobId, carolId;
 
     // ── データ投入 ──
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var g = tx.G(db.Schema);
-        aliceId = g.AddNode("Person").P("name", "Alice").Next();
-        bobId   = g.AddNode("Person").P("name", "Bob").Next();
-        carolId = g.AddNode("Person").P("name", "Carol").Next();
+        var g = tx.Query;
+        aliceId = tx.Mutate.AddVertex("Person").P("name", "Alice").Next();
+        bobId   = tx.Mutate.AddVertex("Person").P("name", "Bob").Next();
+        carolId = tx.Mutate.AddVertex("Person").P("name", "Carol").Next();
 
-        db.Vectors.SetVector(EntityKind.Node, aliceId.Value, indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
-        db.Vectors.SetVector(EntityKind.Node, bobId.Value,   indexName, new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
-        db.Vectors.SetVector(EntityKind.Node, carolId.Value, indexName, new float[] { 0.9f, 0.8f, 0.7f, 0.6f });
+        tx.SetVectorProperty(EntityRef.From(aliceId), "bio", [0.1f, 0.2f, 0.3f, 0.4f]);
+        tx.SetVectorProperty(EntityRef.From(bobId), "bio", [0.0f, 0.1f, 0.2f, 0.5f]);
+        tx.SetVectorProperty(EntityRef.From(carolId), "bio", [0.9f, 0.8f, 0.7f, 0.6f]);
         tx.Commit();
     }
 
     // ── 1. KNN を起点とするトラバーサル ──
     Console.WriteLine("── 1. g.Knn(query, k=2) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var top2Names = g.Knn(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 2)
                          .Values("name")
                          .ToList();
@@ -52,10 +54,10 @@ try
     // ── 2. グラフファーストな複合検索 (フィルタしてから KNN) ──
     Console.WriteLine();
     Console.WriteLine("── 2. graph-first hybrid ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
-        var filtered = g.Nodes().HasLabel("Person")
+        var g = tx.Query;
+        var filtered = g.Vertices().HasLabel("Person")
                         .FilterByKnn(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 1)
                         .Values("name")
                         .ToList();
@@ -64,13 +66,14 @@ try
 
     // ── 3. 生スコア付きの直接 KNN ──
     Console.WriteLine();
-    Console.WriteLine("── 3. 生スコア付き db.Vectors.KnnSearch ──");
-    using (var cursor = db.Vectors.KnnSearch(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 3))
+    Console.WriteLine("── 3. 生スコア付き transaction KNN ──");
+    using (var tx = db.BeginReadTransaction())
     {
+        using var cursor = tx.KnnSearch(indexName, [0.1f, 0.2f, 0.3f, 0.4f], k: 3);
         while (cursor.MoveNext())
         {
             var hit = cursor.Current;
-            Console.WriteLine($"  {hit.EntityKind}#{hit.EntityId}  score={hit.Score:F4}");
+            Console.WriteLine($"  {hit.Owner.Kind}#{hit.Owner.Sequence}  score={hit.Score:F4}");
         }
     }
 }

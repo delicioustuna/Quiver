@@ -6,174 +6,162 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 1 つのベクトルインデックスの payload を container テナントへ永続化する固定次元ストア。
-/// Sequence をキーに <c>[gen:u16 | present:u8 | reserved:u8 | float×dim]</c> のレコードを保持する。
-/// レコードはページ本体 (<see cref="RecordPageMapping.PageBodySize"/> = 8160B) を跨いで論理連続
-/// バイト列として striping され、任意次元で隙間なくパックされる。
-///
-/// <para>書き込みは container の単一物理 <c>PagedFile</c> に乗るため、アクティブ tx の
-/// <c>WalPageContext</c> 下で行えば自動的にその tx の WAL / ARIES (PageImage redo + CLR undo) に
-/// 含まれる。tx コンテキスト外の書き込みは buffer pool に乗り checkpoint / close で永続化される
-/// (crash-atomic ではない — autocommit 経路は呼び出し側が tx で包む)。</para>
-///
-/// <para><c>gen</c> はバインド先エンティティの世代。slot 再利用で別ノードに化けた
-/// stale binding を KNN read 時に世代照合で弾くために保持する。</para>
+/// property が参照する immutable vector payload の primary store。
+/// metadata は generation、element type、dimensions、byte length、checksum を保持し、
+/// 要素列は blob tenant に格納する。
 /// </summary>
 internal sealed class VectorPayloadStore
 {
-    private const int RecHeaderSize = 4;       // gen:u16 + present:u8 + reserved:u8
-    private const int OffGen = 0;              // u16
-    private const int OffPresent = 2;          // u8 (1=present, 0=absent)
+    private const int RecordSize = 32;
+    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
+    private const byte FlagPresent = 0x01;
+    private const int OffFlags = 0;
+    private const int OffElementType = 1;
+    private const int OffGeneration = 4;
+    private const int OffDimensions = 8;
+    private const int OffByteLength = 12;
+    private const int OffChecksum = 16;
+    private const int OffBlobId = 20;
 
     private static readonly PageId HeaderPageId = new(1);
-    private const int MetaHwm = 0;             // i64 採番済み seq 数
-    private const int MetaDim = 8;             // i32 次元数
-    private const int MetaFormatVersion = 31;  // byte
-
-    private static int Body => RecordPageMapping.PageBodySize; // 8160
+    private const int MetaHwm = 0;
+    private const int MetaFormatVersion = 31;
 
     private readonly IPagedFile _file;
-    private readonly int _dim;
-    private readonly int _recSize;
+    private readonly BlobStore _blobs;
     private long _hwm;
 
-    public VectorPayloadStore(IPagedFile file, int dim)
+    public VectorPayloadStore(IPagedFile file, IPagedFile blobFile)
     {
         _file = file;
-        if (dim <= 0) throw new VectorException($"vector payload dim must be positive (was {dim}).");
+        _blobs = new BlobStore(blobFile);
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
-            _dim = dim;
-            _recSize = RecHeaderSize + dim * 4;
             _hwm = 0;
             SaveMeta(initialise: true);
         }
         else
         {
             CheckFormatVersion();
-            int storedDim;
-            using (var h = _file.PinForRead(HeaderPageId))
-            {
-                _hwm = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaHwm..]);
-                storedDim = BinaryPrimitives.ReadInt32LittleEndian(h.Data[MetaDim..]);
-            }
-            if (storedDim != dim)
-                throw new VectorException($"vector payload dim mismatch: stored {storedDim}, requested {dim}.");
-            _dim = dim;
-            _recSize = RecHeaderSize + _dim * 4;
+            LoadMeta();
         }
     }
 
-    public int Dimensions => _dim;
-
-    /// <summary>採番済み seq 数 (= 最大 seq + 1)。KNN flat scan の上限。</summary>
-    public long Hwm => _hwm;
-
-    /// <summary>seq のベクトルを (世代付きで) set / 上書きする。</summary>
-    public void Set(long seq, ushort generation, ReadOnlySpan<float> vector)
+    public VectorPayloadRef Write(ReadOnlySpan<float> elements)
     {
-        if (vector.Length != _dim)
-            throw new VectorException($"vector payload expects {_dim} dims, got {vector.Length}.");
-        long start = seq * (long)_recSize;
-        Span<byte> hdr = stackalloc byte[RecHeaderSize];
-        BinaryPrimitives.WriteUInt16LittleEndian(hdr[OffGen..], generation);
-        hdr[OffPresent] = 1;
-        hdr[3] = 0;
-        WriteBytes(start, hdr);
-        WriteBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(vector));
-        if (seq >= _hwm) { _hwm = seq + 1; SaveMeta(); }
+        if (elements.IsEmpty)
+            throw new VectorException("vector payload dimensions must be positive.");
+
+        long sequence = _hwm++;
+        const int generation = 1;
+        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(elements);
+        long blobId = _blobs.Write(bytes);
+        var (pageId, offset) = Location(sequence);
+        EnsurePage(pageId);
+        var page = _file.PinForWrite(pageId);
+        Span<byte> record = page.Data.Slice(offset, RecordSize);
+        record.Clear();
+        record[OffFlags] = FlagPresent;
+        record[OffElementType] = (byte)VectorElementType.Float32;
+        BinaryPrimitives.WriteInt32LittleEndian(record[OffGeneration..], generation);
+        BinaryPrimitives.WriteInt32LittleEndian(record[OffDimensions..], elements.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(record[OffByteLength..], bytes.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(record[OffChecksum..], Crc32.HashToUInt32(bytes));
+        BinaryPrimitives.WriteInt64LittleEndian(record[OffBlobId..], blobId);
+        _file.UnpinDirty(pageId, 0);
+        SaveMeta();
+        return new VectorPayloadRef(sequence, generation);
     }
 
-    /// <summary>seq のベクトルを論理削除する (present=0)。hwm は縮めない。</summary>
-    public void Remove(long seq)
+    public float[] Read(VectorPayloadRef reference)
     {
-        if (seq < 0 || seq >= _hwm) return;
-        long start = seq * (long)_recSize;
-        Span<byte> zero = stackalloc byte[1];
-        zero[0] = 0;
-        WriteBytes(start + OffPresent, zero);
+        if (!reference.IsValid || reference.Sequence >= _hwm)
+            throw new CorruptionException("Property references a missing vector payload.");
+
+        var (pageId, offset) = Location(reference.Sequence);
+        using var page = _file.PinForRead(pageId);
+        ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+        if ((record[OffFlags] & FlagPresent) == 0)
+            throw new CorruptionException("Property references an absent vector payload.");
+        int generation = BinaryPrimitives.ReadInt32LittleEndian(record[OffGeneration..]);
+        if (generation != reference.Generation)
+            throw new CorruptionException("Property references a stale vector payload generation.");
+        if ((VectorElementType)record[OffElementType] != VectorElementType.Float32)
+            throw new CorruptionException("Vector payload element type is unsupported.");
+
+        int dimensions = BinaryPrimitives.ReadInt32LittleEndian(record[OffDimensions..]);
+        int byteLength = BinaryPrimitives.ReadInt32LittleEndian(record[OffByteLength..]);
+        if (dimensions <= 0 || byteLength != checked(dimensions * sizeof(float)))
+            throw new CorruptionException("Vector payload dimensions and byte length do not match.");
+        long blobId = BinaryPrimitives.ReadInt64LittleEndian(record[OffBlobId..]);
+        if (_blobs.GetLength(blobId) != byteLength)
+            throw new CorruptionException("Vector payload blob length does not match its metadata.");
+
+        byte[] bytes = new byte[byteLength];
+        if (_blobs.Read(blobId, bytes) != byteLength)
+            throw new CorruptionException("Vector payload blob is truncated.");
+        uint expected = BinaryPrimitives.ReadUInt32LittleEndian(record[OffChecksum..]);
+        if (Crc32.HashToUInt32(bytes) != expected)
+            throw new CorruptionException("Vector payload checksum mismatch.");
+        return MemoryMarshal.Cast<byte, float>(bytes).ToArray();
     }
 
-    /// <summary>seq のベクトルを <paramref name="dest"/> へ読み出す。未設定 / 削除済みは false。</summary>
-    public bool TryGet(long seq, Span<float> dest, out ushort generation)
+    public IReadOnlyList<VectorPayloadRef> ScanOrphans(IReadOnlySet<VectorPayloadRef> reachable)
     {
-        generation = 0;
-        if (seq < 0 || seq >= _hwm || dest.Length < _dim) return false;
-        long start = seq * (long)_recSize;
-        Span<byte> hdr = stackalloc byte[RecHeaderSize];
-        ReadBytes(start, hdr);
-        if (hdr[OffPresent] != 1) return false;
-        generation = BinaryPrimitives.ReadUInt16LittleEndian(hdr[OffGen..]);
-        ReadBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(dest[.._dim]));
-        return true;
-    }
-
-    /// <summary>recovery 用: ヘッダから hwm を読み直す (abort の before-image undo 後)。</summary>
-    public void ReloadMeta() => LoadMeta();
-
-    // --- private: 論理バイト配列 (page 2+ を striping) ---
-
-    private void ReadBytes(long logicalStart, Span<byte> dest)
-    {
-        int copied = 0;
-        while (copied < dest.Length)
+        ArgumentNullException.ThrowIfNull(reachable);
+        var orphans = new List<VectorPayloadRef>();
+        for (long sequence = 0; sequence < _hwm; sequence++)
         {
-            long pos = logicalStart + copied;
-            var pid = new PageId(pos / Body + 2);
-            int intra = (int)(pos % Body);
-            int n = Math.Min(Body - intra, dest.Length - copied);
-            if (_file.PageCount <= pid.Value)
-            {
-                dest.Slice(copied, n).Clear(); // 未割当ページ = zero (absent)
-            }
-            else
-            {
-                using var h = _file.PinForRead(pid);
-                h.Data.Slice(intra, n).CopyTo(dest.Slice(copied, n));
-            }
-            copied += n;
+            var (pageId, offset) = Location(sequence);
+            using var page = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+            if ((record[OffFlags] & FlagPresent) == 0)
+                continue;
+            var reference = new VectorPayloadRef(
+                sequence,
+                BinaryPrimitives.ReadInt32LittleEndian(record[OffGeneration..]));
+            if (!reachable.Contains(reference))
+                orphans.Add(reference);
         }
+        return orphans;
     }
 
-    private void WriteBytes(long logicalStart, ReadOnlySpan<byte> src)
+    public void ReloadMeta()
     {
-        int copied = 0;
-        while (copied < src.Length)
-        {
-            long pos = logicalStart + copied;
-            var pid = new PageId(pos / Body + 2);
-            int intra = (int)(pos % Body);
-            while (_file.PageCount <= pid.Value)
-                _file.AllocatePage(PageKind.ItemPointerMap);
-            int n = Math.Min(Body - intra, src.Length - copied);
-            var ph = _file.PinForWrite(pid);
-            src.Slice(copied, n).CopyTo(ph.Data.Slice(intra, n));
-            _file.UnpinDirty(pid, 0);
-            copied += n;
-        }
+        LoadMeta();
+        _blobs.ReloadMeta();
+    }
+
+    private (PageId PageId, int Offset) Location(long sequence)
+        => (new PageId(sequence / RecordsPerPage + 2), (int)(sequence % RecordsPerPage) * RecordSize);
+
+    private void EnsurePage(PageId pageId)
+    {
+        while (_file.PageCount <= pageId.Value)
+            _file.AllocatePage(PageKind.PropertyRecord);
     }
 
     private void LoadMeta()
     {
-        using var h = _file.PinForRead(HeaderPageId);
-        _hwm = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaHwm..]);
-    }
-
-    private void CheckFormatVersion()
-    {
-        using var h = _file.PinForRead(HeaderPageId);
-        byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("vectorpayload", v, FormatVersion.Current);
+        using var page = _file.PinForRead(HeaderPageId);
+        _hwm = BinaryPrimitives.ReadInt64LittleEndian(page.Data[MetaHwm..]);
     }
 
     private void SaveMeta(bool initialise = false)
     {
-        using var ph = _file.PinForWrite(HeaderPageId);
-        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
-        BinaryPrimitives.WriteInt32LittleEndian(ph.Data[MetaDim..], _dim);
+        using var page = _file.PinForWrite(HeaderPageId);
+        BinaryPrimitives.WriteInt64LittleEndian(page.Data[MetaHwm..], _hwm);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            page.Data[MetaFormatVersion] = StorageFormatVersion.Current;
+    }
+
+    private void CheckFormatVersion()
+    {
+        using var page = _file.PinForRead(HeaderPageId);
+        byte version = page.Data[MetaFormatVersion];
+        if (version != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException(
+                "vector-payload", version, StorageFormatVersion.Current);
     }
 }

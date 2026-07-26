@@ -7,7 +7,7 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-12: BitmapFilterOperator vs chained FilterOperator across selectivity
+/// BitmapFilterOperator vs chained FilterOperator across selectivity
 /// orderings. Same input data, three plans:
 ///   1. FilterOperator(P_selective) → FilterOperator(P_broad)   ← row-by-row baseline
 ///   2. BitmapFilterOperator([P_selective, P_broad])             ← bitmap, best ordering
@@ -29,9 +29,9 @@ public class BitmapFilterBenchmarks
     [Params(0.5)]
     public double BroadFraction { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private LabelId _label;
     private PropertyKeyId _tagKey;
     private PropertyKeyId _hotKey;
@@ -40,27 +40,27 @@ public class BitmapFilterBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("pw12");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         int matchA = (int)(Total * SelectiveFraction);
         int matchHot = (int)(Total * BroadFraction);
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            _label = _db.Schema.GetOrCreateLabel("N");
-            _tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-            _hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+            _label = _db.EditSchema(schema => schema.GetOrCreateLabel("N"));
+            _tagKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("tag"));
+            _hotKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("hot"));
 
             for (int i = 0; i < Total; i++)
             {
-                var nid = tx.CreateNode("N");
+                var nid = tx.CreateVertex("N");
                 tx.SetProperty(nid, "tag", PropertyValue.FromString(i < matchA ? "A" : "B"));
                 tx.SetProperty(nid, "hot", PropertyValue.FromBool(i < matchHot));
             }
             tx.Commit();
         }
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -79,7 +79,7 @@ public class BitmapFilterBenchmarks
     public long Chained_Selective_First()
     {
         var plan = new FilterOperator(
-            new FilterOperator(new NodeByLabelScanOperator(_label), TagEqA()),
+            new FilterOperator(new VertexByLabelScanOperator(_label), TagEqA()),
             HotTrue());
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
@@ -89,7 +89,7 @@ public class BitmapFilterBenchmarks
     public long Bitmap_Selective_First()
     {
         var plan = new BitmapFilterOperator(
-            new NodeByLabelScanOperator(_label),
+            new VertexByLabelScanOperator(_label),
             new IPredicate[] { TagEqA(), HotTrue() });
         using var result = _readTx.Execute(plan);
         return result.Statistics.PredicateEvaluations;
@@ -99,7 +99,7 @@ public class BitmapFilterBenchmarks
     public long Bitmap_Broad_First()
     {
         var plan = new BitmapFilterOperator(
-            new NodeByLabelScanOperator(_label),
+            new VertexByLabelScanOperator(_label),
             new IPredicate[] { HotTrue(), TagEqA() });
         using var result = _readTx.Execute(plan);
         return result.Statistics.PredicateEvaluations;
@@ -108,7 +108,7 @@ public class BitmapFilterBenchmarks
     [Benchmark(Description = "FilterOperator single predicate (overhead floor)")]
     public long Filter_Single()
     {
-        var plan = new FilterOperator(new NodeByLabelScanOperator(_label), TagEqA());
+        var plan = new FilterOperator(new VertexByLabelScanOperator(_label), TagEqA());
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
     }
@@ -117,7 +117,7 @@ public class BitmapFilterBenchmarks
     public long Bitmap_Single()
     {
         var plan = new BitmapFilterOperator(
-            new NodeByLabelScanOperator(_label),
+            new VertexByLabelScanOperator(_label),
             new IPredicate[] { TagEqA() });
         using var result = _readTx.Execute(plan);
         return result.Statistics.PredicateEvaluations;
@@ -131,9 +131,9 @@ file sealed class BenchTagEqPredicate : IPredicate
     public BenchTagEqPredicate(PropertyKeyId key, string expected) { _key = key; _expected = expected; }
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nid = new NodeId(tuple[0].LongValue);
-        using var h = tx.Nodes.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var nid = new VertexId(tuple[0].LongValue);
+        using var h = tx.Vertices.Read(nid);
+        var en = tx.Properties.Enumerate(EntityRef.From(nid), h.FirstPropertyRef);
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;
@@ -151,9 +151,9 @@ file sealed class BenchHotEqPredicate : IPredicate
     public BenchHotEqPredicate(PropertyKeyId key, bool expected) { _key = key; _expected = expected; }
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nid = new NodeId(tuple[0].LongValue);
-        using var h = tx.Nodes.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var nid = new VertexId(tuple[0].LongValue);
+        using var h = tx.Vertices.Read(nid);
+        var en = tx.Properties.Enumerate(EntityRef.From(nid), h.FirstPropertyRef);
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;

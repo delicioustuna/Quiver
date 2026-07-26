@@ -5,6 +5,7 @@ using Quiver.Core;
 using Quiver.Index.FullText;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -21,13 +22,13 @@ public sealed class FullTextWandTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FullTextWandTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts8_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -36,44 +37,47 @@ public sealed class FullTextWandTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body)
+    private VertexId AddDoc(string body)
     {
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
         return n;
     }
 
     /// <summary>統計を渡さず、語単位の全走査へフォールバックする。</summary>
-    private List<NodeId> SearchFullScan(string query, int k)
+    private List<VertexId> SearchFullScan(string query, int k)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     /// <summary>統計を渡し、語ごとの上限値を使う WAND 経路を選択する。</summary>
-    private List<NodeId> SearchWand(string query, int k)
+    private List<VertexId> SearchWand(string query, int k)
     {
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema, stats).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.WithStats(stats).Search(Index, query, k).ToList();
     }
 
     private void AddDocsBatch(IReadOnlyList<string> bodies)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         foreach (var body in bodies)
         {
-            var n = tx.CreateNode("Doc");
+            var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "body", PropertyValue.FromString(body));
         }
         tx.Commit();
     }
 
-    private FullTextIndex Ft()
+    private FullTextSegmentSnapshot Ft()
     {
-        ((SchemaApi)_db.Schema).IndexManager.TryGetFullTextIndex(Index, out var ft).Should().BeTrue();
+        using var transaction = _db.BeginReadTransaction();
+        ITransaction inner = transaction.AsInternal().Inner;
+        inner.FullTextSegments.Should().NotBeNull();
+        inner.FullTextSegments!.TryOpen(inner, Index, out var ft).Should().BeTrue();
         return ft;
     }
 
@@ -119,7 +123,7 @@ public sealed class FullTextWandTests : IDisposable
         // 200 docs all contain the common term; only one also contains the rare term.
         // WAND must surface that doc first (rare term's high idf) without scoring every
         // posting of the common term — the core pruning win.
-        NodeId target = default;
+        VertexId target = default;
         for (int i = 0; i < 200; i++)
         {
             string body = i == 137 ? "common rareneedle" : "common";
@@ -146,9 +150,9 @@ public sealed class FullTextWandTests : IDisposable
         var keep = AddDoc("secret keepme");
         var drop = AddDoc("secret dropme");
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            tx.DeleteNode(drop);
+            tx.DeleteVertex(drop);
             tx.Commit();
         }
 
@@ -177,15 +181,11 @@ public sealed class FullTextWandTests : IDisposable
     }
 
     [Fact]
-    public void Wand_matches_full_scan_across_multiple_btree_leaves()
+    public void Wand_matches_full_scan_across_large_postings()
     {
-        // ~900 docs share "common" so its postings span several B+Tree leaves (≈313
-        // entries per 8160-byte leaf). WAND must traverse leaf links and, while pruning
-        // the low-idf common-only docs, SeekTo across leaf boundaries via the root descent
-        // (BTreeRawCursor's slow path — the skip-pointer substitute, untested by the small
-        // corpora). A rare "needle" seeded into scattered docs supplies the pivots that
-        // force those cross-leaf seeks. Two-term queries keep the comparison free of
-        // float summation-order differences (those need 3+ terms; review item #2).
+        // ~900 docs share "common". WAND must SeekTo across a large immutable postings
+        // array while pruning low-idf common-only docs. A rare "needle" seeded into
+        // scattered docs supplies pivots that force long skips.
         const int n = 900;
         var needleAt = new HashSet<int> { 50, 200, 400, 480, 620, 770, 899 };
         var bodies = new List<string>(n);
@@ -202,7 +202,7 @@ public sealed class FullTextWandTests : IDisposable
         {
             var wand = SearchWand(q, k: 10);
             var full = SearchFullScan(q, k: 10);
-            wand.Should().Equal(full, "WAND must equal the full scan across multiple leaves for '{0}'", q);
+            wand.Should().Equal(full, "WAND must equal the full scan across large postings for '{0}'", q);
         }
     }
 
@@ -223,7 +223,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = stale.FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = ((SchemaApi)_db.Schema).IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         // 同一 (stale) stats 基準での exact 全走査と WAND を比較する。
         var exact = Bm25Scorer.Rank(
@@ -234,25 +234,25 @@ public sealed class FullTextWandTests : IDisposable
 
         wand.Should().Equal(exact,
             "WAND must return the same exact top-k as the full scan under the same stats basis " +
-            "even when the snapshot maxTf/minDocLen are stale relative to the live postings (audit #3)");
+            "even when snapshot maxTf/minDocLen are stale relative to live postings");
     }
 
     [Fact]
     public void Wand_liveness_filter_drops_dead_doc_and_fills_from_next_live()
     {
         // Directly exercise RankWand's inline liveness filter (the isLive==false branch):
-        // DeleteNode physically removes postings, so a black-box delete never produces the
+        // DeleteVertex physically removes postings, so a black-box delete never produces the
         // dead/slot-reused orphan posting the filter guards against. Here we feed an
         // explicit isLive that excludes the top-scoring (genuinely live) doc, simulating
         // that orphan, and assert the k-bounded heap still returns k live docs — i.e. the
         // next-best live doc fills in rather than the result shrinking below k.
-        var ids = new List<NodeId>();
+        var ids = new List<VertexId>();
         for (int i = 1; i <= 6; i++)
             ids.Add(AddDoc(string.Join(' ', Enumerable.Repeat("x", i)))); // tf = docLen = i → distinct, monotone scores
 
         var corpus = _db.CollectStats().FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = ((SchemaApi)_db.Schema).IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         var full = Bm25Scorer.RankWand(
             ft, tokenizer, "x", corpus.DocumentCount, corpus.AverageDocLength, corpus.Terms!, k: 6, isLive: null)!;

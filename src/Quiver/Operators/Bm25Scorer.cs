@@ -51,6 +51,9 @@ internal sealed class Bm25TermStats
 internal readonly record struct Bm25CorpusStats(
     long DocumentCount, double AverageDocLength, Bm25TermStats? Terms = null);
 
+// 順位から score を逆算すると同点処理や丸めを再現できないため、scorer の累積結果をそのまま渡す。
+internal readonly record struct Bm25Score(long PackedEntityId, double Score);
+
 /// <summary>
 /// text-first (<see cref="FullTextScanOperator"/>) と graph-first
 /// (<see cref="FilteredFullTextScanOperator"/>) の両経路で共有する
@@ -70,23 +73,50 @@ internal static class Bm25Scorer
     /// <summary>
     /// <paramref name="queryText"/> に対し BM25 スコア降順で文書をランキングする
     /// (同スコアは packed entityId 昇順で決定論的に解決)。返却 ID は生の packed entityId
-    /// (generation + sequence); 呼び出し元がライブ <c>NodeId</c> に解決する。
+    /// (generation + sequence); 呼び出し元がライブ <c>VertexId</c> に解決する。
     /// <para>
     /// <paramref name="candidateSequences"/> が non-null の場合、そのセットに限定して
-    /// 累積する (graph-first)。パイプライン上の NodeId は sequence 空間だが posting キーは
+    /// 累積する (graph-first)。パイプライン上の VertexId は sequence 空間だが posting キーは
     /// packed のため、posting の <see cref="EntityRef.Sequence"/> で照合する。
     /// df / idf は全 posting リスト (または <paramref name="termStats"/> 提供時は
     /// スナップショット df) から計算し、WAND 経路とスコアを一致させる。
     /// </para>
     /// </summary>
     public static List<long> Rank(
-        FullTextIndex ft, ITokenizer tokenizer, string queryText,
+        FullTextSegmentSnapshot ft, ITokenizer tokenizer, string queryText,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
+    {
+        return RankScored(
+                ft,
+                tokenizer,
+                queryText,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankScored(
+        FullTextSegmentSnapshot ft,
+        ITokenizer tokenizer,
+        string queryText,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
     {
         var sink = new TermSink();
         tokenizer.Tokenize(queryText, sink);
-        if (sink.Terms.Count == 0) return new List<long>();
-        return RankTerms(ft, sink.Terms, n, avgdl, candidateSequences, termStats);
+        if (sink.Terms.Count == 0) return [];
+        return RankTermsScored(
+            ft,
+            sink.Terms,
+            n,
+            avgdl,
+            candidateSequences,
+            termStats);
     }
 
     /// <summary>
@@ -94,11 +124,37 @@ internal static class Bm25Scorer
     /// (プレフィックスワイルドカードをインデックスに対して展開済みの場合に使用)。
     /// </summary>
     public static List<long> RankTerms(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
-        if (queryTerms.Count == 0) return new List<long>();
-        return SortByScore(AccumulateScores(ft, queryTerms, n, avgdl, candidateSequences, termStats));
+        return RankTermsScored(
+                ft,
+                queryTerms,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankTermsScored(
+        FullTextSegmentSnapshot ft,
+        IReadOnlySet<string> queryTerms,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
+    {
+        if (queryTerms.Count == 0) return [];
+        return SortByScore(
+            AccumulateScores(
+                ft,
+                queryTerms,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats));
     }
 
     /// <summary>
@@ -108,11 +164,30 @@ internal static class Bm25Scorer
     /// (<c>quiv*</c> のようなプレフィックス展開節で有用)。
     /// </summary>
     public static List<long> RankBoolean(
-        FullTextIndex ft, ParsedFtsQuery query,
+        FullTextSegmentSnapshot ft, ParsedFtsQuery query,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
+        return RankBooleanScored(
+                ft,
+                query,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankBooleanScored(
+        FullTextSegmentSnapshot ft,
+        ParsedFtsQuery query,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
+    {
         var allPositive = query.AllPositiveTerms();
-        if (allPositive.Count == 0) return new List<long>();
+        if (allPositive.Count == 0) return [];
 
         var scores = AccumulateScores(ft, allPositive, n, avgdl, candidateSequences, termStats);
 
@@ -139,11 +214,13 @@ internal static class Bm25Scorer
     }
 
     private static Dictionary<long, double> AccumulateScores(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats)
     {
         var scores = new Dictionary<long, double>();
         var docLenCache = new Dictionary<long, int>();
+        double k1 = ft.Definition.K1;
+        double b = ft.Definition.B;
         foreach (var term in queryTerms)
         {
             var postings = ft.GetPostings(term);
@@ -152,22 +229,22 @@ internal static class Bm25Scorer
             double idf = Math.Log(1.0 + (n - df + 0.5) / (df + 0.5));
             foreach (var (eid, tf) in postings)
             {
-                if (candidateSequences is not null && !candidateSequences.Contains(EntityRef.Sequence(eid)))
+                if (candidateSequences is not null && !candidateSequences.Contains(EntityRef.UnpackSequence(eid)))
                     continue;
                 if (!docLenCache.TryGetValue(eid, out var dl))
                 {
                     dl = ft.TryGetDocLength(eid, out var d) ? d : 0;
                     docLenCache[eid] = dl;
                 }
-                double denom = tf + K1 * (1.0 - B + (avgdl > 0 ? B * dl / avgdl : 0.0));
-                double contrib = denom > 0 ? idf * (tf * (K1 + 1.0)) / denom : 0.0;
+                double denom = tf + k1 * (1.0 - b + (avgdl > 0 ? b * dl / avgdl : 0.0));
+                double contrib = denom > 0 ? idf * (tf * (k1 + 1.0)) / denom : 0.0;
                 scores[eid] = scores.TryGetValue(eid, out var prev) ? prev + contrib : contrib;
             }
         }
         return scores;
     }
 
-    private static HashSet<long> CollectPostingEids(FullTextIndex ft, IReadOnlySet<string> terms)
+    private static HashSet<long> CollectPostingEids(FullTextSegmentSnapshot ft, IReadOnlySet<string> terms)
     {
         var eids = new HashSet<long>();
         foreach (var term in terms)
@@ -179,7 +256,7 @@ internal static class Bm25Scorer
     /// <summary>
     /// WAND document-at-a-time 枝刈りによる exact top-<paramref name="k"/> BM25。
     /// per-term スナップショット df + 上限を使い、k 番目のスコアを超えられない高 df 語の
-    /// posting をスキップし、遅れたカーソルを B+Tree <c>SeekTo</c> で前進させる。
+    /// posting をスキップし、遅れたimmutable postings cursorを <c>SeekTo</c> で前進させる。
     /// ランク済み packed entityId を返す。クエリ語が <paramref name="termStats"/> に無い場合は
     /// <c>null</c> を返し、呼び出し元が <see cref="Rank"/> にフォールバックする。
     /// <para>
@@ -189,7 +266,7 @@ internal static class Bm25Scorer
     /// </para>
     /// </summary>
     public static List<long>? RankWand(
-        FullTextIndex ft, ITokenizer tokenizer, string queryText,
+        FullTextSegmentSnapshot ft, ITokenizer tokenizer, string queryText,
         long n, double avgdl, Bm25TermStats termStats, int k, Func<long, bool>? isLive = null)
     {
         var sink = new TermSink();
@@ -203,11 +280,13 @@ internal static class Bm25Scorer
     /// (呼び出し元が <see cref="RankTerms"/> にフォールバック)。
     /// </summary>
     public static List<long>? RankWandTerms(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, Bm25TermStats termStats, int k, Func<long, bool>? isLive = null)
     {
         if (queryTerms.Count == 0) return new List<long>();
 
+        double k1 = ft.Definition.K1;
+        double b = ft.Definition.B;
         var cursors = new List<WandTerm>(queryTerms.Count);
         foreach (var term in queryTerms)
         {
@@ -220,8 +299,8 @@ internal static class Bm25Scorer
             // idf*(K1+1) に収束し、lenNorm≥0 なので任意の tf/docLen に対し ≤ idf*(K1+1)。
             // snapshot の maxTf/minDocLen に依存しないため、snapshot 後にライブ index へ
             // 高 tf / 短文書が増えても上限が過小評価されず top-k を取りこぼさない。
-            double ub = idf * (K1 + 1.0);
-            var cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
+            double ub = idf * (k1 + 1.0);
+            FullTextPostingsCursor cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
             if (cur.MoveNext()) cursors.Add(new WandTerm(idf, ub, cur));
         }
         if (cursors.Count == 0) return new List<long>();
@@ -250,14 +329,14 @@ internal static class Bm25Scorer
             if (cursors[0].Cursor.CurrentEid == pivotEid)
             {
                 int docLen = ft.TryGetDocLength(pivotEid, out var dl) ? dl : 0;
-                double lenNorm = 1.0 - B + (avgdl > 0 ? B * docLen / avgdl : 0.0);
+                double lenNorm = 1.0 - b + (avgdl > 0 ? b * docLen / avgdl : 0.0);
                 double score = 0;
                 for (int i = 0; i < cursors.Count; i++)
                 {
                     if (cursors[i].Cursor.CurrentEid != pivotEid) continue;
                     int tf = cursors[i].Cursor.CurrentTf;
-                    double denom = tf + K1 * lenNorm;
-                    if (denom > 0) score += cursors[i].Idf * (tf * (K1 + 1.0)) / denom;
+                    double denom = tf + k1 * lenNorm;
+                    if (denom > 0) score += cursors[i].Idf * (tf * (k1 + 1.0)) / denom;
                     cursors[i].Cursor.MoveNext();
                 }
                 if (isLive is null || isLive(pivotEid))
@@ -278,7 +357,9 @@ internal static class Bm25Scorer
     /// それを使い (GraphStats 経路、O(N) norms スキャンを回避)、
     /// なければ norms summary へのフォールバック。
     /// </summary>
-    public static (long N, double Avgdl) ResolveCorpus(FullTextIndex ft, Bm25CorpusStats? corpus)
+    public static (long N, double Avgdl) ResolveCorpus(
+        FullTextSegmentSnapshot ft,
+        Bm25CorpusStats? corpus)
     {
         if (corpus is { DocumentCount: > 0 } c)
             return (c.DocumentCount, c.AverageDocLength);
@@ -288,7 +369,7 @@ internal static class Bm25Scorer
         return (n, avgdl);
     }
 
-    private static List<long> SortByScore(Dictionary<long, double> scores)
+    private static List<Bm25Score> SortByScore(Dictionary<long, double> scores)
     {
         var ranked = new List<KeyValuePair<long, double>>(scores);
         ranked.Sort(static (a, b) =>
@@ -296,21 +377,21 @@ internal static class Bm25Scorer
             int byScore = b.Value.CompareTo(a.Value);
             return byScore != 0 ? byScore : a.Key.CompareTo(b.Key);
         });
-        var result = new List<long>(ranked.Count);
-        foreach (var kv in ranked) result.Add(kv.Key);
+        var result = new List<Bm25Score>(ranked.Count);
+        foreach (var kv in ranked) result.Add(new(kv.Key, kv.Value));
         return result;
     }
 
     private readonly struct WandTerm
     {
-        public WandTerm(double idf, double ub, PostingsCursor cursor)
+        public WandTerm(double idf, double ub, FullTextPostingsCursor cursor)
         {
             Idf = idf; Ub = ub; Cursor = cursor;
         }
 
         public double Idf { get; }
         public double Ub { get; }
-        public PostingsCursor Cursor { get; }
+        public FullTextPostingsCursor Cursor { get; }
     }
 
     /// <summary>

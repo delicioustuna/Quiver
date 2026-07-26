@@ -5,7 +5,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="UnionOperator"/> 2-branch union emitting probe value each time.</summary>
+/// <summary> sentinel: <see cref="UnionOperator"/> 2-branch union emitting probe value each time.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class UnionOperatorBench
@@ -24,7 +24,7 @@ public class UnionOperatorBench
         private bool _emitted;
         private readonly TupleSlot[] _buffer = new TupleSlot[1];
         public EmitOnceBranch(CorrelatedInputOperator probe) => _probe = probe;
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("union", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("union", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
         public void Open(ITransaction tx) { _probe.Open(tx); _probe.MoveNext(); _emitted = false; }
@@ -41,7 +41,7 @@ public class UnionOperatorBench
     [Benchmark]
     public int Union_two_branches()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         var pA = new CorrelatedInputOperator();
         var pB = new CorrelatedInputOperator();
         using var op = new UnionOperator(src, 0,

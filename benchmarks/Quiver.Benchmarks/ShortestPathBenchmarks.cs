@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -8,9 +8,9 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-5: ShortestPathOperator vs BidirectionalExpandOperator の比較。
+/// ShortestPathOperator vs BidirectionalExpandOperator の比較。
 /// Setup: 0 → 1 → 2 → ... → PathLength の線形チェーンを BulkLoader で構築。
-/// クエリ: node 0 から node PathLength までの最短経路を求める。
+/// クエリ: vertex 0 から vertex PathLength までの最短経路を求める。
 /// </summary>
 [MemoryDiagnoser]
 public class ShortestPathBenchmarks
@@ -18,31 +18,31 @@ public class ShortestPathBenchmarks
     [Params(10, 50, 100)]
     public int PathLength { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
-    private NodeId _srcNode;
-    private NodeId _tgtNode;
+    private IReadTransaction _readTx = null!;
+    private VertexId _srcVertex;
+    private VertexId _tgtVertex;
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("sp");
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             for (int i = 0; i <= PathLength; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
             for (int i = 0; i < PathLength; i++)
-                loader.AppendRelationship(new RelationshipId(i),
-                    new NodeId(i), new NodeId(i + 1), new RelationshipTypeId(0));
+                loader.AppendEdge(new EdgeId(i),
+                    new VertexId(i), new VertexId(i + 1), new EdgeTypeId(0));
             loader.Commit();
         }
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _srcNode = new NodeId(0);
-        _tgtNode = new NodeId(PathLength);
-        _readTx = _db.BeginTransaction();
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _srcVertex = new VertexId(0);
+        _tgtVertex = new VertexId(PathLength);
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -58,8 +58,8 @@ public class ShortestPathBenchmarks
     public long ShortestPathBfs()
     {
         var plan = new ShortestPathOperator(
-            new PairNodeSource(_srcNode, _tgtNode),
-            sourceNodeColumn: 0, targetNodeColumn: 1,
+            new PairVertexSource(_srcVertex, _tgtVertex),
+            sourceVertexColumn: 0, targetVertexColumn: 1,
             Direction.Outgoing, typeFilter: null);
         using var result = _readTx.Execute(plan);
         if (result.Statistics.RowsProduced == 0) return -1;
@@ -70,8 +70,8 @@ public class ShortestPathBenchmarks
     public long ShortestPathBidir()
     {
         var plan = new BidirectionalExpandOperator(
-            new PairNodeSource(_srcNode, _tgtNode),
-            sourceNodeColumn: 0, targetNodeColumn: 1,
+            new PairVertexSource(_srcVertex, _tgtVertex),
+            sourceVertexColumn: 0, targetVertexColumn: 1,
             Direction.Outgoing, typeFilter: null);
         using var result = _readTx.Execute(plan);
         if (result.Statistics.RowsProduced == 0) return -1;
@@ -80,18 +80,18 @@ public class ShortestPathBenchmarks
 }
 
 /// <summary>単一 (source, target) ペアを1行だけ出力する source operator。</summary>
-internal sealed class PairNodeSource : IPhysicalOperator
+internal sealed class PairVertexSource : IPhysicalOperator
 {
-    private readonly NodeId _src;
-    private readonly NodeId _tgt;
+    private readonly VertexId _src;
+    private readonly VertexId _tgt;
     private bool _emitted;
     private readonly TupleSlot[] _buffer = new TupleSlot[2];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("source", TupleSlotType.NodeId),
-        new ColumnDefinition("target", TupleSlotType.NodeId)]);
+        new ColumnDefinition("source", TupleSlotType.VertexId),
+        new ColumnDefinition("target", TupleSlotType.VertexId)]);
 
-    public PairNodeSource(NodeId src, NodeId tgt) { _src = src; _tgt = tgt; }
+    public PairVertexSource(VertexId src, VertexId tgt) { _src = src; _tgt = tgt; }
 
     public TupleSchema Schema => s_schema;
     public OperatorStatistics Statistics => default;
@@ -100,8 +100,8 @@ internal sealed class PairNodeSource : IPhysicalOperator
     public void Open(ITransaction tx)
     {
         _emitted = false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _src.Value };
-        _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _tgt.Value };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _src.Value };
+        _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _tgt.Value };
     }
 
     public bool MoveNext()

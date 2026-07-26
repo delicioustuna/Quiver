@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
 using Quiver.Storage.Records;
@@ -7,11 +7,11 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-4 / PW-8 隣接ブロック vs linked-list の 1-hop 比較。
+/// 隣接ブロックとlinked-listの1-hop比較。
 /// Setup: BulkLoader で adjacency index を構築してから DB を再オープン。
-/// Linked:        EnumerateRelationships (linked-list)
-/// ReadEdges:     IAdjacencyBlockStore.ReadEdges (連続メモリ・固定バッファ)
-/// AdjCursor:     IAdjacencyBlockStore.OpenCursor (PW-8 page 継続 iterator)
+/// Linked:        EnumerateEdges (linked-list)
+/// ReadEdges:     IAdjacencySegmentStore.ReadEdges (連続メモリ・固定バッファ)
+/// AdjCursor:     IAdjacencySegmentStore.OpenCursor ( page 継続 iterator)
 ///
 /// degree 10_000 / 50_000 では ReadEdges の fixed-buffer fallback と
 /// AdjCursor の差が顕著になる。AdjCursor は degree に依らず fallback しないこと。
@@ -22,10 +22,10 @@ public class OneHopAdjBenchmarks
     [Params(10, 100, 1_000, 10_000, 50_000)]
     public int Degree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private NodeId _hub;
-    private IGraphTransaction _readTx = null!;
+    private VertexId _hub;
+    private IReadTransaction _readTx = null!;
     private readonly AdjacencyEntry[] _adjBuf = new AdjacencyEntry[65_536];
 
     [GlobalSetup]
@@ -33,23 +33,23 @@ public class OneHopAdjBenchmarks
     {
         _dbPath = BenchTempDir.Create("1hop_adj");
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             long hubId = 0;
-            loader.AppendNode(new NodeId(hubId), new LabelId(0));
+            loader.AppendVertex(new VertexId(hubId), new LabelId(0));
             for (int i = 1; i <= Degree; i++)
             {
-                loader.AppendNode(new NodeId(i), new LabelId(1));
-                loader.AppendRelationship(new RelationshipId(i - 1),
-                    new NodeId(hubId), new NodeId(i), new RelationshipTypeId(0));
+                loader.AppendVertex(new VertexId(i), new LabelId(1));
+                loader.AppendEdge(new EdgeId(i - 1),
+                    new VertexId(hubId), new VertexId(i), new EdgeTypeId(0));
             }
             loader.Commit();
         }
         // adj.db が書き出された状態で再オープン
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _hub = new NodeId(0);
-        _readTx = _db.BeginTransaction();
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _hub = new VertexId(0);
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -65,7 +65,7 @@ public class OneHopAdjBenchmarks
     public int LinkedList()
     {
         int count = 0;
-        var en = _readTx.EnumerateRelationships(_hub, Direction.Outgoing);
+        var en = _readTx.EnumerateEdges(_hub, Direction.Outgoing);
         while (en.MoveNext()) count++;
         return count;
     }
@@ -73,15 +73,15 @@ public class OneHopAdjBenchmarks
     [Benchmark(Description = "1-hop AdjacencyBlock (ReadEdges)")]
     public int AdjacencyBlock()
     {
-        var adj = _readTx.AsInternal().AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencySegments!;
         int count = adj.ReadEdges(_hub, Direction.Outgoing, null, _adjBuf);
         return count;
     }
 
-    [Benchmark(Description = "1-hop AdjacencyCursor (PW-8)")]
+    [Benchmark(Description = "1-hop AdjacencyCursor ()")]
     public int AdjacencyCursor()
     {
-        var adj = _readTx.AsInternal().AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencySegments!;
         int count = 0;
         using var cursor = adj.OpenCursor(_hub, Direction.Outgoing, null);
         while (cursor.MoveNext()) count++;

@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -8,7 +8,7 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-5: 手動トラバーサル vs BfsOperator / VariableLengthExpandOperator の比較。
+/// 手動トラバーサル vs BfsOperator / VariableLengthExpandOperator の比較。
 /// Setup: BulkLoader(buildAdjacencyIndex:true) で hub → L1 → L2 → L3 の3段ツリー。
 /// </summary>
 [MemoryDiagnoser]
@@ -17,10 +17,10 @@ public class MultiHopOperatorBenchmarks
     [Params(5, 10)]
     public int Degree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private NodeId _hub;
-    private IGraphTransaction _readTx = null!;
+    private VertexId _hub;
+    private IReadTransaction _readTx = null!;
 
     // LabelId mapping (BulkLoader で直接 int 指定)
     private static readonly LabelId HubLabel = new(0);
@@ -30,48 +30,48 @@ public class MultiHopOperatorBenchmarks
     {
         _dbPath = BenchTempDir.Create("mhop");
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
-            long nodeId = 0;
-            long relId = 0;
-            long hubRawId = nodeId;
-            loader.AppendNode(new NodeId(nodeId++), new LabelId(0)); // hub
+            long vertexId = 0;
+            long edgeId = 0;
+            long hubRawId = vertexId;
+            loader.AppendVertex(new VertexId(vertexId++), new LabelId(0)); // hub
 
             // hub → L1
-            long l1Start = nodeId;
+            long l1Start = vertexId;
             for (int i = 0; i < Degree; i++)
-                loader.AppendNode(new NodeId(nodeId++), new LabelId(1));
+                loader.AppendVertex(new VertexId(vertexId++), new LabelId(1));
             for (int i = 0; i < Degree; i++)
-                loader.AppendRelationship(new RelationshipId(relId++),
-                    new NodeId(hubRawId), new NodeId(l1Start + i), new RelationshipTypeId(0));
+                loader.AppendEdge(new EdgeId(edgeId++),
+                    new VertexId(hubRawId), new VertexId(l1Start + i), new EdgeTypeId(0));
 
             // L1 → L2
-            long l2Start = nodeId;
+            long l2Start = vertexId;
             for (int i = 0; i < Degree; i++)
                 for (int j = 0; j < Degree; j++)
-                    loader.AppendNode(new NodeId(nodeId++), new LabelId(2));
+                    loader.AppendVertex(new VertexId(vertexId++), new LabelId(2));
             for (int i = 0; i < Degree; i++)
                 for (int j = 0; j < Degree; j++)
-                    loader.AppendRelationship(new RelationshipId(relId++),
-                        new NodeId(l1Start + i), new NodeId(l2Start + i * Degree + j), new RelationshipTypeId(0));
+                    loader.AppendEdge(new EdgeId(edgeId++),
+                        new VertexId(l1Start + i), new VertexId(l2Start + i * Degree + j), new EdgeTypeId(0));
 
             // L2 → L3
-            long l3Start = nodeId;
+            long l3Start = vertexId;
             int l2Count = Degree * Degree;
             for (int i = 0; i < l2Count; i++)
                 for (int j = 0; j < Degree; j++)
-                    loader.AppendNode(new NodeId(nodeId++), new LabelId(3));
+                    loader.AppendVertex(new VertexId(vertexId++), new LabelId(3));
             for (int i = 0; i < l2Count; i++)
                 for (int j = 0; j < Degree; j++)
-                    loader.AppendRelationship(new RelationshipId(relId++),
-                        new NodeId(l2Start + i), new NodeId(l3Start + i * Degree + j), new RelationshipTypeId(0));
+                    loader.AppendEdge(new EdgeId(edgeId++),
+                        new VertexId(l2Start + i), new VertexId(l3Start + i * Degree + j), new EdgeTypeId(0));
 
             loader.Commit();
         }
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _hub = new NodeId(0);
-        _readTx = _db.BeginTransaction();
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _hub = new VertexId(0);
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -89,10 +89,10 @@ public class MultiHopOperatorBenchmarks
     public int TwoHopManual()
     {
         int count = 0;
-        var en1 = _readTx.EnumerateRelationships(_hub, Direction.Outgoing);
+        var en1 = _readTx.EnumerateEdges(_hub, Direction.Outgoing);
         while (en1.MoveNext())
         {
-            var en2 = _readTx.EnumerateRelationships(en1.Current.Target, Direction.Outgoing);
+            var en2 = _readTx.EnumerateEdges(en1.Current.Target, Direction.Outgoing);
             while (en2.MoveNext()) count++;
         }
         return count;
@@ -102,7 +102,7 @@ public class MultiHopOperatorBenchmarks
     public long TwoHopBfsOperator()
     {
         var plan = new BfsOperator(
-            new SingleNodeSource(_hub), sourceNodeColumn: 0,
+            new SingleVertexSource(_hub), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, maxDepth: 2);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
@@ -112,7 +112,7 @@ public class MultiHopOperatorBenchmarks
     public long TwoHopVLExpand()
     {
         var plan = new VariableLengthExpandOperator(
-            new SingleNodeSource(_hub), sourceNodeColumn: 0,
+            new SingleVertexSource(_hub), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, minHops: 1, maxHops: 2);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
@@ -124,13 +124,13 @@ public class MultiHopOperatorBenchmarks
     public int ThreeHopManual()
     {
         int count = 0;
-        var en1 = _readTx.EnumerateRelationships(_hub, Direction.Outgoing);
+        var en1 = _readTx.EnumerateEdges(_hub, Direction.Outgoing);
         while (en1.MoveNext())
         {
-            var en2 = _readTx.EnumerateRelationships(en1.Current.Target, Direction.Outgoing);
+            var en2 = _readTx.EnumerateEdges(en1.Current.Target, Direction.Outgoing);
             while (en2.MoveNext())
             {
-                var en3 = _readTx.EnumerateRelationships(en2.Current.Target, Direction.Outgoing);
+                var en3 = _readTx.EnumerateEdges(en2.Current.Target, Direction.Outgoing);
                 while (en3.MoveNext()) count++;
             }
         }
@@ -141,7 +141,7 @@ public class MultiHopOperatorBenchmarks
     public long ThreeHopBfsOperator()
     {
         var plan = new BfsOperator(
-            new SingleNodeSource(_hub), sourceNodeColumn: 0,
+            new SingleVertexSource(_hub), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, maxDepth: 3);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
@@ -151,24 +151,24 @@ public class MultiHopOperatorBenchmarks
     public long ThreeHopVLExpand()
     {
         var plan = new VariableLengthExpandOperator(
-            new SingleNodeSource(_hub), sourceNodeColumn: 0,
+            new SingleVertexSource(_hub), sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, minHops: 1, maxHops: 3);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
     }
 }
 
-/// <summary>単一 NodeId を1行だけ出力する source operator。</summary>
-internal sealed class SingleNodeSource : IPhysicalOperator
+/// <summary>単一 VertexId を1行だけ出力する source operator。</summary>
+internal sealed class SingleVertexSource : IPhysicalOperator
 {
-    private readonly NodeId _id;
+    private readonly VertexId _id;
     private bool _emitted;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
+        new ColumnDefinition("vertexId", TupleSlotType.VertexId)]);
 
-    public SingleNodeSource(NodeId id) => _id = id;
+    public SingleVertexSource(VertexId id) => _id = id;
 
     public TupleSchema Schema => s_schema;
     public OperatorStatistics Statistics => default;
@@ -177,7 +177,7 @@ internal sealed class SingleNodeSource : IPhysicalOperator
     public void Open(ITransaction tx)
     {
         _emitted = false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _id.Value };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _id.Value };
     }
 
     public bool MoveNext()

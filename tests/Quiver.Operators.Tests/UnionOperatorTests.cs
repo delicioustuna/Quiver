@@ -26,7 +26,7 @@ public class UnionOperatorTests
             _multiplier = multiplier;
         }
 
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("union", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("union", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
 
@@ -51,7 +51,7 @@ public class UnionOperatorTests
     [Fact]
     public void Empty_source_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var probe = new CorrelatedInputOperator();
         using var op = new UnionOperator(src, 0, [probe], [new RepeatProbeBranch(probe, 1)]);
         op.Open(null!);
@@ -61,7 +61,7 @@ public class UnionOperatorTests
     [Fact]
     public void Concatenates_branches_for_each_source_row()
     {
-        var src = new FixedNodeListOperator(new NodeId(10), new NodeId(20));
+        var src = new FixedVertexListOperator(new VertexId(10), new VertexId(20));
         var probeA = new CorrelatedInputOperator();
         var probeB = new CorrelatedInputOperator();
         using var op = new UnionOperator(
@@ -76,7 +76,7 @@ public class UnionOperatorTests
     [Fact]
     public void Mismatched_probe_branch_arity_throws()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var probe = new CorrelatedInputOperator();
         Action act = () => new UnionOperator(
             src, 0,
@@ -86,12 +86,12 @@ public class UnionOperatorTests
     }
 
     [Fact]
-    public void Schema_is_single_NodeId_column()
+    public void Schema_is_single_VertexId_column()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var probe = new CorrelatedInputOperator();
         using var op = new UnionOperator(src, 0, [probe], [new RepeatProbeBranch(probe, 1)]);
         op.Schema.Columns.Should().HaveCount(1);
-        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.NodeId);
+        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.VertexId);
     }
 }

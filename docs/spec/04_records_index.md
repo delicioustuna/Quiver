@@ -1,61 +1,176 @@
 # レコード & インデックス
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## Slotted ページモデル {#slotted-pages}
 
-すべてのレコードストアは、8,160 バイトのページボディ (`PagedFile.BodySize`) 内で slotted-page
-レイアウトを用いる。レコードはストアごとに固定サイズであり、slot index = ページ内のレコードオフセット。
+Vertex、Edge、Nexus は `VersionedRecordHeap` と `ItemPointerMap` を使う slotted-page レイアウトである。
+各 heap record は 24 バイトの version header と store 固有の固定 payload を持つ。
+Property version、incidence、primary vector payload は Sequence から固定 slot を直接計算する。
 
-## Node ストア {#node-store}
+## Vertex ストア {#vertex-store}
 
-`NodeStore` (`src/Quiver/Storage/Records/NodeStore.cs`)。
+`VersionedVertexStore` (`src/Quiver/Stores/VersionedVertexStore.cs`)。
 
-**Node レコード** (15 バイト):
+**Vertex payload**（15 バイト、version header の後ろ）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
-| 0 | 1 | Flags (alive, deleted) |
-| 1 | 6 | FirstRelId（隣接リスト先頭のリレーションシップ） |
-| 7 | 6 | FirstPropId（プロパティチェーンの先頭エントリ） |
+| 0 | 1 | Flags (in-use) |
+| 1 | 6 | FirstEdgeId（隣接リスト先頭のEdge） |
+| 7 | 6 | FirstPropertyRef（owner-bound property version chain の先頭 Sequence） |
 | 13 | 2 | LabelId |
 
-- **1 ページあたり 544 レコード** (8160 / 15)
-- バージョンメタデータ (xmin/xmax) は別の MVCC サイドカー (`EntityVersionMeta`) に格納
-- vacuum フリーリストによる slot 再利用 (`OP-3`)。アクティブ tx 中は論理削除
+- xmin/xmax は version header に格納する。
+- Generation は `EntityVersionMeta` sidecar に格納する。
+- vacuum が reader horizon を越えた record を回収した後、Sequence を再利用すると Generation が増える。
 
-## Relationship ストア {#rel-store}
+## Edge ストア {#rel-store}
 
-リレーションシップは隣接リスト構造で格納される。各リレーションシップレコードは、source と target の
-両ノードについて next/prev のリレーションシップにリンクし、ノードのエンドポイントごとに双方向連結リストを形成する。
+`VersionedEdgeStore` (`src/Quiver/Stores/VersionedEdgeStore.cs`) は 45 バイト payload を `VersionedRecordHeap` に格納する。
+payload は flags、source、target、type、両端の prev/next、`FirstPropertyRef` で構成する。
+xmin/xmax は version header、Generation は `EntityVersionMeta` sidecar に置く。
+
+各Edgeは source と target の両Vertexについて prev/next にリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
+adjacency、delta、locator が raw Sequence を保持するため、通常の dead version 回収だけでは Edge Sequence を再利用しない。
+
+`RelationshipReuseCoordinator` は reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable checkpoint を順に完了し、その後だけ Sequence を free list へ返す。
+各 phase と対象 Sequence は primary catalog に永続化する。
+release 前の crash は再利用しない safe leak となり、reopen 後に未完了 phase から再開する。
+free list へ返した Sequence の次回割り当てでは Generation が増える。
+
+`AdjacencySegmentStore` は linked-list から再構築できる derived view である。
+descriptor version 2 の `KindSegment` だけを受理し、payload lane がない場合も `PayloadKind.None` の同じ segment format を使う。
+旧 adjacency descriptor を読む fallback は持たない。
+
+## Nexus ストア {#nexus-store}
+
+`VersionedNexusStore` (`src/Quiver/Stores/VersionedNexusStore.cs`)。
+**Nexus**は 1 つの型とロール付きメンバー集合（アリティ 2 以上）を持つ第一級エンティティであり、
+Edgeとは別の `EntityKind` として格納される。
+header レコードが MVCC 可視性の正本になる。
+
+**Nexus header レコード**（固定領域 15 バイト、version ヘッダ 24 バイトの後ろ）:
+
+| オフセット | サイズ | フィールド |
+|---|---|---|
+| 0 | 1 | Flags (in-use) |
+| 1 | 2 | TypeId（インターンされたNexus型） |
+| 3 | 6 | FirstIncidenceId（メンバーチェーンの先頭） |
+| 9 | 6 | FirstPropertyRef（owner-bound property version chain の先頭 Sequence） |
+
+- `VersionedRecordHeap` + `ItemPointerMap` 上の固定 payload であり、inline property 領域は持たない
+- xmin/xmax は heap の version header、Generation は `EntityVersionMeta` sidecar に置く
+- メンバー集合は作成時に確定し、以後変更されない。変更は削除 + 再作成で表現する
+- 同じロールとVertexの組は 1 つのNexus内で重複できない。
+  同じVertexが別ロールで参加すること、同じロールに複数Vertexが参加することは許される
+- Nexus型名とロール名は、ラベルと同様それぞれ独立したトークンストアで
+  16 bit ID（`NexusTypeId` / internal な RoleId）にインターンされる
+
+## Incidence ストア {#incidence-store}
+
+`IncidenceStore` (`src/Quiver/Stores/IncidenceStore.cs`)。
+**incidence** は「どのVertexが、どのロールで、どのNexusに属すか」を表す vertex-nexus 対
+（内部表現）であり、独立した MVCC エンティティではない。
+可視性は参照先の nexus header に従う。
+
+**Incidence slot**（27 バイト固定、1 ページあたり 302 slot）:
+
+| オフセット | サイズ | フィールド |
+|---|---|---|
+| 0 | 1 | Flags (in-use / free) |
+| 1 | 6 | NexusId (Sequence) |
+| 7 | 6 | VertexId (Sequence) |
+| 13 | 2 | RoleId（インターンされたロール） |
+| 15 | 6 | NextInVertex（同一Vertexの incidence チェーン） |
+| 21 | 6 | NextInNexus（同一Nexusのメンバーチェーン） |
+
+- **fixed-slot 直接アドレス方式**: `sequence → (page = seq / 302 + 2, offset = seq % 302 × 27)` で
+  slot を直引きし、version チェーンも間接ポインタ層（map / slot directory）も持たない。
+  ヘッダページ (page 1) に高水位と free chain 先頭を置く
+- incidence は 2 本のチェーンを貫通する。Vertex側は `NextInVertex`、Nexus側は
+  `NextInNexus` を辿る。Vertex側チェーンの走査は、参照先 header が不可視の incidence を
+  skip して後続を継続する
+- 逆方向リンク（PrevInVertex）は持たない。vacuum の unlink は、dead incidence をVertex別に
+  グループ化し、影響Vertexのチェーンを head から 1 回だけ走査する sweep
+  （合計 O(影響チェーン長)）で行う
+- free chain は空 slot の `NextInVertex` 領域を転用する。slot を free に戻せるのは
+  「全 live チェーンから unlink 済み、かつアクティブトランザクションなし」のときに限る
+
+incidence 自身が xmin/xmax を持たないのは、可視性判定に header だけを使うためである。
+undo（abort / savepoint）とクラッシュリカバリは物理 page image で行われレイアウトに依存しない。
+
+## Vertex incidence head {#vertex-incidence-head}
+
+`VertexIncidenceHeadStore` (`src/Quiver/Stores/VertexIncidenceHeadStore.cs`)。
+vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incidence（6 バイト Int48）を保持する
+固定長 sidecar。head をVertexレコード本体に持たせないのは、Nexusを使わない
+ワークロードのVertex読み取り帯域を増やさないためである（インライン案との実測比較で採用）。
+
+## Nexus の vacuum {#nexus-vacuum}
+
+`VacuumTarget.Nexuses` は visibility horizon を越えた dead nexus を
+プロパティ → incidence → header の順に回収する。
+
+- incidence の unlink はVertex別 sweep（上記）で行い、vertex incidence head が回収対象を
+  指す場合は次の生存 incidence へ進める
+- header slot は free list へ戻し、sequence 再利用時に generation を進める。
+  古い ID による参照（ベクトル binding を含む）は世代照合で弾く
+- 回収件数は `VacuumReport.ReclaimedNexuses` / `ReclaimedIncidences` で報告される
+
+## Horizon-aware vacuum {#horizon-vacuum}
+
+`Vacuum()` は database instance の writer lease を取得するが、active reader の終了は待たない。
+`SnapshotRegistry` が返す最古の visibility horizon より前だけを回収するため、long reader は開始時の property、payload、entity、manifest を読み続けられる。
+
+derived index entry を先に退役させ、primary property version とその version だけが参照する payload を同じ maintenance commit で回収する。
+その後に incidence、Edge、Vertex、Nexus slot を回収する。
+この順序により、到達可能な property version が解放済み payload を指す状態を作らない。
+
+`VacuumTarget.Indexes` は horizon を越えた vector manifest と全文 manifest を退役させる。
+どの committed manifest からも参照されない全文 artifact file は物理削除する。
+回収結果は `RetiredVectorManifests`、`RetiredFullTextManifests`、`ReclaimedFullTextArtifacts` で報告する。
 
 ## Property ストア {#property-store}
 
-`PropertyStore` (`src/Quiver/Storage/Records/PropertyStore.cs`)。
+`PropertyVersionStore` (`src/Quiver/Stores/PropertyVersionStore.cs`) は owner-bound property version を格納する。
+Property は独立 entity ではなく、public `PropertyId` を持たない。
+論理アドレスは `PropertyAddress(Owner: EntityRef, Key: PropertyKeyId)` である。
 
-**Property レコード** (41 バイト):
+**Property version レコード**（84 バイト）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
-| 0 | 1 | Flags |
-| 1 | 4 | KeyId（インターンされたプロパティキー） |
-| 5 | 1 | ValueType |
-| 6 | 24 | InlineValue（最大 24 バイトをインライン） |
-| 30 | 5 | SpilloverId（24 バイト超の値用） |
-| 35 | 6 | NextPropId（プロパティチェーン） |
+| 0 | 1 | Flags（in-use、spillover、vector payload） |
+| 1 | 1 | Cardinality |
+| 2 | 1 | ValueType |
+| 3 | 1 | 予約 |
+| 4 | 8 | Owner（kind、Generation、Sequence を含む packed `EntityRef`） |
+| 12 | 4 | KeyId |
+| 16 | 6 | PreviousVersion（同じ address の直前 version） |
+| 22 | 6 | NextOwned（owner chain の次 version） |
+| 28 | 4 | ValueLength |
+| 32 | 24 | InlineValue または payload ref |
+| 56 | 4 | CRC32C checksum |
+| 60 | 8 | xmin |
+| 68 | 8 | xmax |
+| 76 | 8 | Generation |
 
-- **1 ページあたり 199 レコード** (8160 / 41)
-- インライン容量: 24 バイト。これより大きい値はオーバーフローページにスピルする。
-- MVCC バージョンメタデータは `PropertyVersionMeta` サイドカー経由
-- alloc-free な読み取りパスとバージョンチェーンを持つ列指向レイアウト
+- 1 ページあたり 97 レコードである
+- 最大 24 バイトの string と bytes は record 内に格納し、それを超える値は checksum 付き immutable blob を参照する
+- `FloatArray` は `VectorPayloadRef` を格納し、property record へ配列を inline 化しない
+- xmin/xmax と Generation は property version record に格納し、property 専用の `EntityVersionMeta` sidecar は持たない
+- owner が一致しない chain read は `CorruptionException`、Generation が一致しない ref は missing として扱う
+- vacuum は dead version を回収し、HWM 縮小後に有効範囲だけで free-list を再構築する
+- free slot の Generation を保持するため、property page の物理 truncate は payload GC が reader horizon を扱う段階まで遅延する
 
 ## EntityRef (ID パッキング) {#entity-ref}
 
-`EntityRef` (`src/Quiver/Core/Ids.cs`) は、エンティティの同一性を単一の `long` にパックする:
+`EntityRef` (`src/Quiver/Core/EntityRef.cs`) は、エンティティの同一性を単一の `long` にパックする。
 
 ```
 ビットレイアウト (MSB → LSB):
-[63..60]  EntityKind   (4 bits; Node=0, Relationship=1)
+[63..60]  EntityKind   (4 bits; Vertex=1, Edge=2, Reserved=3, Nexus=4)
 [59..44]  Generation   (16 bits; 0..65535)
 [43..0]   Sequence     (44 bits; slot-local ID; 0..17.6 兆)
 ```
@@ -68,13 +183,17 @@
 - `PackLocal(seq, gen)` = `(gen << 44) | (seq & SequenceMask)`
 - Generation は vacuum 後の slot 再利用時にインクリメントされ、ABA エイリアシングを防ぐ
 - Generation オーバーフロー (> 65535): その slot は恒久的に退役する
+- `VertexId`、`EdgeId`、`NexusId`、`EntityRef` の等価性とハッシュは Generation を含む。
+- public な `EntityRef` は typed `From` または検証済み `Create` でだけ生成する。
+  `Vertex`、`Edge`、`Nexus` 以外の kind と、範囲外の local value は拒否する。
+  `default(EntityRef)` だけが invalid sentinel である。
+- internal `EntityId` の packed 値 `0` は canonical Invalid を表す。
+  予約値、未知 kind、範囲外 local value は `ToPacked` と strict decoder で拒否する。
 
 ## マルチバリュープロパティ {#multi-value}
 
-`PropertyCardinality` (`Single=0`, `Set=1`) を `PropertyKeyId` ごとに永続化し、
-同一キーに複数のスカラー値を持てるようにする。ストレージフォーマット変更なし —
-PropertyStore チェーンが MVCC で同一 KeyId の複数エントリを既に許容しているため、
-API / スキーマ層のみの拡張。
+`PropertyCardinality` (`Single=0`, `Set=1`) を property version に永続化する。
+同一 owner と key に複数の値を持つ Set は、同じ owner chain に複数の可視 version を保持する。
 
 - **`AddPropertyValue`**: 既存エントリに xmax スタンプせずに新エントリを prepend (重複時はスキップ)
 - **`RemovePropertyValue`**: 同一 key+value の visible エントリに xmax スタンプ
@@ -82,7 +201,7 @@ API / スキーマ層のみの拡張。
 - **B+Tree インデックス**: 要素単位。`Has("tags", "sensor")` は既存 B+Tree ルックアップで包含クエリとして動作
 - **Cardinality 制約**: `SetProperty` を Set キーに呼ぶと例外、`AddPropertyValue` を Single キーに呼ぶと例外
 - **SourceGenerator**: `List<T>` / `IList<T>` / `IReadOnlyList<T>` を検出し Set cardinality で CRUD を emit
-- **型付きトラバーサル**: `Has(s => s.Tags, "outdoor")` で包含フィルタ、`Values(s => s.Tags)` でノードごとの値リスト取得
+- **型付きトラバーサル**: `Has(s => s.Tags, "outdoor")` で包含フィルタ、`Values(s => s.Tags)` でVertexごとの値リスト取得
 
 ## B+Tree インデックス {#btree}
 
@@ -117,15 +236,57 @@ API / スキーマ層のみの拡張。
 | 種別 | キー型 | ルックアップ |
 |---|---|---|
 | `StringEquality` | string | SeekIndex による完全一致 |
+| `StringRange` | string | RangeIndex による範囲スキャン |
+| `Int32Equality` | int32 | SeekIndex による完全一致 |
 | `Int64Equality` | int64 | SeekIndex による完全一致 |
-| Range indexes | int64 | RangeIndex による範囲スキャン |
+| `DoubleEquality` | double | SeekIndex による完全一致 |
 
-### ジャーナリングモード {#btree-journal}
+### 統一スカラ索引定義 {#scalar-index-definition}
 
-B+Tree インデックスは型に応じて異なる WAL ジャーナリングモードで動作する:
+スカラ索引は `ScalarIndexDefinition(Name, Target, Kind)` を永続定義の正本とする。
+`PropertyTarget` は所有者種別、プロパティキー名、任意のラベルまたは型スコープを明示する。
+所有者種別は Vertex、Edge、Nexus を区別し、同じ sequence 値を別種別へ誤解決しない。
+各 B+Tree value はエンティティ ID ではなく `PropertyVersionRef` を格納する。
+seek と range はプロパティキー、値、所有者種別、所有者世代、所有者の MVCC 可視性、スコープを primary record で再検証する。
+stale entry は結果から除外されるため、索引 artifact 自体を可視性の正本にしない。
 
-| モード | ページ WAL | CLR | 用途 |
-|---|---|---|---|
-| `Full` | PageImage + coalesce | before-image を取得 | 標準インデックス |
-| `Suppressed` | PageImage なし | CLR なし | FT postings/norms リーフ（論理 WAL のみ） |
-| `RedoOnly` | eager な PageImage | undo なし | FT 構造ページ（nested top action） |
+### ライフサイクルと再構築 {#scalar-index-lifecycle}
+
+永続状態は `Building`、`Ready`、`RebuildRequired` の三種類である。
+作成時は定義を `Building` として記録し、既存の可視プロパティを backfill してから `Ready` に遷移する。
+同じ名前と同じ定義の再作成は冪等であり、同じ名前で異なる定義を要求した場合は拒否する。
+通常 mutation、Set cardinality、bulk load、streaming bulk load は同じ定義集合を更新対象とする。
+bulk load 後は定義を `RebuildRequired` にし、snapshot reader が primary property を走査して immutable な候補 artifact を構築する。
+open 時に `Building`、`RebuildRequired`、欠損または不正な B+Tree header を検出した場合も、同じ background rebuild を開始する。
+primary scan、key decode、sort の間は writer lease を保持しない。
+publish transaction は source committed high-water と index definition を再検証し、一致した artifact だけを `Ready` にする。
+再検証に失敗した artifact は破棄し、新しい snapshot から再試行する。
+source snapshot より古い reader が残る間は publish を延期し、旧 reader が参照する artifact を reset しない。
+定義が `Ready` でない間の seek と range は、同じ読み取りスナップショットの primary scan へフォールバックする。
+フォールバックも同じ値比較と順序規則を使うため、artifact の状態によって結果集合を変えない。
+
+### ベクトル索引定義と segment lifecycle {#vector-index-lifecycle}
+
+`VectorIndexDefinition` は `PropertyTarget`、dimensions、metric、element type、HNSW 構築パラメタ、`VectorSegmentPolicy` を永続定義とする。
+vector property mutation は一致する definition ごとに commit-local flat delta segment を公開する。
+merge worker は read snapshot から immutable HNSW artifact を構築し、source manifest generation と definition が一致する場合だけ短い write transaction で新 manifest を公開する。
+old reader は旧 manifest を使い続け、新 reader だけが新 manifest を参照する。
+candidate は owner generation、property visibility、target、payload checksum を primary store で再検証する。
+derived state が不足する場合は同じ snapshot の primary property scan へフォールバックする。
+
+### B+Tree WAL {#btree-journal}
+
+すべての scalar B+Tree ページは同じ `PageImage` WAL 経路を使う。
+全文のterm dataとdocument lengthは immutable derived segment に置き、B+Tree page と専用 journaling modeを持たない。
+
+## 全文 definition と segment {#fulltext-segment}
+
+`FullTextIndexDefinition` は `PropertyTarget`、tokenizer/filter pipeline、BM25 parameter、segment policy を統一 catalog に保存する。
+
+全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
+
+artifact file は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg/` に保持する。
+catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact ID/length/checksum、lifecycle state を保持する。
+
+検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
+プロセス内 rollback は transaction-owned write set の before-image を使う。

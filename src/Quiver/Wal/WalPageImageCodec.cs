@@ -3,21 +3,13 @@ using System.Buffers.Binary;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// <see cref="WalRecordType.PageImage"/> と
-/// <see cref="WalRecordType.CompensationLogRecord"/> が共有するページペイロードの
-/// エンコード / デコード。両者は「どのファイルのどのページの 8KB バイト列か」という
-/// 同一フォーマットを使う (前者は after-image, 後者は before-image)。
-///
-/// ページ末尾の連続ゼロを trim する v2 フォーマットを追加。
-/// trim 後の payload を「literal + byte-run」chunk へ符号化する v3 を追加。
-/// NodeStore record (31B のうち FF×12 と 00×8 で計 20B が同一バイト run) や
+/// <see cref="WalRecordType.PageImage"/> のページペイロード codec。
+/// ページ末尾の連続ゼロを trim し、残りを「literal + byte-run」chunk へ符号化する。
+/// VertexStore record (31B のうち FF×12 と 00×8 で計 20B が同一バイト run) や
 /// PageHeader 直後のページタイプ特有のゼロ run を縮める。
 ///
-/// ペイロード形式 (version dispatch は payload[0] = version byte で判定):
-///   v1 (旧): [version=1:1][fileKind:1][pageId:8][pageBytes:N=8192]
-///   v2:      [version=2:1][fileKind:1][pageId:8][usedLen:2][usedBytes:M]
-///            recovery 側で残り (8192-M) バイトを zero-pad して reconstruct。
-///   v3:      [version=3:1][fileKind:1][pageId:8][usedLen:2][chunks...]
+/// ペイロード形式:
+///   [familyVersion=1:1][fileKind:1][pageId:8][usedLen:2][chunks...]
 ///            chunks は逐次連結された可変長ブロックで、各ブロックは:
 ///              [chunkType:1][...]
 ///                chunkType=0x00 (Literal): [count:varint(1-3B)][literal_bytes:count]
@@ -27,45 +19,40 @@ namespace Quiver.Storage.Wal;
 /// </summary>
 internal static class WalPageImageCodec
 {
-    /// <summary>v1 ヘッダ長 (バイト)。version + fileKind + pageId。</summary>
-    public const int HeaderLength = 10;
-
-    /// <summary>v2 / v3 ヘッダ長 (バイト)。version + fileKind + pageId + usedLen。</summary>
-    public const int HeaderLengthV2 = 12;
+    /// <summary>family version + fileKind + pageId + usedLen の長さ。</summary>
+    public const int HeaderLength = 12;
 
     /// <summary>復元時のページサイズ (= PagedFile.PageSizeConst)。</summary>
     public const int FullPageBytes = 8192;
 
     /// <summary>
-    /// trim で消してはいけない最低保持バイト数。PageHeader (32B) は CRC や magic を持つので
-    /// 完全ゼロ判定でも 0 にしない (= 32B 残す)。これにより「未初期化フラグの page」を recovery で
+    /// trim で消してはいけない最低保持バイト数。PageHeader は checksum と magic を持つので
+    /// 完全ゼロ判定でも除去しない。これにより「未初期化フラグの page」を recovery で
     /// 区別したい場合や、将来 PageHeader.Validate の早期失敗で原因切り分けに使う場合に役立つ。
     /// </summary>
-    public const int MinKeptBytes = 32;
+    public const int MinKeptBytes = Quiver.Storage.PageHeader.Size;
 
     /// <summary>
     /// RLE chunk 化で「run」と認識する最小連続バイト数。
     /// 損益分岐分析: literal chunk を split して run を挟むコスト = 2 chunk header (4B) + run chunk (3B) -
     /// run bytes。break-even は 7 バイトなので、確実に得をする 8 を採用する。
-    /// NodeStore record パターンの FF×12 / 00×8 は両方 trigger される (12B run で 5B 節約、8B run で 1B 節約)。
+    /// VertexStore record パターンの FF×12 / 00×8 は両方 trigger される (12B run で 5B 節約、8B run で 1B 節約)。
     /// BTree page の散在する短い run (KeyLen 後ろの 4-6 zero など) は literal のままで余計なオーバヘッドを避ける。
     /// </summary>
     public const int MinRunBytes = 8;
 
-    private const byte Version1 = 1;
-    private const byte Version2 = 2;
-    private const byte Version3 = 3;
+    private const byte PayloadVersion = 1;
     private const byte ChunkLiteral = 0x00;
     private const byte ChunkRun = 0x01;
 
     /// <summary>
-    /// ページバイト列を v3 (trim + RLE chunk) WAL ペイロードへエンコードする。
+    /// ページバイト列を現行 QUIVER-SW family の WAL ペイロードへエンコードする。
     /// 末尾ゼロを trim した上で、連続同一バイトの run (>= <see cref="MinRunBytes"/>) を
-    /// chunk として符号化する。NodeStore record の FF×12 / 00×8 等が縮む。
+    /// chunk として符号化する。VertexStore record の FF×12 / 00×8 等が縮む。
     /// </summary>
     public static byte[] Encode(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
-        // 1. 末尾ゼロ trim (v2 と同一ロジック)。
+        // 1. 末尾の連続ゼロを trim する。
         int lastNonZero = pageBytes.LastIndexOfAnyExcept((byte)0);
         int usedLen = lastNonZero < 0 ? MinKeptBytes : Math.Max(lastNonZero + 1, MinKeptBytes);
         if (usedLen > pageBytes.Length) usedLen = pageBytes.Length;
@@ -78,13 +65,13 @@ internal static class WalPageImageCodec
 
         // 上限見積もり: worst case = 全部 literal (chunk overhead 1+3 = 4 バイト)。
         // 余裕を持って trimmed.Length + 16 を確保。
-        var output = new byte[HeaderLengthV2 + trimmed.Length + 16];
-        output[0] = Version3;
+        var output = new byte[HeaderLength + trimmed.Length + 16];
+        output[0] = PayloadVersion;
         output[1] = fileKind;
         BinaryPrimitives.WriteInt64LittleEndian(output.AsSpan(2), pageId);
         BinaryPrimitives.WriteUInt16LittleEndian(output.AsSpan(10), (ushort)usedLen);
 
-        int outPos = HeaderLengthV2;
+        int outPos = HeaderLength;
         int litStart = 0; // 未出力の literal 区間の開始 index
 
         int i = 0;
@@ -168,42 +155,8 @@ internal static class WalPageImageCodec
     }
 
     /// <summary>
-    /// v1 (旧、全ページバイト保持) を書く。テスト・互換用に残す。production からは
-    /// 呼ばない。
-    /// </summary>
-    public static byte[] EncodeV1(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
-    {
-        var payload = new byte[HeaderLength + pageBytes.Length];
-        payload[0] = Version1;
-        payload[1] = fileKind;
-        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(2), pageId);
-        pageBytes.CopyTo(payload.AsSpan(HeaderLength));
-        return payload;
-    }
-
-    /// <summary>
-    /// v2 (trim 単独) を書く。v3 (RLE) が問題ある場合の fallback として残す旧形式。
-    /// </summary>
-    public static byte[] EncodeV2(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
-    {
-        int lastNonZero = pageBytes.LastIndexOfAnyExcept((byte)0);
-        int usedLen = lastNonZero < 0 ? MinKeptBytes : Math.Max(lastNonZero + 1, MinKeptBytes);
-        if (usedLen > pageBytes.Length) usedLen = pageBytes.Length;
-
-        var payload = new byte[HeaderLengthV2 + usedLen];
-        payload[0] = Version2;
-        payload[1] = fileKind;
-        BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(2), pageId);
-        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(10), (ushort)usedLen);
-        pageBytes[..usedLen].CopyTo(payload.AsSpan(HeaderLengthV2));
-        return payload;
-    }
-
-    /// <summary>
     /// WAL ペイロードを fileKind / pageId / ページバイト列へ分解する。
-    /// v1/v2/v3 すべて対応。v2 と v3 は <see cref="FullPageBytes"/> へ zero-pad した上で
-    /// <paramref name="pageBytes"/> に返す。長さ不足や未対応バージョン、usedLen / chunk 不正
-    /// のときは <c>false</c>。
+    /// 長さ不足、family version 不一致、usedLen または chunk 不正のときは <c>false</c>。
     /// </summary>
     public static bool TryDecode(
         ReadOnlySpan<byte> payload,
@@ -214,69 +167,46 @@ internal static class WalPageImageCodec
         pageBytes = Array.Empty<byte>();
         if (payload.Length < HeaderLength) return false;
 
-        byte version = payload[0];
-        if (version == Version1)
-        {
-            fileKind = payload[1];
-            pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
-            pageBytes = payload[HeaderLength..].ToArray();
-            return true;
-        }
-        if (version == Version2)
-        {
-            if (payload.Length < HeaderLengthV2) return false;
-            fileKind = payload[1];
-            pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
-            int usedLen = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
-            if (usedLen > FullPageBytes) return false;
-            if (payload.Length < HeaderLengthV2 + usedLen) return false;
-            var buf = new byte[FullPageBytes];
-            payload.Slice(HeaderLengthV2, usedLen).CopyTo(buf);
-            pageBytes = buf;
-            return true;
-        }
-        if (version == Version3)
-        {
-            if (payload.Length < HeaderLengthV2) return false;
-            fileKind = payload[1];
-            pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
-            int usedLen = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
-            if (usedLen > FullPageBytes) return false;
+        if (payload[0] != PayloadVersion) return false;
 
-            var buf = new byte[FullPageBytes];
-            int writePos = 0;
-            int readPos = HeaderLengthV2;
-            while (writePos < usedLen)
+        fileKind = payload[1];
+        pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
+        int usedLen = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
+        if (usedLen > FullPageBytes) return false;
+
+        var buf = new byte[FullPageBytes];
+        int writePos = 0;
+        int readPos = HeaderLength;
+        while (writePos < usedLen)
+        {
+            if (readPos >= payload.Length) return false;
+            byte chunkType = payload[readPos++];
+            if (chunkType == ChunkLiteral)
+            {
+                if (!TryReadVarint(payload, ref readPos, out uint count)) return false;
+                if (writePos + (int)count > usedLen) return false;
+                if (readPos + (int)count > payload.Length) return false;
+                payload.Slice(readPos, (int)count).CopyTo(buf.AsSpan(writePos));
+                writePos += (int)count;
+                readPos += (int)count;
+            }
+            else if (chunkType == ChunkRun)
             {
                 if (readPos >= payload.Length) return false;
-                byte chunkType = payload[readPos++];
-                if (chunkType == ChunkLiteral)
-                {
-                    if (!TryReadVarint(payload, ref readPos, out uint count)) return false;
-                    if (writePos + (int)count > usedLen) return false;
-                    if (readPos + (int)count > payload.Length) return false;
-                    payload.Slice(readPos, (int)count).CopyTo(buf.AsSpan(writePos));
-                    writePos += (int)count;
-                    readPos += (int)count;
-                }
-                else if (chunkType == ChunkRun)
-                {
-                    if (readPos >= payload.Length) return false;
-                    byte value = payload[readPos++];
-                    if (!TryReadVarint(payload, ref readPos, out uint count)) return false;
-                    if (writePos + (int)count > usedLen) return false;
-                    buf.AsSpan(writePos, (int)count).Fill(value);
-                    writePos += (int)count;
-                }
-                else
-                {
-                    return false; // 未知の chunk type
-                }
+                byte value = payload[readPos++];
+                if (!TryReadVarint(payload, ref readPos, out uint count)) return false;
+                if (writePos + (int)count > usedLen) return false;
+                buf.AsSpan(writePos, (int)count).Fill(value);
+                writePos += (int)count;
             }
-            if (writePos != usedLen) return false;
-            pageBytes = buf;
-            return true;
+            else
+            {
+                return false;
+            }
         }
-        return false; // 未対応バージョン
+
+        if (writePos != usedLen || readPos != payload.Length) return false;
+        pageBytes = buf;
+        return true;
     }
 }

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Quiver.Core;
 using Quiver.FuzzTests.Targets;
 using Xunit;
 
@@ -9,8 +10,8 @@ namespace Quiver.FuzzTests;
 /// `[Trait("Category", "Fuzz")]` で日常 run から外し、`dotnet test --filter Category=Fuzz`
 /// または CI nightly で回す。
 ///
-/// 各 target は「いかなる入力に対しても例外を投げず終わる」が契約。テストは
-/// <see cref="Record.Exception"/> で実際の例外有無を確認し、無であれば緑。
+/// codec target は任意入力を安全に拒否する。
+/// WAL file target は strict parser の定義済み format/corruption 例外を許容し、それ以外の例外を検出する。
 /// </summary>
 [Trait("Category", "Fuzz")]
 public class FuzzWalkerTests
@@ -53,7 +54,7 @@ public class FuzzWalkerTests
         ex.Should().BeNull("TryReadVarInt64 は truncated / 過長で false を返すだけで例外を投げてはならない");
     }
 
-    // ---- WAL レコード / segment ファイル --------------------------------------
+    // ---- WAL レコードファイル -------------------------------------------------
 
     public static IEnumerable<object[]> WalRecordInputs()
     {
@@ -65,10 +66,14 @@ public class FuzzWalkerTests
 
     [Theory]
     [MemberData(nameof(WalRecordInputs))]
-    public void WalRecord_does_not_throw(string label, byte[] input)
+    public void WalRecord_rejects_invalid_input_with_defined_exception(string label, byte[] input)
     {
         _ = label;
         var ex = Record.Exception(() => WalRecordFuzzTarget.Run(input));
-        ex.Should().BeNull("WriteAheadLog の RebuildState / OpenReader は破損 WAL を吸収すべきで、例外を漏らしてはならない");
+        bool isDefinedOutcome = ex is null
+            || ex.GetType() == typeof(WalFormatMismatchException)
+            || ex.GetType() == typeof(CorruptionException);
+        isDefinedOutcome.Should().BeTrue(
+            "strict WAL parser は入力を受理するか、format/corruption 例外で明示拒否する");
     }
 }

@@ -28,76 +28,73 @@ static void PrepareFile(string outputPath)
     Console.WriteLine($"Generating sample database: {Path.GetFullPath(outputPath)}");
 }
 
-static void PrintStats(GraphDatabase db)
+static void PrintStats(QuiverDatabase db)
 {
     var stats = db.Diagnostics.GetStatistics();
-    Console.WriteLine($"  Nodes:         {stats.NodeCount}");
-    Console.WriteLine($"  Relationships: {stats.RelationshipCount}");
+    Console.WriteLine($"  Vertices:         {stats.VertexCount}");
+    Console.WriteLine($"  Edges: {stats.EdgeCount}");
     Console.WriteLine($"  Properties:    {stats.PropertyCount}");
     Console.WriteLine($"  Labels:        [{string.Join(", ", db.Schema.ListLabels())}]");
-    Console.WriteLine($"  Rel Types:     [{string.Join(", ", db.Schema.ListRelationshipTypes())}]");
+    Console.WriteLine($"  Rel Types:     [{string.Join(", ", db.Schema.ListEdgeTypes())}]");
     Console.WriteLine($"  Prop Keys:     [{string.Join(", ", db.Schema.ListPropertyKeys())}]");
     Console.WriteLine($"  Indexes:       {db.Schema.ListIndexes().Count}");
-    Console.WriteLine($"  FT Indexes:    {db.Schema.ListFullTextIndexes().Count}");
+    Console.WriteLine($"  FT Indexes:    {db.Schema.ListIndexes().Count(i => i.Definition is FullTextIndexDefinition)}");
     Console.WriteLine("Done.");
+}
+
+static void EditSchema(QuiverDatabase db, Action<ISchemaEditor> edit)
+{
+    using var tx = db.BeginWriteTransaction();
+    edit(tx.EditSchema);
+    tx.Commit();
 }
 
 static void GenerateMovie(string outputPath)
 {
     PrepareFile(outputPath);
-    using var db = GraphDatabase.Open(outputPath);
+    using var db = QuiverDatabase.Open(outputPath);
 
-    db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
-    db.Schema.CreateIndex("idx_movie_year", "Movie", "year", IndexKind.Int64Equality);
-    db.Schema.CreateFullTextIndex("ft_movie_title", "Movie", "title");
-
-    using (var tx = db.BeginTransaction())
+    EditSchema(db, schema =>
     {
-        var g = tx.G(db.Schema);
+        schema.CreateIndex(new ScalarIndexDefinition("idx_person_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality));
+        schema.CreateIndex(new ScalarIndexDefinition("idx_movie_year", new PropertyTarget(PropertyOwnerKind.Vertex, "year", "Movie"), IndexKind.Int64Equality));
+        schema.CreateIndex(new FullTextIndexDefinition("ft_movie_title", new PropertyTarget(PropertyOwnerKind.Vertex, "title", "Movie")));
+    });
 
-        var keanu = g.AddNode("Person").P("name", "Keanu Reeves").P("born", 1964L).Next();
-        var carrie = g.AddNode("Person").P("name", "Carrie-Anne Moss").P("born", 1967L).Next();
-        var hugo = g.AddNode("Person").P("name", "Hugo Weaving").P("born", 1960L).Next();
-        var laurence = g.AddNode("Person").P("name", "Laurence Fishburne").P("born", 1961L).Next();
-        var lana = g.AddNode("Person").P("name", "Lana Wachowski").P("born", 1965L).Next();
-        var lilly = g.AddNode("Person").P("name", "Lilly Wachowski").P("born", 1967L).Next();
-        var tom = g.AddNode("Person").P("name", "Tom Hanks").P("born", 1956L).Next();
-        var robert = g.AddNode("Person").P("name", "Robert Zemeckis").P("born", 1952L).Next();
+    using (var tx = db.BeginWriteTransaction())
+    {
+        var g = tx.Query;
 
-        var matrix = g.AddNode("Movie").P("title", "The Matrix").P("year", 1999L).P("tagline", "Welcome to the Real World").Next();
-        var reloaded = g.AddNode("Movie").P("title", "The Matrix Reloaded").P("year", 2003L).Next();
-        var forrest = g.AddNode("Movie").P("title", "Forrest Gump").P("year", 1994L).P("tagline", "Life is like a box of chocolates").Next();
+        var keanu = tx.Mutate.AddVertex("Person").P("name", "Keanu Reeves").P("born", 1964L).Next();
+        var carrie = tx.Mutate.AddVertex("Person").P("name", "Carrie-Anne Moss").P("born", 1967L).Next();
+        var hugo = tx.Mutate.AddVertex("Person").P("name", "Hugo Weaving").P("born", 1960L).Next();
+        var laurence = tx.Mutate.AddVertex("Person").P("name", "Laurence Fishburne").P("born", 1961L).Next();
+        var lana = tx.Mutate.AddVertex("Person").P("name", "Lana Wachowski").P("born", 1965L).Next();
+        var lilly = tx.Mutate.AddVertex("Person").P("name", "Lilly Wachowski").P("born", 1967L).Next();
+        var tom = tx.Mutate.AddVertex("Person").P("name", "Tom Hanks").P("born", 1956L).Next();
+        var robert = tx.Mutate.AddVertex("Person").P("name", "Robert Zemeckis").P("born", 1952L).Next();
 
-        g.AddRelationship("ACTED_IN").From(keanu).To(matrix).P("role", "Neo").Next();
-        g.AddRelationship("ACTED_IN").From(carrie).To(matrix).P("role", "Trinity").Next();
-        g.AddRelationship("ACTED_IN").From(hugo).To(matrix).P("role", "Agent Smith").Next();
-        g.AddRelationship("ACTED_IN").From(laurence).To(matrix).P("role", "Morpheus").Next();
-        g.AddRelationship("ACTED_IN").From(keanu).To(reloaded).P("role", "Neo").Next();
-        g.AddRelationship("ACTED_IN").From(carrie).To(reloaded).P("role", "Trinity").Next();
-        g.AddRelationship("ACTED_IN").From(hugo).To(reloaded).P("role", "Agent Smith").Next();
-        g.AddRelationship("ACTED_IN").From(tom).To(forrest).P("role", "Forrest Gump").Next();
+        var matrix = tx.Mutate.AddVertex("Movie").P("title", "The Matrix").P("year", 1999L).P("tagline", "Welcome to the Real World").Next();
+        var reloaded = tx.Mutate.AddVertex("Movie").P("title", "The Matrix Reloaded").P("year", 2003L).Next();
+        var forrest = tx.Mutate.AddVertex("Movie").P("title", "Forrest Gump").P("year", 1994L).P("tagline", "Life is like a box of chocolates").Next();
 
-        g.AddRelationship("DIRECTED").From(lana).To(matrix).Next();
-        g.AddRelationship("DIRECTED").From(lilly).To(matrix).Next();
-        g.AddRelationship("DIRECTED").From(lana).To(reloaded).Next();
-        g.AddRelationship("DIRECTED").From(lilly).To(reloaded).Next();
-        g.AddRelationship("DIRECTED").From(robert).To(forrest).Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(keanu).To(matrix).P("role", "Neo").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(carrie).To(matrix).P("role", "Trinity").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(hugo).To(matrix).P("role", "Agent Smith").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(laurence).To(matrix).P("role", "Morpheus").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(keanu).To(reloaded).P("role", "Neo").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(carrie).To(reloaded).P("role", "Trinity").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(hugo).To(reloaded).P("role", "Agent Smith").Next();
+        tx.Mutate.AddEdge("ACTED_IN").From(tom).To(forrest).P("role", "Forrest Gump").Next();
 
-        g.AddRelationship("KNOWS").From(keanu).To(carrie).Next();
-        g.AddRelationship("KNOWS").From(keanu).To(hugo).Next();
+        tx.Mutate.AddEdge("DIRECTED").From(lana).To(matrix).Next();
+        tx.Mutate.AddEdge("DIRECTED").From(lilly).To(matrix).Next();
+        tx.Mutate.AddEdge("DIRECTED").From(lana).To(reloaded).Next();
+        tx.Mutate.AddEdge("DIRECTED").From(lilly).To(reloaded).Next();
+        tx.Mutate.AddEdge("DIRECTED").From(robert).To(forrest).Next();
 
-        (string name, NodeId id)[] people =
-        [
-            ("Keanu Reeves", keanu), ("Carrie-Anne Moss", carrie), ("Hugo Weaving", hugo),
-            ("Laurence Fishburne", laurence), ("Lana Wachowski", lana), ("Lilly Wachowski", lilly),
-            ("Tom Hanks", tom), ("Robert Zemeckis", robert),
-        ];
-        foreach (var (name, id) in people)
-            tx.IndexInsert("idx_person_name", name, id);
-
-        tx.IndexInsert("idx_movie_year", 1999L, matrix);
-        tx.IndexInsert("idx_movie_year", 2003L, reloaded);
-        tx.IndexInsert("idx_movie_year", 1994L, forrest);
+        tx.Mutate.AddEdge("KNOWS").From(keanu).To(carrie).Next();
+        tx.Mutate.AddEdge("KNOWS").From(keanu).To(hugo).Next();
 
         tx.Commit();
     }
@@ -108,17 +105,21 @@ static void GenerateMovie(string outputPath)
 static void GenerateVector(string outputPath)
 {
     PrepareFile(outputPath);
-    using var db = GraphDatabase.Open(outputPath);
+    using var db = QuiverDatabase.Open(outputPath);
 
-    db.Schema.CreateIndex("idx_doc_title", "Document", "title", IndexKind.StringEquality);
-    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-        "vec_doc", EntityKind.Node, default, 8, DistanceMetric.Cosine, "sample"));
+    EditSchema(db, schema =>
+    {
+        schema.CreateIndex(
+            new ScalarIndexDefinition("idx_doc_title", new PropertyTarget(PropertyOwnerKind.Vertex, "title", "Document"), IndexKind.StringEquality));
+        schema.CreateIndex(
+            new VectorIndexDefinition("vec_doc", new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Document"), 8));
+    });
 
     var rng = new Random(42);
 
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
 
         var topics = new[]
         {
@@ -136,32 +137,31 @@ static void GenerateVector(string outputPath)
             ("Index Design Patterns",        "database",   new float[] { 0.75f, 0.65f, 0.25f, 0.15f, 0.4f, 0.3f, 0.3f, 0.2f }),
         };
 
-        var topicNode = g.AddNode("Topic").P("name", "Database Engineering").Next();
-        var nodeIds = new List<(NodeId id, string topic)>();
+        var topicVertex = tx.Mutate.AddVertex("Topic").P("name", "Database Engineering").Next();
+        var vertexIds = new List<(VertexId id, string topic)>();
 
         foreach (var (title, topic, vec) in topics)
         {
-            var docId = g.AddNode("Document")
+            var docId = tx.Mutate.AddVertex("Document")
                 .P("title", title)
                 .P("topic", topic)
                 .P("wordCount", (long)(rng.Next(500, 3000)))
                 .Next();
 
-            tx.SetVector(EntityKind.Node, docId.Sequence, "vec_doc", vec);
-            tx.IndexInsert("idx_doc_title", title, docId);
-            nodeIds.Add((docId, topic));
+            tx.SetVectorProperty(EntityRef.From(docId), "embedding", vec);
+            vertexIds.Add((docId, topic));
 
-            g.AddRelationship("BELONGS_TO").From(docId).To(topicNode).Next();
+            tx.Mutate.AddEdge("BELONGS_TO").From(docId).To(topicVertex).Next();
         }
 
         // 関連文書間の相互参照
-        for (var i = 0; i < nodeIds.Count; i++)
+        for (var i = 0; i < vertexIds.Count; i++)
         {
-            for (var j = i + 1; j < nodeIds.Count; j++)
+            for (var j = i + 1; j < vertexIds.Count; j++)
             {
-                if (nodeIds[i].topic == nodeIds[j].topic)
+                if (vertexIds[i].topic == vertexIds[j].topic)
                 {
-                    g.AddRelationship("REFERENCES").From(nodeIds[i].id).To(nodeIds[j].id).Next();
+                    tx.Mutate.AddEdge("REFERENCES").From(vertexIds[i].id).To(vertexIds[j].id).Next();
                 }
             }
         }
@@ -173,99 +173,88 @@ static void GenerateVector(string outputPath)
     Console.WriteLine("  Vector Indexes: 1 (vec_doc)");
     Console.WriteLine();
     Console.WriteLine("Test query in Studio:");
-    Console.WriteLine("  db.Vectors.KnnSearch(\"vec_doc\", new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }, 8)");
+    Console.WriteLine("  readTx.KnnSearch(\"vec_doc\", new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }, 8)");
 }
 
 static void GenerateHierarchical(string outputPath)
 {
     PrepareFile(outputPath);
-    using var db = GraphDatabase.Open(outputPath);
+    using var db = QuiverDatabase.Open(outputPath);
 
-    db.Schema.CreateIndex("idx_dept_name", "Department", "name", IndexKind.StringEquality);
-    db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
-    db.Schema.CreateFullTextIndex("ft_person_bio", "Person", "bio");
-
-    using (var tx = db.BeginTransaction())
+    EditSchema(db, schema =>
     {
-        var g = tx.G(db.Schema);
+        schema.CreateIndex(new ScalarIndexDefinition("idx_dept_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Department"), IndexKind.StringEquality));
+        schema.CreateIndex(new ScalarIndexDefinition("idx_person_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality));
+        schema.CreateIndex(new FullTextIndexDefinition("ft_person_bio", new PropertyTarget(PropertyOwnerKind.Vertex, "bio", "Person")));
+    });
+
+    using (var tx = db.BeginWriteTransaction())
+    {
+        var g = tx.Query;
 
         // --- 会社 (ルート) ---
-        var company = g.AddNode("Company").P("name", "Quiver Corp").P("founded", 2024L).Next();
+        var company = tx.Mutate.AddVertex("Company").P("name", "Quiver Corp").P("founded", 2024L).Next();
 
         // --- 部門 (第 1 層) ---
-        var eng = g.AddNode("Department").P("name", "Engineering").P("headcount", 8L).Next();
-        var prod = g.AddNode("Department").P("name", "Product").P("headcount", 3L).Next();
-        var design = g.AddNode("Department").P("name", "Design").P("headcount", 2L).Next();
+        var eng = tx.Mutate.AddVertex("Department").P("name", "Engineering").P("headcount", 8L).Next();
+        var prod = tx.Mutate.AddVertex("Department").P("name", "Product").P("headcount", 3L).Next();
+        var design = tx.Mutate.AddVertex("Department").P("name", "Design").P("headcount", 2L).Next();
 
-        g.AddRelationship("HAS_DEPT").From(company).To(eng).Next();
-        g.AddRelationship("HAS_DEPT").From(company).To(prod).Next();
-        g.AddRelationship("HAS_DEPT").From(company).To(design).Next();
+        tx.Mutate.AddEdge("HAS_DEPT").From(company).To(eng).Next();
+        tx.Mutate.AddEdge("HAS_DEPT").From(company).To(prod).Next();
+        tx.Mutate.AddEdge("HAS_DEPT").From(company).To(design).Next();
 
         // --- 開発部門配下のチーム (第 2 層) ---
-        var frontend = g.AddNode("Team").P("name", "Frontend").P("tech", "TypeScript").Next();
-        var backend = g.AddNode("Team").P("name", "Backend").P("tech", "C#").Next();
-        var infra = g.AddNode("Team").P("name", "Infrastructure").P("tech", "Terraform").Next();
+        var frontend = tx.Mutate.AddVertex("Team").P("name", "Frontend").P("tech", "TypeScript").Next();
+        var backend = tx.Mutate.AddVertex("Team").P("name", "Backend").P("tech", "C#").Next();
+        var infra = tx.Mutate.AddVertex("Team").P("name", "Infrastructure").P("tech", "Terraform").Next();
 
-        g.AddRelationship("HAS_TEAM").From(eng).To(frontend).Next();
-        g.AddRelationship("HAS_TEAM").From(eng).To(backend).Next();
-        g.AddRelationship("HAS_TEAM").From(eng).To(infra).Next();
+        tx.Mutate.AddEdge("HAS_TEAM").From(eng).To(frontend).Next();
+        tx.Mutate.AddEdge("HAS_TEAM").From(eng).To(backend).Next();
+        tx.Mutate.AddEdge("HAS_TEAM").From(eng).To(infra).Next();
 
         // --- 従業員 (第 3 層) ---
-        var alice = g.AddNode("Person").P("name", "Alice").P("role", "Frontend Lead").P("bio", "Alice leads the frontend team and specializes in React and TypeScript").Next();
-        var bob = g.AddNode("Person").P("name", "Bob").P("role", "Frontend Dev").P("bio", "Bob is a frontend developer focused on accessibility and design systems").Next();
-        var carol = g.AddNode("Person").P("name", "Carol").P("role", "Backend Lead").P("bio", "Carol architects backend services and manages the API layer").Next();
-        var dave = g.AddNode("Person").P("name", "Dave").P("role", "Backend Dev").P("bio", "Dave works on database integration and query optimization").Next();
-        var eve = g.AddNode("Person").P("name", "Eve").P("role", "Backend Dev").P("bio", "Eve specializes in microservice patterns and event-driven architecture").Next();
-        var frank = g.AddNode("Person").P("name", "Frank").P("role", "SRE").P("bio", "Frank manages cloud infrastructure and CI/CD pipelines").Next();
-        var grace = g.AddNode("Person").P("name", "Grace").P("role", "SRE").P("bio", "Grace focuses on monitoring, alerting, and incident response").Next();
-        var heidi = g.AddNode("Person").P("name", "Heidi").P("role", "PM").P("bio", "Heidi is a product manager driving the roadmap for core features").Next();
-        var ivan = g.AddNode("Person").P("name", "Ivan").P("role", "PM").P("bio", "Ivan handles customer research and prioritization of feature requests").Next();
-        var judy = g.AddNode("Person").P("name", "Judy").P("role", "Designer").P("bio", "Judy creates user interfaces and maintains the design system").Next();
-        var ken = g.AddNode("Person").P("name", "Ken").P("role", "UX Researcher").P("bio", "Ken conducts user research and usability testing").Next();
+        var alice = tx.Mutate.AddVertex("Person").P("name", "Alice").P("role", "Frontend Lead").P("bio", "Alice leads the frontend team and specializes in React and TypeScript").Next();
+        var bob = tx.Mutate.AddVertex("Person").P("name", "Bob").P("role", "Frontend Dev").P("bio", "Bob is a frontend developer focused on accessibility and design systems").Next();
+        var carol = tx.Mutate.AddVertex("Person").P("name", "Carol").P("role", "Backend Lead").P("bio", "Carol architects backend services and manages the API layer").Next();
+        var dave = tx.Mutate.AddVertex("Person").P("name", "Dave").P("role", "Backend Dev").P("bio", "Dave works on database integration and query optimization").Next();
+        var eve = tx.Mutate.AddVertex("Person").P("name", "Eve").P("role", "Backend Dev").P("bio", "Eve specializes in microservice patterns and event-driven architecture").Next();
+        var frank = tx.Mutate.AddVertex("Person").P("name", "Frank").P("role", "SRE").P("bio", "Frank manages cloud infrastructure and CI/CD pipelines").Next();
+        var grace = tx.Mutate.AddVertex("Person").P("name", "Grace").P("role", "SRE").P("bio", "Grace focuses on monitoring, alerting, and incident response").Next();
+        var heidi = tx.Mutate.AddVertex("Person").P("name", "Heidi").P("role", "PM").P("bio", "Heidi is a product manager driving the roadmap for core features").Next();
+        var ivan = tx.Mutate.AddVertex("Person").P("name", "Ivan").P("role", "PM").P("bio", "Ivan handles customer research and prioritization of feature requests").Next();
+        var judy = tx.Mutate.AddVertex("Person").P("name", "Judy").P("role", "Designer").P("bio", "Judy creates user interfaces and maintains the design system").Next();
+        var ken = tx.Mutate.AddVertex("Person").P("name", "Ken").P("role", "UX Researcher").P("bio", "Ken conducts user research and usability testing").Next();
 
         // HAS_MEMBER: チームまたは部門 → 従業員 (Sugiyama 用の親 → 子方向)
-        g.AddRelationship("HAS_MEMBER").From(frontend).To(alice).Next();
-        g.AddRelationship("HAS_MEMBER").From(frontend).To(bob).Next();
-        g.AddRelationship("HAS_MEMBER").From(backend).To(carol).Next();
-        g.AddRelationship("HAS_MEMBER").From(backend).To(dave).Next();
-        g.AddRelationship("HAS_MEMBER").From(backend).To(eve).Next();
-        g.AddRelationship("HAS_MEMBER").From(infra).To(frank).Next();
-        g.AddRelationship("HAS_MEMBER").From(infra).To(grace).Next();
-        g.AddRelationship("HAS_MEMBER").From(prod).To(heidi).Next();
-        g.AddRelationship("HAS_MEMBER").From(prod).To(ivan).Next();
-        g.AddRelationship("HAS_MEMBER").From(design).To(judy).Next();
-        g.AddRelationship("HAS_MEMBER").From(design).To(ken).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(frontend).To(alice).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(frontend).To(bob).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(backend).To(carol).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(backend).To(dave).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(backend).To(eve).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(infra).To(frank).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(infra).To(grace).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(prod).To(heidi).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(prod).To(ivan).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(design).To(judy).Next();
+        tx.Mutate.AddEdge("HAS_MEMBER").From(design).To(ken).Next();
 
         // MANAGES: 管理者 → 部下 (親 → 子)
-        g.AddRelationship("MANAGES").From(alice).To(bob).Next();
-        g.AddRelationship("MANAGES").From(carol).To(dave).Next();
-        g.AddRelationship("MANAGES").From(carol).To(eve).Next();
-        g.AddRelationship("MANAGES").From(frank).To(grace).Next();
-        g.AddRelationship("MANAGES").From(judy).To(ken).Next();
-        g.AddRelationship("MANAGES").From(heidi).To(ivan).Next();
+        tx.Mutate.AddEdge("MANAGES").From(alice).To(bob).Next();
+        tx.Mutate.AddEdge("MANAGES").From(carol).To(dave).Next();
+        tx.Mutate.AddEdge("MANAGES").From(carol).To(eve).Next();
+        tx.Mutate.AddEdge("MANAGES").From(frank).To(grace).Next();
+        tx.Mutate.AddEdge("MANAGES").From(judy).To(ken).Next();
+        tx.Mutate.AddEdge("MANAGES").From(heidi).To(ivan).Next();
 
         // COLLABORATES: チーム間のリンク
-        g.AddRelationship("COLLABORATES").From(alice).To(judy).P("project", "Design System").Next();
-        g.AddRelationship("COLLABORATES").From(carol).To(heidi).P("project", "API Roadmap").Next();
-        g.AddRelationship("COLLABORATES").From(frank).To(carol).P("project", "Deploy Pipeline").Next();
+        tx.Mutate.AddEdge("COLLABORATES").From(alice).To(judy).P("project", "Design System").Next();
+        tx.Mutate.AddEdge("COLLABORATES").From(carol).To(heidi).P("project", "API Roadmap").Next();
+        tx.Mutate.AddEdge("COLLABORATES").From(frank).To(carol).P("project", "Deploy Pipeline").Next();
 
         // MENTORS: 階層をまたぐ接続
-        g.AddRelationship("MENTORS").From(carol).To(bob).Next();
-        g.AddRelationship("MENTORS").From(frank).To(eve).Next();
-
-        // インデックスエントリ
-        (string name, NodeId id)[] depts = [("Engineering", eng), ("Product", prod), ("Design", design)];
-        foreach (var (name, id) in depts)
-            tx.IndexInsert("idx_dept_name", name, id);
-
-        (string name, NodeId id)[] people =
-        [
-            ("Alice", alice), ("Bob", bob), ("Carol", carol), ("Dave", dave),
-            ("Eve", eve), ("Frank", frank), ("Grace", grace), ("Heidi", heidi),
-            ("Ivan", ivan), ("Judy", judy), ("Ken", ken),
-        ];
-        foreach (var (name, id) in people)
-            tx.IndexInsert("idx_person_name", name, id);
+        tx.Mutate.AddEdge("MENTORS").From(carol).To(bob).Next();
+        tx.Mutate.AddEdge("MENTORS").From(frank).To(eve).Next();
 
         tx.Commit();
     }

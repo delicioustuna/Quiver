@@ -1,98 +1,105 @@
-# WAL & リカバリ
+# WAL とリカバリ
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
-## Write-Ahead Logging {#wal}
+## フォーマットファミリ {#format-family}
 
-Quiver はクラッシュリカバリに ARIES スタイルの write-ahead logging を用いる。WAL ファイル
-(`*.quiver-wal`) は可変長レコードのシーケンシャルログであり、各レコードは単調増加する LSN を持つ。
+データファイルと WAL は `QUIVER-SW` という同じフォーマットファミリに属する。
+ファミリバージョンは `2` である。
+旧データベースと旧 WAL は読み替えず、open 時に拒否する。
+データファイルの不一致は `StorageFormatMismatchException`、WAL の不一致は `WalFormatMismatchException` で通知する。
 
-### WAL レコード種別 {#record-types}
+WAL はデータファイルと同じ場所に置く単一の `*.quiver-wal` サイドカーファイルである。
+先頭 16 バイトはファイルヘッダであり、magic `QUIVER-SW`、kind `W`、family version `2` を記録する。
+空の WAL は open 時に現行ヘッダで初期化する。
 
-| 種別 | 値 | 目的 |
-|---|---|---|
-| `Begin` | 1 | トランザクション開始 |
-| `Commit` | 2 | トランザクションコミット（永続性の境界） |
-| `Abort` | 3 | 明示的アボート |
-| `PageImage` | 10 | ページ全体の after-image（redo 用） |
-| `PageDelta` | 11 | ページへのデルタ更新 |
-| `CompensationLogRecord` | 12 | undo 用の before-image (CLR) |
-| `IndexMutation` | 13 | レガシーな論理 B+Tree mutation（予約済み、現在は発行しない） |
-| `CheckpointBegin` | 14 | チェックポイント開始のセンチネル |
-| `CheckpointEnd` | 15 | チェックポイント完了のセンチネル |
-| `FileTruncate` | 16 | Vacuum によるページファイルの切り詰め |
-| `FtLeafMutation` | 17 | 全文 postings/norms リーフの論理 mutation |
-| `FtStructureImage` | 18 | 全文 B+Tree 構造ページの after-image（nested top action） |
-| `Checkpoint` | 100 | レガシーな単一レコードチェックポイント（読み取り専用の互換） |
-| `EndOfSegment` | 0xFE | セグメント境界マーカー |
+## WAL レコード {#wal-records}
 
-### Write-Ahead 保証 {#write-ahead}
+各レコードは `Length(4) + LSN(8) + TransactionId(8) + Type(1) + CRC32(4) + Payload` で構成する。
+整数は little-endian で格納する。
+LSN は WAL 内で単調に増加する `Int64` である。
 
-dirty ページがバッファプールから退避される (STEAL) 前に、WAL はそのページの CLR
-(CompensationLogRecord = before-image) を少なくとも含んでいなければならない。`UnpinDirty` 時には
-after-image (PageImage) もログされる。これによりクラッシュ後の redo と undo の双方が可能になる。
+| 種別 | 値 | 役割 |
+|---|---:|---|
+| `BeginWrite` | 1 | 書き込みトランザクションの開始 |
+| `PageImage` | 2 | ページ全体の after-image |
+| `Commit` | 3 | トランザクションの永続化境界 |
+| `Abort` | 4 | 未コミットトランザクションの終了 |
+| `CheckpointBegin` | 5 | チェックポイント開始 |
+| `CheckpointEnd` | 6 | 対応するチェックポイントの完了 |
+| `FileTruncate` | 7 | ページファイルの切り詰め |
 
-### Presume-Committed {#presume-committed}
+上表以外の type は corruption として拒否する。
+レコードヘッダ、payload、CRC のいずれかが欠けた WAL も拒否する。
+CRC が一致しないレコードは `CorruptionException` とし、途中までを正常なログとして扱わない。
 
-Quiver は **presume-committed** リカバリ戦略を用いる。トランザクションがコミット済みとみなされるのは、
-WAL に `Commit` レコードが見つかった場合に限る。Commit レコードを持たないトランザクションは
-loser とみなされ、undo される。
+## 書き込み契約 {#write-contract}
 
-## 2 フェーズリカバリ {#two-phase-recovery}
+トランザクションは変更したページの before-image をメモリ上の write set に保持する。
+同じページを複数回変更した場合、WAL へ出力する `PageImage` は最終状態へ集約する。
+commit は集約済み `PageImage` と明示的な `Commit` を WAL へ書き、`Commit` の LSN まで fsync した時点で成立する。
+各 `PageImage` の record LSN は、payload 内の page LSN と同じ値である。
 
-`RecoveryManager` はリカバリを 2 フェーズで実装する:
+fsync 済みの `Commit` は取り消さない。
+その後の post-commit 処理が失敗しても `Abort` を追記せず、呼び出し側へは durable commit として扱う。
+commit 前の例外、明示 abort、savepoint rollback は、メモリ上の before-image を逆順に適用してプロセス内で復元する。
 
-### Pass 1: 解析 + Redo {#pass-1-redo}
+active writer が変更した、committed 構造から到達可能な dirty page は、commit fsync 前にデータファイルへ書かない。
+退避、close、checkpoint、buffer pressure もこの no-steal 規則を迂回しない。
+commit はデータページの flush を待たないため、no-force である。
 
-直近の完了済みチェックポイント（対応する `CheckpointBegin`/`CheckpointEnd` のペアで特定）から
-WAL を走査する。各レコードについて:
+バッファプールが active writer の dirty page で埋まり、pin できる退避候補がなくなった場合は `TransactionTooLargeException` を送出する。
+エンジンは before-image を適用してその writer を自動 abort し、writer lease を解放する。
 
-- **PageImage / PageDelta**: ページイメージをデータファイルに書き込んで redo する
-- **FtStructureImage**: 無条件に redo する（nested top action -- undo されない）
-- **FtLeafMutation（コミット済み tx）**: state-setting な `ApplyFtLeafRedo` で redo する
-- **Begin / Commit / Abort**: トランザクションのステータスを追跡する
-- **FileTruncate**: 切り詰めを冪等に再適用する
+読み取り専用トランザクションは `BeginWrite`、`Abort`、`PageImage` を含む WAL record を一切生成しない。
+したがって、開始、読み取り、commit、dispose の全経路で WAL bytes は 0 のままである。
 
-Winner（コミット済み）トランザクションのページイメージは前向きに redo される。これにより
-データファイルは少なくとも最後の WAL フラッシュ時点の状態まで復元される。
+## リカバリ契約 {#recovery}
 
-### Pass 2: Undo（loser トランザクション） {#pass-2-undo}
+winner は checksum が正しい明示的な `Commit` レコードを持つトランザクションだけである。
+`PageImage` の存在やページ LSN から commit を推測しない。
+`BeginWrite` だけを持つトランザクションと、`Abort` で終わったトランザクションの `PageImage` は再生しない。
 
-`Begin` はあるが `Commit` も `Abort` もないトランザクション（loser）について:
+リカバリは WAL を解析して winner 集合と再生開始 LSN を決めた後、winner の `PageImage` を LSN 順に適用する。
+同じページへ複数の committed image がある場合は、後の image が先の状態を置き換える。
+データファイル上の page LSN が `PageImage` の LSN 以上なら、その image は適用済みとして読み飛ばす。
+WAL record LSN と payload 内の page LSN が一致しない image は corruption として拒否する。
+`FileTruncate` は payload の file kind と page count を検証して冪等に再適用する。
 
-- **CLR (CompensationLogRecord)**: before-image をデータファイルに復元する
-- **FtLeafMutation**: LIFO 順で逆操作（undo）を適用する
+crash recovery は loser の undo pass、論理 mutation、compensation record、全文専用 pass を持たない。
 
-Undo は loser トランザクションのレコードを LSN 降順で処理し、トランザクション前の状態を復元する。
+全文 segment は primary text property から再構築できる derived artifact であり、segment-local posting、norm、tombstone の専用 WAL record を持たない。
+segment body は manifest transaction より前に checksum 付き immutable artifact file として fsync する。
+recovery は winner の catalog PageImage から manifest を復元し、artifact ID、length、checksum を検証する。
+未参照 file は不可視 orphan であり、欠損または checksum 不一致の参照は primary corruption ではなく `RebuildRequired` とする。
+loser の物理変更は no-steal によってデータファイルへ到達しないため、winner redo だけで復旧できる。
+
+open はデータベースと WAL のヘッダ、WAL record、再生する page image を検証し、recovery と完了 checkpoint を終えてから通常 operation を受け付ける。
+WAL で観測した transaction のうち winner でない ID は aborted gap に復元する。
+次の transaction ID は、checkpoint 済み catalog と WAL で観測した最大 ID の後へ進める。
 
 ## チェックポイント {#checkpoint}
 
-`Checkpointer` (`src/Quiver/Transactions/Checkpointer.cs`) は定期的なチェックポイントを実行する:
+`CheckpointBegin` の payload は 20 バイト、`CheckpointEnd` の payload は 8 バイトである。
+`CheckpointEnd` は対応する `CheckpointBegin` の LSN を保持する。
+先行する Begin と一致する End がある場合だけ、その checkpoint を完了済みとみなす。
+対応しない End、不正な payload 長、途中で切れた checkpoint record は corruption として拒否する。
 
-### チェックポイントのフェーズ {#checkpoint-phases}
+checkpoint は writer lease を取得し、active writer がいない sharp boundary で実行する。
+reader の終了は待たない。
+`CheckpointBegin` を fsync した後に committed high-water と次の transaction ID を catalog へ保存し、committed dirty page とデータファイルを flush する。
+対応する `CheckpointEnd` を fsync できた場合だけ checkpoint を完了済みとみなし、その End 以前の WAL を切り詰める。
 
-| フェーズ | アクション |
-|---|---|
-| `AfterBegin` | `CheckpointBegin` を WAL に書き込む |
-| `AfterDataFlush` | バッファプールの全 dirty ページをデータファイルにフラッシュ (`PageManager.FlushAll`) |
-| `AfterIndexFlush` | 全インデックスをフラッシュ (`IndexManager.FlushAll`) |
-| `AfterEnd` | `CheckpointEnd` を WAL に書き込む |
-| `AfterTruncate` | WAL の先頭部分を切り詰める（このチェックポイント以前のレコードを除去） |
+checkpoint の各段階でクラッシュした場合は、対応する End のない checkpoint を採用しない。
+open-time recovery の redo 後も同じ手順で完了 checkpoint を作るため、再びクラッシュしても page LSN による冪等 redoから再開できる。
 
-### アトミック性 {#checkpoint-atomicity}
+## ページとチェックサム {#pages}
 
-チェックポイントが完了とみなされるのは、`CheckpointBegin` と `CheckpointEnd` の双方が存在する場合のみ。
-チェックポイント途中でクラッシュした場合（例: data flush 後・End 前）、リカバリは直前の完了済み
-チェックポイントにフォールバックしてそこから再生する。これにより、部分フラッシュの状態が
-永続的なものとして扱われるのを防ぐ。
+ページサイズは 8 KiB、ヘッダサイズは 40 バイトである。
+ページヘッダは `QUIVER-SW` magic、family version、page kind、page ID、page LSN、checksum を保持する。
+page ID、family、version、checksum の不一致は open または page load 時に拒否する。
 
-### チェックポイントの起動契機 {#checkpoint-trigger}
-
-チェックポイントは、書き込まれた WAL バイト数が `GraphDatabaseOptions.CheckpointThresholdBytes` を
-超え、かつアクティブなトランザクションが 1 つも進行中でないときに起動される。
-
-## LSN {#lsn}
-
-Log Sequence Number (LSN) は単調増加する int64 である。各ページヘッダは最後の変更時の LSN を保持する。
-リカバリはページ LSN と WAL レコード LSN を比較して redo が必要か判定する
-（ページ LSN >= レコード LSN ならスキップ）。
+新規データベースは既定で 1 MiB を物理確保する。
+容量不足時は 1、2、4、8、16、32、64 MiB の段階で適応的に成長し、既定の一回増分上限は 64 MiB である。
+`InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` は 8 KiB 境界へ切り上げて適用する。
+再 open 後も現在の容量から同じ規則で成長し、既存ページを保持する。

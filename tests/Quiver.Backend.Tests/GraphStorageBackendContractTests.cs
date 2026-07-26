@@ -23,13 +23,16 @@ public abstract class GraphStorageBackendContractTests : IDisposable
             Path.GetTempPath(),
             "quiver_backend_contract_" + Guid.NewGuid().ToString("N"));
         _factory = CreateFactory();
-        _backend = _factory.Open(DatabasePath, new GraphDatabaseOptions());
+        _backend = _factory.Open(DatabasePath, new QuiverDatabaseOptions());
     }
 
     /// <summary>テストディレクトリ。fault 注入やファイルパス解決でサブクラスが参照する。</summary>
     protected string DatabaseDirectory => _dir;
 
     protected virtual string DatabasePath => _dir;
+
+    /// <summary>バックエンドを再オープンしたときにコミット済みデータが残るか。</summary>
+    protected virtual bool SupportsPersistence => true;
 
     public void Dispose()
     {
@@ -43,61 +46,61 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     /// </summary>
     protected abstract IGraphStorageBackendFactory CreateFactory();
 
-    private IGraphTransaction BeginWrite() =>
-        _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
+    private IWriteTransaction BeginWrite() =>
+        _backend.BeginWriteTransaction();
 
-    private IGraphTransaction BeginRead() =>
-        _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
+    private IReadTransaction BeginRead() =>
+        _backend.BeginReadTransaction();
 
     private void Reopen()
     {
         _backend.Dispose();
-        _backend = _factory.Open(DatabasePath, new GraphDatabaseOptions());
+        _backend = _factory.Open(DatabasePath, new QuiverDatabaseOptions());
     }
 
-    // ===== ノード CRUD =====
+    // ===== Vertex CRUD =====
 
     [Fact]
-    public void CreateNode_then_NodeExists_returns_true()
+    public void CreateVertex_then_VertexExists_returns_true()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("Person");
-        tx.NodeExists(id).Should().BeTrue();
+        var id = tx.CreateVertex("Person");
+        tx.VertexExists(id).Should().BeTrue();
         tx.Commit();
     }
 
     [Fact]
-    public void DeleteNode_makes_NodeExists_false()
+    public void DeleteVertex_makes_VertexExists_false()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("Person");
-        tx.DeleteNode(id);
-        tx.NodeExists(id).Should().BeFalse();
+        var id = tx.CreateVertex("Person");
+        tx.DeleteVertex(id);
+        tx.VertexExists(id).Should().BeFalse();
         tx.Commit();
     }
 
     [Fact]
-    public void CreateNode_with_LabelId_resolved_via_Schema_works()
+    public void CreateVertex_with_LabelId_resolved_via_Schema_works()
     {
-        var labelId = _backend.Schema.GetOrCreateLabel("Asset");
         using var tx = BeginWrite();
-        var id = tx.CreateNode(labelId);
-        tx.NodeExists(id).Should().BeTrue();
+        var labelId = tx.EditSchema.GetOrCreateLabel("Asset");
+        var id = tx.CreateVertex(labelId);
+        tx.VertexExists(id).Should().BeTrue();
         tx.Commit();
     }
 
-    // ===== リレーションシップ CRUD =====
+    // ===== Edge CRUD =====
 
     [Fact]
-    public void CreateRelationship_then_enumerate_finds_neighbor()
+    public void CreateEdge_then_enumerate_finds_neighbor()
     {
         using var tx = BeginWrite();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        tx.CreateRelationship(a, b, "LINK");
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        tx.CreateEdge(a, b, "LINK");
 
-        var neighbors = new List<NodeId>();
-        var en = tx.EnumerateRelationships(a);
+        var neighbors = new List<VertexId>();
+        var en = tx.EnumerateEdges(a);
         while (en.MoveNext())
         {
             var r = en.Current;
@@ -109,28 +112,28 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     }
 
     [Fact]
-    public void DeleteRelationship_removes_it_from_enumeration()
+    public void DeleteEdge_removes_it_from_enumeration()
     {
         using var tx = BeginWrite();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "LINK");
-        tx.DeleteRelationship(rel);
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "LINK");
+        tx.DeleteEdge(edge);
 
-        var en = tx.EnumerateRelationships(a);
+        var en = tx.EnumerateEdges(a);
         en.MoveNext().Should().BeFalse();
         tx.Commit();
     }
 
     [Fact]
-    public void DeleteNode_with_incident_relationship_succeeds()
+    public void DeleteVertex_with_incident_edge_succeeds()
     {
         using var tx = BeginWrite();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        tx.CreateRelationship(a, b, "LINK");
-        tx.DeleteNode(a);
-        tx.NodeExists(a).Should().BeFalse();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        tx.CreateEdge(a, b, "LINK");
+        tx.DeleteVertex(a);
+        tx.VertexExists(a).Should().BeFalse();
         tx.Commit();
     }
 
@@ -140,7 +143,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void SetProperty_then_GetProperty_returns_value()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("Item");
+        var id = tx.CreateVertex("Item");
         tx.SetProperty(id, "score", PropertyValue.FromInt64(42L));
         var v = tx.GetProperty(id, "score");
         v.Type.Should().Be(PropertyValueType.Int64);
@@ -152,7 +155,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void SetProperty_overwrites_previous_value()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("X");
+        var id = tx.CreateVertex("X");
         tx.SetProperty(id, "n", PropertyValue.FromInt64(1L));
         tx.SetProperty(id, "n", PropertyValue.FromInt64(99L));
         tx.GetProperty(id, "n").Int64Value.Should().Be(99L);
@@ -163,7 +166,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void RemoveProperty_then_HasProperty_returns_false()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("X");
+        var id = tx.CreateVertex("X");
         tx.SetProperty(id, "age", PropertyValue.FromInt32(30));
         tx.RemoveProperty(id, "age");
         tx.HasProperty(id, "age").Should().BeFalse();
@@ -173,73 +176,73 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     // ===== HWM 境界を安全に扱う防御的読み取り API =====
 
     [Fact]
-    public void NodeExists_returns_false_for_id_past_hwm()
+    public void VertexExists_returns_false_for_id_past_hwm()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         // 既存より十分大きい ID は未割当 → false (例外なし)。
-        tx.NodeExists(new NodeId(id.Value + 1_000_000)).Should().BeFalse();
-        tx.NodeExists(new NodeId(long.MaxValue / 2)).Should().BeFalse();
+        tx.VertexExists(new VertexId(id.Value + 1_000_000)).Should().BeFalse();
+        tx.VertexExists(new VertexId(long.MaxValue / 2)).Should().BeFalse();
         tx.Commit();
     }
 
     [Fact]
-    public void NodeExists_returns_false_for_negative_id()
+    public void VertexExists_returns_false_for_negative_id()
     {
         using var tx = BeginWrite();
-        tx.CreateNode("Person");
-        tx.NodeExists(new NodeId(-1L)).Should().BeFalse();
-        tx.NodeExists(new NodeId(long.MinValue)).Should().BeFalse();
+        tx.CreateVertex("Person");
+        tx.VertexExists(new VertexId(-1L)).Should().BeFalse();
+        tx.VertexExists(new VertexId(long.MinValue)).Should().BeFalse();
         tx.Commit();
     }
 
     [Fact]
-    public void HasProperty_returns_false_for_nonexistent_node()
+    public void HasProperty_returns_false_for_nonexistent_vertex()
     {
         using var tx = BeginWrite();
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString("alice"));
-        var ghost = new NodeId(id.Value + 999_999);
+        var ghost = new VertexId(id.Value + 999_999);
         tx.HasProperty(ghost, "name").Should().BeFalse();
-        // 既存ノードでも未設定 key は false。
+        // 既存Vertexでも未設定 key は false。
         tx.HasProperty(id, "missing_key").Should().BeFalse();
         tx.Commit();
     }
 
     [Fact]
-    public void GetProperty_returns_default_for_nonexistent_node()
+    public void GetProperty_returns_default_for_nonexistent_vertex()
     {
         using var tx = BeginWrite();
-        tx.CreateNode("Person");
-        var ghost = new NodeId(999_999L);
+        tx.CreateVertex("Person");
+        var ghost = new VertexId(999_999L);
         var pv = tx.GetProperty(ghost, "anything");
         pv.Type.Should().Be(default(PropertyValueType));
         tx.Commit();
     }
 
     [Fact]
-    public void NodeExists_in_readonly_tx_does_not_throw_for_past_hwm()
+    public void VertexExists_in_readonly_tx_does_not_throw_for_past_hwm()
     {
         using (var tx = BeginWrite())
         {
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
         using var rtx = BeginRead();
-        rtx.NodeExists(new NodeId(42_000L)).Should().BeFalse();
-        rtx.HasProperty(new NodeId(42_000L), "x").Should().BeFalse();
+        rtx.VertexExists(new VertexId(42_000L)).Should().BeFalse();
+        rtx.HasProperty(new VertexId(42_000L), "x").Should().BeFalse();
     }
 
     [Fact]
-    public void Relationship_property_round_trips()
+    public void Edge_property_round_trips()
     {
         using var tx = BeginWrite();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "LINK");
-        tx.SetProperty(rel, "since", PropertyValue.FromInt64(2020L));
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "LINK");
+        tx.SetProperty(edge, "since", PropertyValue.FromInt64(2020L));
 
-        var v = tx.GetProperty(rel, "since");
+        var v = tx.GetProperty(edge, "since");
         v.Type.Should().Be(PropertyValueType.Int64);
         v.Int64Value.Should().Be(2020L);
         tx.Commit();
@@ -248,38 +251,46 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     // ===== インデックス検索 =====
 
     [Fact]
-    public void IndexInsert_string_then_SeekIndex_finds_node()
+    public void SetProperty_string_then_SeekIndex_finds_vertex()
     {
         using var tx = BeginWrite();
-        var alice = tx.CreateNode("Person");
-        var bob   = tx.CreateNode("Person");
-        tx.IndexInsert("idx_name", "Alice", alice);
-        tx.IndexInsert("idx_name", "Bob",   bob);
+        tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+            "idx_name",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+            IndexKind.StringEquality));
+        var alice = tx.CreateVertex("Person");
+        var bob   = tx.CreateVertex("Person");
+        tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+        tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
 
         var en = tx.SeekIndex("idx_name", PropertyValue.FromString("Alice"));
-        var found = new List<NodeId>();
+        var found = new List<EntityRef>();
         while (en.MoveNext()) found.Add(en.Current);
         en.Dispose();
 
-        found.Should().ContainSingle().Which.Should().Be(alice);
+        found.Should().ContainSingle().Which.Should().Be(EntityRef.From(alice));
         tx.Commit();
     }
 
     [Fact]
-    public void IndexInsert_int64_then_SeekIndex_finds_node()
+    public void SetProperty_int64_then_SeekIndex_finds_vertex()
     {
         using var tx = BeginWrite();
-        var n42 = tx.CreateNode("Item");
-        var n99 = tx.CreateNode("Item");
-        tx.IndexInsert("idx_score", 42L, n42);
-        tx.IndexInsert("idx_score", 99L, n99);
+        tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+            "idx_score",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "score", "Item"),
+            IndexKind.Int64Equality));
+        var n42 = tx.CreateVertex("Item");
+        var n99 = tx.CreateVertex("Item");
+        tx.SetProperty(n42, "score", PropertyValue.FromInt64(42L));
+        tx.SetProperty(n99, "score", PropertyValue.FromInt64(99L));
 
         var en = tx.SeekIndex("idx_score", PropertyValue.FromInt64(42L));
-        var found = new List<NodeId>();
+        var found = new List<EntityRef>();
         while (en.MoveNext()) found.Add(en.Current);
         en.Dispose();
 
-        found.Should().ContainSingle().Which.Should().Be(n42);
+        found.Should().ContainSingle().Which.Should().Be(EntityRef.From(n42));
         tx.Commit();
     }
 
@@ -299,15 +310,15 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void OneHop_enumerates_outgoing_and_incoming_edges()
     {
         using var tx = BeginWrite();
-        var alice = tx.CreateNode("Person");
-        var bob   = tx.CreateNode("Person");
-        var carol = tx.CreateNode("Person");
-        tx.CreateRelationship(alice, bob,   "KNOWS");
-        tx.CreateRelationship(carol, alice, "KNOWS");
+        var alice = tx.CreateVertex("Person");
+        var bob   = tx.CreateVertex("Person");
+        var carol = tx.CreateVertex("Person");
+        tx.CreateEdge(alice, bob,   "KNOWS");
+        tx.CreateEdge(carol, alice, "KNOWS");
 
-        var outgoing = new List<NodeId>();
-        var incoming = new List<NodeId>();
-        var en = tx.EnumerateRelationships(alice);
+        var outgoing = new List<VertexId>();
+        var incoming = new List<VertexId>();
+        var en = tx.EnumerateEdges(alice);
         while (en.MoveNext())
         {
             var r = en.Current;
@@ -323,16 +334,16 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void OneHop_type_filter_with_outgoing_direction_returns_matching_edges_only()
     {
-        // typeFilter 指定時も EnumerateRelationships は Direction を尊重する。
+        // typeFilter 指定時も EnumerateEdges は Direction を尊重する。
         using var tx = BeginWrite();
-        var alice = tx.CreateNode("Person");
-        var bob   = tx.CreateNode("Person");
-        var dave  = tx.CreateNode("Person");
-        tx.CreateRelationship(alice, bob,  "KNOWS");
-        tx.CreateRelationship(alice, dave, "WORKS_WITH");
+        var alice = tx.CreateVertex("Person");
+        var bob   = tx.CreateVertex("Person");
+        var dave  = tx.CreateVertex("Person");
+        tx.CreateEdge(alice, bob,  "KNOWS");
+        tx.CreateEdge(alice, dave, "WORKS_WITH");
 
-        var hits = new List<NodeId>();
-        var en = tx.EnumerateRelationships(alice, Direction.Outgoing, typeFilter: "KNOWS");
+        var hits = new List<VertexId>();
+        var en = tx.EnumerateEdges(alice, Direction.Outgoing, typeFilter: "KNOWS");
         while (en.MoveNext())
             hits.Add(en.Current.Target);
 
@@ -343,23 +354,23 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     // ===== MERGE / UPSERT =====
 
     [Fact]
-    public void MergeNode_creates_when_no_match_exists()
+    public void MergeVertex_creates_when_no_match_exists()
     {
         using var tx = BeginWrite();
-        var (id, created) = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
+        var (id, created) = tx.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
         created.Should().BeTrue();
-        tx.NodeExists(id).Should().BeTrue();
+        tx.VertexExists(id).Should().BeTrue();
         System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "name").Utf8StringValue)
             .Should().Be("Alice");
         tx.Commit();
     }
 
     [Fact]
-    public void MergeNode_returns_existing_when_match_exists_in_same_tx()
+    public void MergeVertex_returns_existing_when_match_exists_in_same_tx()
     {
         using var tx = BeginWrite();
-        var first  = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
-        var second = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
+        var first  = tx.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var second = tx.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
 
         first.Created.Should().BeTrue();
         second.Created.Should().BeFalse();
@@ -368,28 +379,28 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     }
 
     [Fact]
-    public void MergeNode_finds_existing_node_across_commits()
+    public void MergeVertex_finds_existing_vertex_across_commits()
     {
-        NodeId persisted;
+        VertexId persisted;
         using (var tx = BeginWrite())
         {
-            (persisted, _) = tx.MergeNode("Person", "name", PropertyValue.FromString("Bob"));
+            (persisted, _) = tx.MergeVertex("Person", "name", PropertyValue.FromString("Bob"));
             tx.Commit();
         }
 
         using var tx2 = BeginWrite();
-        var (id, created) = tx2.MergeNode("Person", "name", PropertyValue.FromString("Bob"));
+        var (id, created) = tx2.MergeVertex("Person", "name", PropertyValue.FromString("Bob"));
         created.Should().BeFalse();
         id.Should().Be(persisted);
         tx2.Commit();
     }
 
     [Fact]
-    public void MergeNode_distinguishes_by_label()
+    public void MergeVertex_distinguishes_by_label()
     {
         using var tx = BeginWrite();
-        var (person, pc) = tx.MergeNode("Person",  "name", PropertyValue.FromString("Alice"));
-        var (city,   cc) = tx.MergeNode("City",    "name", PropertyValue.FromString("Alice"));
+        var (person, pc) = tx.MergeVertex("Person",  "name", PropertyValue.FromString("Alice"));
+        var (city,   cc) = tx.MergeVertex("City",    "name", PropertyValue.FromString("Alice"));
 
         pc.Should().BeTrue();
         cc.Should().BeTrue();
@@ -398,11 +409,11 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     }
 
     [Fact]
-    public void MergeNode_matches_by_int_property()
+    public void MergeVertex_matches_by_int_property()
     {
         using var tx = BeginWrite();
-        var (a, _) = tx.MergeNode("Item", "sku", PropertyValue.FromInt64(42L));
-        var (b, created) = tx.MergeNode("Item", "sku", PropertyValue.FromInt64(42L));
+        var (a, _) = tx.MergeVertex("Item", "sku", PropertyValue.FromInt64(42L));
+        var (b, created) = tx.MergeVertex("Item", "sku", PropertyValue.FromInt64(42L));
         created.Should().BeFalse();
         b.Should().Be(a);
         tx.Commit();
@@ -413,18 +424,17 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Commit_persists_writes_to_a_new_transaction()
     {
-        NodeId persisted;
+        VertexId persisted;
         using (var tx = BeginWrite())
         {
-            persisted = tx.CreateNode("Persisted");
+            persisted = tx.CreateVertex("Persisted");
             tx.SetProperty(persisted, "marker", PropertyValue.FromInt64(7L));
             tx.Commit();
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(persisted).Should().BeTrue();
+        rtx.VertexExists(persisted).Should().BeTrue();
         rtx.GetProperty(persisted, "marker").Int64Value.Should().Be(7L);
-        rtx.Rollback();
     }
 
     [Fact]
@@ -432,41 +442,40 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     {
         // rollback は書き込みを取り消して lock を解放し、トランザクションを終了する。
         // 直後に同じ backend で新しいトランザクションを開始でき、
-        // 破棄されたノードはそのトランザクションから見えない。
-        NodeId discarded;
+        // 破棄されたVertexはそのトランザクションから見えない。
+        VertexId discarded;
         var tx = BeginWrite();
-        discarded = tx.CreateNode("Discarded");
+        discarded = tx.CreateVertex("Discarded");
         tx.Rollback();
         tx.State.Should().Be(TransactionState.Aborted);
         tx.Dispose();
 
         using (var next = BeginWrite())
         {
-            next.NodeExists(discarded).Should().BeFalse(
-                "a rolled-back CreateNode must not be visible to later transactions");
-            next.CreateNode("Subsequent");
+            next.VertexExists(discarded).Should().BeFalse(
+                "a rolled-back CreateVertex must not be visible to later transactions");
+            next.CreateVertex("Subsequent");
             next.Commit();
         }
     }
 
     [Fact]
-    public void Rollback_discards_node_property_and_relationship_writes()
+    public void Rollback_discards_vertex_property_and_edge_writes()
     {
         // abort されたトランザクションのあらゆる書き込みは消失しなければならない。
-        NodeId a, b;
+        VertexId a, b;
         using (var tx = BeginWrite())
         {
-            a = tx.CreateNode("A");
-            b = tx.CreateNode("B");
+            a = tx.CreateVertex("A");
+            b = tx.CreateVertex("B");
             tx.SetProperty(a, "score", PropertyValue.FromInt64(123L));
-            tx.CreateRelationship(a, b, "LINK");
+            tx.CreateEdge(a, b, "LINK");
             tx.Rollback();
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(a).Should().BeFalse("rolled-back node A must be gone");
-        rtx.NodeExists(b).Should().BeFalse("rolled-back node B must be gone");
-        rtx.Rollback();
+        rtx.VertexExists(a).Should().BeFalse("rolled-back vertex A must be gone");
+        rtx.VertexExists(b).Should().BeFalse("rolled-back vertex B must be gone");
     }
 
     [Fact]
@@ -474,17 +483,16 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     {
         // 書き込みトランザクションを Commit せず Dispose すると abort する。
         // lock 解放だけでなく undo も実行されなければならない。
-        NodeId discarded;
+        VertexId discarded;
         using (var tx = BeginWrite())
         {
-            discarded = tx.CreateNode("Discarded");
+            discarded = tx.CreateVertex("Discarded");
             // 意図的に Commit も Rollback もしない。
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(discarded).Should().BeFalse(
+        rtx.VertexExists(discarded).Should().BeFalse(
             "a write transaction disposed without Commit must discard its writes");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -492,35 +500,34 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     {
         // abort されたトランザクションは、先行トランザクションのコミット済みデータを
         // 損傷してはならない。コミット済みレコードへの処理中の変更も元の値へ戻す。
-        NodeId keeper;
+        VertexId keeper;
         using (var tx = BeginWrite())
         {
-            keeper = tx.CreateNode("Keeper");
+            keeper = tx.CreateVertex("Keeper");
             tx.SetProperty(keeper, "v", PropertyValue.FromInt64(7L));
             tx.Commit();
         }
 
         using (var tx = BeginWrite())
         {
-            tx.CreateNode("Doomed");
+            tx.CreateVertex("Doomed");
             tx.SetProperty(keeper, "v", PropertyValue.FromInt64(999L));
             tx.Rollback();
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(keeper).Should().BeTrue("committed data survives an unrelated rollback");
+        rtx.VertexExists(keeper).Should().BeTrue("committed data survives an unrelated rollback");
         rtx.GetProperty(keeper, "v").Int64Value.Should().Be(7L,
             "a rolled-back property mutation must restore the committed value");
-        rtx.Rollback();
     }
 
     [Fact]
     public void Commit_survives_backend_reopen()
     {
-        NodeId persisted;
+        VertexId persisted;
         using (var tx = BeginWrite())
         {
-            persisted = tx.CreateNode("Survives");
+            persisted = tx.CreateVertex("Survives");
             tx.SetProperty(persisted, "ok", PropertyValue.FromBool(true));
             tx.Commit();
         }
@@ -528,9 +535,16 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         Reopen();
 
         using var rtx = BeginRead();
-        rtx.NodeExists(persisted).Should().BeTrue();
-        rtx.GetProperty(persisted, "ok").Type.Should().Be(PropertyValueType.Bool);
-        rtx.Rollback();
+        if (SupportsPersistence)
+        {
+            rtx.VertexExists(persisted).Should().BeTrue();
+            rtx.GetProperty(persisted, "ok").Type.Should().Be(PropertyValueType.Bool);
+        }
+        else
+        {
+            rtx.VertexExists(persisted).Should().BeFalse(
+                "非永続バックエンドは再オープン時に空の状態へ戻る");
+        }
     }
 
     // ===== Savepoint / ネストした undo =====
@@ -539,40 +553,39 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void Savepoint_RollbackTo_discards_changes_after_savepoint_only()
     {
         // Savepoint 前の変更は保たれ、Savepoint 後の変更だけが消える。
-        NodeId before, after;
+        VertexId before, after;
         using (var tx = BeginWrite())
         {
-            before = tx.CreateNode("Before");
+            before = tx.CreateVertex("Before");
             tx.SetProperty(before, "k", PropertyValue.FromInt64(1L));
             var sp = tx.Savepoint();
-            after = tx.CreateNode("After");
+            after = tx.CreateVertex("After");
             tx.SetProperty(before, "k", PropertyValue.FromInt64(999L));
             tx.RollbackTo(sp);
             tx.Commit();
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(before).Should().BeTrue("savepoint 以前のノードは生存");
-        rtx.NodeExists(after).Should().BeFalse("savepoint 以後のノードは消える");
+        rtx.VertexExists(before).Should().BeTrue("savepoint 以前のVertexは生存");
+        rtx.VertexExists(after).Should().BeFalse("savepoint 以後のVertexは消える");
         rtx.GetProperty(before, "k").Int64Value.Should().Be(1L,
             "savepoint 以後のプロパティ上書きは取り消される");
-        rtx.Rollback();
     }
 
     [Fact]
     public void Savepoint_nested_three_levels_rolls_back_to_each_level()
     {
         // 3 段ネスト: SP1 → 操作 → SP2 → 操作 → SP3 → 操作 → RollbackTo(SP2) で SP2 直後の状態へ。
-        NodeId n0, n1, n2, n3;
+        VertexId n0, n1, n2, n3;
         using (var tx = BeginWrite())
         {
-            n0 = tx.CreateNode("L0");
+            n0 = tx.CreateVertex("L0");
             var sp1 = tx.Savepoint("sp1");
-            n1 = tx.CreateNode("L1");
+            n1 = tx.CreateVertex("L1");
             var sp2 = tx.Savepoint("sp2");
-            n2 = tx.CreateNode("L2");
+            n2 = tx.CreateVertex("L2");
             var sp3 = tx.Savepoint("sp3");
-            n3 = tx.CreateNode("L3");
+            n3 = tx.CreateVertex("L3");
 
             tx.RollbackTo(sp2);
             // sp2 以降 (n2, n3 含む sp3 も) が消える。n0, n1 は残る。
@@ -580,56 +593,53 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(n0).Should().BeTrue();
-        rtx.NodeExists(n1).Should().BeTrue();
-        rtx.NodeExists(n2).Should().BeFalse("RollbackTo(sp2) で n2 は消える");
-        rtx.NodeExists(n3).Should().BeFalse("RollbackTo(sp2) で sp3 配下の n3 も消える");
-        rtx.Rollback();
+        rtx.VertexExists(n0).Should().BeTrue();
+        rtx.VertexExists(n1).Should().BeTrue();
+        rtx.VertexExists(n2).Should().BeFalse("RollbackTo(sp2) で n2 は消える");
+        rtx.VertexExists(n3).Should().BeFalse("RollbackTo(sp2) で sp3 配下の n3 も消える");
     }
 
     [Fact]
     public void ReleaseSavepoint_keeps_all_changes_in_committed_tx()
     {
         // Release は savepoint を消費するが、savepoint 内の変更は親へマージされる。
-        NodeId outer, inner;
+        VertexId outer, inner;
         using (var tx = BeginWrite())
         {
-            outer = tx.CreateNode("Outer");
+            outer = tx.CreateVertex("Outer");
             var sp = tx.Savepoint();
-            inner = tx.CreateNode("Inner");
+            inner = tx.CreateVertex("Inner");
             tx.ReleaseSavepoint(sp);
             tx.Commit();
         }
 
         using var rtx = BeginRead();
-        rtx.NodeExists(outer).Should().BeTrue();
-        rtx.NodeExists(inner).Should().BeTrue("released savepoint 内の変更はコミットで永続化");
-        rtx.Rollback();
+        rtx.VertexExists(outer).Should().BeTrue();
+        rtx.VertexExists(inner).Should().BeTrue("released savepoint 内の変更はコミットで永続化");
     }
 
     [Fact]
     public void Savepoint_can_be_rolled_back_to_multiple_times()
     {
         // SQL 標準: ROLLBACK TO は savepoint を消費せず、同じ id で再度 RollbackTo できる。
-        NodeId pre;
+        VertexId pre;
         using (var tx = BeginWrite())
         {
-            pre = tx.CreateNode("Pre");
+            pre = tx.CreateVertex("Pre");
             var sp = tx.Savepoint();
 
-            tx.CreateNode("Throw1");
+            tx.CreateVertex("Throw1");
             tx.RollbackTo(sp);
 
-            tx.CreateNode("Throw2");
+            tx.CreateVertex("Throw2");
             tx.RollbackTo(sp);
 
             tx.Commit();
         }
 
-        // pre 以外のノードは何も残らない (Throw1/Throw2 は両方とも消えた)。
+        // pre 以外のVertexは何も残らない (Throw1/Throw2 は両方とも消えた)。
         using var rtx = BeginRead();
-        rtx.NodeExists(pre).Should().BeTrue();
-        rtx.Rollback();
+        rtx.VertexExists(pre).Should().BeTrue();
     }
 
     [Fact]
@@ -640,7 +650,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var tx = BeginWrite();
         var spOuter = tx.Savepoint();
         var spInner = tx.Savepoint();
-        tx.CreateNode("Mid");
+        tx.CreateVertex("Mid");
         tx.RollbackTo(spOuter);
 
         var act = () => tx.RollbackTo(spInner);
@@ -666,16 +676,15 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     public void Plain_commit_without_savepoint_behaves_unchanged()
     {
         // Regression: savepoint を使わない既存パスの挙動が変わらないこと。
-        NodeId committed;
+        VertexId committed;
         using (var tx = BeginWrite())
         {
-            committed = tx.CreateNode("Plain");
+            committed = tx.CreateVertex("Plain");
             tx.SetProperty(committed, "v", PropertyValue.FromInt64(42L));
             tx.Commit();
         }
         using var rtx = BeginRead();
-        rtx.NodeExists(committed).Should().BeTrue();
+        rtx.VertexExists(committed).Should().BeTrue();
         rtx.GetProperty(committed, "v").Int64Value.Should().Be(42L);
-        rtx.Rollback();
     }
 }

@@ -7,12 +7,10 @@
 
 ## インストール
 
-現状 Quiver は NuGet パッケージ化されていません。リポジトリをクローンして直接プロジェクト参照する想定です。
+`Quiver`パッケージには、コアエンジン、モデル属性、Source Generatorが含まれます。
 
 ```bash
-git clone <quiver-repo-url>
-cd Quiver
-dotnet build Quiver.slnx
+dotnet add package Quiver --version 0.2.0
 ```
 
 ## はじめてのグラフ
@@ -21,14 +19,14 @@ dotnet build Quiver.slnx
 using Quiver;
 using Quiver.Storage.Records;
 
-using var db = GraphDatabase.Open("./mygraph");
-using var tx = db.BeginTransaction();
+using var db = QuiverDatabase.Open("./mygraph");
+using var tx = db.BeginWriteTransaction();
 
-var alice = tx.CreateNode("Person");
-var bob   = tx.CreateNode("Person");
+var alice = tx.CreateVertex("Person");
+var bob   = tx.CreateVertex("Person");
 tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
 tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
-tx.CreateRelationship(alice, bob, "KNOWS");
+tx.CreateEdge(alice, bob, "KNOWS");
 
 tx.Commit();
 ```
@@ -37,4 +35,4 @@ tx.Commit();
 
 - [Concepts](concepts/index.md) — モデル、トランザクション、トラバーサルの概念
 - [Tutorials](tutorials/index.md) — 段階的に動かして学ぶ
-- [API Reference](../api/Quiver.html) — 全公開 API リファレンス
+- [API surface snapshot](https://github.com/delicioustuna/Quiver/blob/main/tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt) — 承認済みの公開 API 一覧

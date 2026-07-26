@@ -12,17 +12,17 @@ public class SortOperatorTests
     [Fact]
     public void Empty_input_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new SortOperator(src, sortColumn: 0);
         op.Open(null!);
         Collect(op).Should().BeEmpty();
     }
 
     [Fact]
-    public void Ascending_default_sorts_NodeId_by_value()
+    public void Ascending_default_sorts_VertexId_by_value()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(5), new NodeId(1), new NodeId(3), new NodeId(2), new NodeId(4));
+        var src = new FixedVertexListOperator(
+            new VertexId(5), new VertexId(1), new VertexId(3), new VertexId(2), new VertexId(4));
         using var op = new SortOperator(src, sortColumn: 0);
         op.Open(null!);
         Collect(op).Should().Equal(1, 2, 3, 4, 5);
@@ -31,8 +31,8 @@ public class SortOperatorTests
     [Fact]
     public void Descending_reverses_order()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(2), new NodeId(7), new NodeId(4));
+        var src = new FixedVertexListOperator(
+            new VertexId(2), new VertexId(7), new VertexId(4));
         using var op = new SortOperator(src, sortColumn: 0, descending: true);
         op.Open(null!);
         Collect(op).Should().Equal(7, 4, 2);
@@ -41,7 +41,7 @@ public class SortOperatorTests
     [Fact]
     public void Stable_for_already_sorted_input()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3));
         using var op = new SortOperator(src, sortColumn: 0);
         op.Open(null!);
         Collect(op).Should().Equal(1, 2, 3);
@@ -50,7 +50,7 @@ public class SortOperatorTests
     [Fact]
     public void Single_element_input_returns_single()
     {
-        var src = new FixedNodeListOperator(new NodeId(42));
+        var src = new FixedVertexListOperator(new VertexId(42));
         using var op = new SortOperator(src, sortColumn: 0);
         op.Open(null!);
         Collect(op).Should().Equal(42);
@@ -59,9 +59,9 @@ public class SortOperatorTests
     [Fact]
     public void Schema_passes_through_from_source()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new SortOperator(src, sortColumn: 0);
         op.Schema.Columns.Should().HaveCount(1);
-        op.Schema.Columns[0].Name.Should().Be("nodeId");
+        op.Schema.Columns[0].Name.Should().Be("vertexId");
     }
 }

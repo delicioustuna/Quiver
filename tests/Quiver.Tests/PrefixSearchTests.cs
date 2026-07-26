@@ -9,20 +9,20 @@ namespace Quiver.Tests;
 
 /// <summary>
 /// 全文検索の前方一致クエリ (<c>g.Search("idx", "quiv*", k)</c>) を検証する。
-/// ワイルドカード検出、Postings B+Tree に対する接頭辞展開、展開語の BM25 採点を
+/// ワイルドカード検出、visible term dictionaryに対する接頭辞展開、展開語の BM25 採点を
 /// text-first と graph-first の両経路で確認する。
 /// </summary>
 public sealed class PrefixSearchTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public PrefixSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_prefix_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -31,10 +31,10 @@ public sealed class PrefixSearchTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body, string? lang = null)
+    private VertexId AddDoc(string body, string? lang = null)
     {
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         if (lang != null) tx.SetProperty(n, "lang", PropertyValue.FromString(lang));
         tx.Commit();
@@ -48,8 +48,8 @@ public sealed class PrefixSearchTests : IDisposable
         var n2 = AddDoc("quick brown fox");
         AddDoc("alpha beta gamma");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // "qui*" should expand to terms like "quiver", "quick", "qui" etc.
         var results = g.Search(Index, "qui*", k: 10).ToList();
@@ -63,8 +63,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         AddDoc("quiver is a graph database");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Search(Index, "zzz*", k: 10).ToList();
         results.Should().BeEmpty();
@@ -77,8 +77,8 @@ public sealed class PrefixSearchTests : IDisposable
         var n2 = AddDoc("quick graph search");
         AddDoc("alpha beta");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // "graph qui*" — exact "graph" + prefix "qui*"
         var results = g.Search(Index, "graph qui*", k: 10).ToList();
@@ -92,8 +92,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         var n1 = AddDoc("graph database");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // "graph*" should match "graph" (the prefix itself is a valid term)
         var results = g.Search(Index, "graph*", k: 10).ToList();
@@ -105,8 +105,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         var n1 = AddDoc("Quiver is great");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // "QUIV*" should normalize to "quiv*" and match "quiver"
         var results = g.Search(Index, "QUIV*", k: 10).ToList();
@@ -120,11 +120,11 @@ public sealed class PrefixSearchTests : IDisposable
         AddDoc("quick search");
         AddDoc("alpha beta");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var textFirst = g.Search(Index, "qui*", k: 10).ToList();
-        var graphFirst = g.Nodes().HasLabel("Doc").FilterByText(Index, "qui*", k: 10).ToList();
+        var graphFirst = g.Vertices().HasLabel("Doc").FilterByText(Index, "qui*", k: 10).ToList();
 
         graphFirst.Should().Equal(textFirst, "graph-first preserves text-first BM25 order for prefix queries");
     }
@@ -137,8 +137,8 @@ public sealed class PrefixSearchTests : IDisposable
         AddDoc("no match");
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         var withStats = g.Search(Index, "qui*", k: 10).ToList();
         withStats.Should().HaveCount(2);
@@ -149,8 +149,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         AddDoc("hello world");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // A lone "*" should not match anything (no prefix)
         var results = g.Search(Index, "*", k: 10).ToList();
@@ -162,8 +162,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         var n1 = AddDoc("quiver engine");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var exact = g.Search(Index, "quiver", k: 10).ToList();
         exact.Should().ContainSingle().Which.Should().Be(n1);
@@ -174,8 +174,8 @@ public sealed class PrefixSearchTests : IDisposable
     {
         for (int i = 0; i < 5; i++) AddDoc($"quiver document number {i}");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Search(Index, "quiv*", k: 2).ToList();
         results.Should().HaveCount(2);
@@ -187,8 +187,8 @@ public sealed class PrefixSearchTests : IDisposable
         AddDoc("quiver engine", lang: "en");
         AddDoc("quick search", lang: "ja");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Search(Index, "qui*", k: 10).HasLabel("Doc").ToList();
         results.Should().HaveCount(2);

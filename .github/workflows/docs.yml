@@ -1,0 +1,48 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-docs:
+    name: generate and build documentation
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore tools and projects
+        run: |
+          dotnet tool restore
+          dotnet restore Quiver.slnx
+
+      - name: Generate architecture inventory
+        shell: pwsh
+        run: ./scripts/generate-docs.ps1
+
+      - name: Verify generated documents are current
+        run: git diff --exit-code -- docs/generated
+
+      - name: Build API documentation
+        run: dotnet docfx docfx.json --warningsAsErrors
+
+      - name: Upload documentation site
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiver-docs
+          path: docs/api/_site/
+          retention-days: 30

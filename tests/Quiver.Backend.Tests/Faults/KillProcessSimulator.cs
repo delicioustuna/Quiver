@@ -12,7 +12,7 @@ namespace Quiver.Backend.Tests.Faults;
 ///      finalizer 管理の handle を解放する。
 ///
 /// この呼び出し前に永続化されたデータ、すなわち
-/// <see cref="IGraphTransaction.Commit"/> が成功したデータは reopen 後も復旧できなければならない。
+/// <see cref="IWriteTransaction.Commit"/> が成功したデータは reopen 後も復旧できなければならない。
 /// 未コミットデータは reopen 後に見えてはならない。
 /// </summary>
 internal static class KillProcessSimulator

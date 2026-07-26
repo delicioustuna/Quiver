@@ -5,17 +5,16 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 隣接ブロックストア (V1 / V2) + その node→firstPageId 索引 + epoch メタを、
-/// 旧来の <c>adj.db</c> / <c>adj_idx.dat</c> / <c>adj_v2.*</c> / <c>adj.epoch</c> サイドカー群から
-/// 単一 <c>graph.quiver</c> コンテナ内のテナントへ移すための共有レイアウトヘルパ。
+/// adjacency segment、その vertex→firstPageId 索引、epoch メタを
+/// 単一 <c>graph.quiver</c> コンテナ内のテナントへ配置する共有レイアウトヘルパ。
 ///
 /// テナント割当 (factory コア 1..10 / IndexManager 0x3F + 0x40.. と衝突しない予約):
 /// <list type="bullet">
-///   <item><see cref="DataTenant"/> = ブロックページ。論理 page 1 に記述子 (V1/V2 種別 + payload spec)、
+///   <item><see cref="DataTenant"/> = segment page。論理 page 1 に記述子と payload spec、
 ///     論理 page 2+ に隣接ブロック。</item>
-///   <item><see cref="IndexTenant"/> = NodeId → 先頭ブロック論理 PageId の int64 配列。
+///   <item><see cref="IndexTenant"/> = VertexId → 先頭ブロック論理 PageId の int64 配列。
 ///     論理 page 1 に entryCount、論理 page 2+ に int64 エントリ (1 ページ 1020 件)。</item>
-///   <item><see cref="EpochTenant"/> = <see cref="AdjacencyEpoch"/> (epoch / baseRelHwm / tombstones)。</item>
+///   <item><see cref="EpochTenant"/> = <see cref="AdjacencyEpoch"/> (epoch / baseEdgeHwm / tombstones)。</item>
 /// </list>
 /// </summary>
 internal static class AdjacencyContainer
@@ -28,13 +27,13 @@ internal static class AdjacencyContainer
 
     /// <summary>
     /// bulk load 後に隣接ビューを container テナントへ構築し epoch を初期化する。
-    /// <paramref name="spec"/> 指定時は V2 (payload lane)、無指定なら V1。bulk load は WAL を介さない
-    /// ため、構築したページを durable にするよう最後に container を flush する。
+    /// payload lane 未指定時も <see cref="PayloadKind.None"/> の同一 segment format を使う。
+    /// bulk load は WAL を介さないため、構築したページを durable にするよう最後に container を flush する。
     /// </summary>
     public static void Build(
         SingleFileContainer container,
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> relData,
-        long nodeHwm,
+        long vertexHwm,
         long relHwm,
         PayloadLaneSpec? spec,
         IReadOnlyDictionary<long, long>? weights)
@@ -43,10 +42,9 @@ internal static class AdjacencyContainer
         var idx = container.OpenTenant(IndexTenant, PageKind.Header);
         var epochTenant = container.OpenTenant(EpochTenant, PageKind.Header);
 
-        if (spec is { } s)
-            AdjacencyBlockStoreV2.Build(data, idx, relData, weights ?? EmptyWeights, nodeHwm, s);
-        else
-            AdjacencyBlockStore.Build(data, idx, relData, nodeHwm);
+        PayloadLaneSpec effectiveSpec = spec ?? new PayloadLaneSpec(PayloadKind.None, -1, 0);
+        AdjacencySegmentStore.Build(
+            data, idx, relData, weights ?? EmptyWeights, vertexHwm, effectiveSpec);
 
         AdjacencyEpoch.CreateNew(epochTenant, relHwm);
         container.Flush();
@@ -54,17 +52,16 @@ internal static class AdjacencyContainer
 
     // ── DataTenant 記述子 (論理 page 1 body) ──
     private const uint DescMagic = 0x4A444151;   // "QADJ"
-    private const ushort DescVersion = 1;
+    private const ushort DescVersion = 2;
     public const byte KindNone = 0;
-    public const byte KindV1 = 1;
-    public const byte KindV2 = 2;
+    public const byte KindSegment = 1;
 
     // ── IndexTenant レイアウト ──
     public const int IndexEntriesPerPage = RecordPageMapping.PageBodySize / 8; // 1020
     private static readonly PageId IndexHeaderPage = new(1);
 
     // ──────────────────────────────────────────────────────────────────
-    // DataTenant 記述子 (V1/V2 種別 + V2 payload spec)
+    // DataTenant 記述子
     // ──────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -72,6 +69,8 @@ internal static class AdjacencyContainer
     /// </summary>
     public static void WriteDescriptor(IPagedFile data, byte kind, PayloadLaneSpec? spec)
     {
+        while (data.PageCount <= 1)
+            data.AllocatePage(PageKind.AdjacencyBlock);
         var wh = data.PinForWrite(new PageId(1));
         try
         {
@@ -80,7 +79,7 @@ internal static class AdjacencyContainer
             BinaryPrimitives.WriteUInt32LittleEndian(body, DescMagic);
             BinaryPrimitives.WriteUInt16LittleEndian(body[4..], DescVersion);
             body[6] = kind;
-            if (kind == KindV2 && spec is { } s)
+            if (kind == KindSegment && spec is { } s)
             {
                 body[7] = (byte)s.Kind;
                 BinaryPrimitives.WriteInt32LittleEndian(body[8..], s.PropertyKeyId);
@@ -102,21 +101,23 @@ internal static class AdjacencyContainer
             var body = rh.Data;
             uint magic = BinaryPrimitives.ReadUInt32LittleEndian(body);
             if (magic != DescMagic) return (KindNone, null);
+            ushort version = BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);
+            if (version != DescVersion) return (KindNone, null);
             byte kind = body[6];
-            if (kind == KindV2)
+            if (kind == KindSegment)
             {
                 var payloadKind = (PayloadKind)body[7];
                 int propKey = BinaryPrimitives.ReadInt32LittleEndian(body[8..]);
                 long defaultRaw = BinaryPrimitives.ReadInt64LittleEndian(body[12..]);
                 return (kind, new PayloadLaneSpec(payloadKind, propKey, defaultRaw));
             }
-            return (kind, null);
+            return (KindNone, null);
         }
         finally { rh.Dispose(); }
     }
 
     // ──────────────────────────────────────────────────────────────────
-    // IndexTenant (NodeId → 先頭ブロック論理 PageId)
+    // IndexTenant (VertexId → 先頭ブロック論理 PageId)
     // ──────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -140,22 +141,22 @@ internal static class AdjacencyContainer
         }
         finally { hh.Dispose(); }
 
-        long node = 0;
+        long vertex = 0;
         for (int page = 0; page < dataPages; page++)
         {
             var dh = idx.PinForWrite(new PageId(2 + page));
             try
             {
                 var body = dh.Data;
-                int slots = (int)Math.Min(IndexEntriesPerPage, entryCount - node);
-                for (int s = 0; s < slots; s++, node++)
-                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], firstPageIds[(int)node]);
+                int slots = (int)Math.Min(IndexEntriesPerPage, entryCount - vertex);
+                for (int s = 0; s < slots; s++, vertex++)
+                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], firstPageIds[(int)vertex]);
             }
             finally { dh.Dispose(); }
         }
     }
 
-    /// <summary>索引テナントの entryCount (= bulk load 時の nodeHwm) を読む。空なら 0。</summary>
+    /// <summary>索引テナントの entryCount (= bulk load 時の vertexHwm) を読む。空なら 0。</summary>
     public static long ReadIndexEntryCount(IPagedFile idx)
     {
         if (idx.PageCount < 2) return 0;
@@ -165,14 +166,14 @@ internal static class AdjacencyContainer
     }
 
     /// <summary>
-    /// NodeId <paramref name="nodeId"/> の先頭ブロック論理 PageId を返す (未索引 / 範囲外は -1)。
+    /// VertexId <paramref name="vertexId"/> の先頭ブロック論理 PageId を返す (未索引 / 範囲外は -1)。
     /// <paramref name="entryCount"/> はコンストラクション時に <see cref="ReadIndexEntryCount"/> で取得した値。
     /// </summary>
-    public static long ReadIndexEntry(IPagedFile idx, long entryCount, long nodeId)
+    public static long ReadIndexEntry(IPagedFile idx, long entryCount, long vertexId)
     {
-        if (nodeId < 0 || nodeId >= entryCount) return -1;
-        long page = 2 + nodeId / IndexEntriesPerPage;
-        int slot = (int)(nodeId % IndexEntriesPerPage);
+        if (vertexId < 0 || vertexId >= entryCount) return -1;
+        long page = 2 + vertexId / IndexEntriesPerPage;
+        int slot = (int)(vertexId % IndexEntriesPerPage);
         var rh = idx.PinForRead(new PageId(page));
         try { return BinaryPrimitives.ReadInt64LittleEndian(rh.Data[(slot * 8)..]); }
         finally { rh.Dispose(); }

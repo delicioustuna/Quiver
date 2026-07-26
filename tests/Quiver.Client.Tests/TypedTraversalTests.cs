@@ -12,22 +12,22 @@ namespace Quiver.Api.Tests;
 public sealed class TypedTraversalTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public TypedTraversalTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_typed_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var alice = g.Insert(new PersonModel { Name = "Alice", Age = 30 });
-        var bob = g.Insert(new PersonModel { Name = "Bob", Age = 25 });
-        var carol = g.Insert(new PersonModel { Name = "Carol", Age = 35 });
+        var alice = tx.Mutate.Insert(new PersonModel { Name = "Alice", Age = 30 });
+        var bob = tx.Mutate.Insert(new PersonModel { Name = "Bob", Age = 25 });
+        var carol = tx.Mutate.Insert(new PersonModel { Name = "Carol", Age = 35 });
 
-        tx.CreateRelationship(alice, bob, "KNOWS");
-        tx.CreateRelationship(bob, carol, "KNOWS");
+        tx.CreateEdge(alice, bob, "KNOWS");
+        tx.CreateEdge(bob, carol, "KNOWS");
 
         tx.Commit();
     }
@@ -38,14 +38,14 @@ public sealed class TypedTraversalTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── Nodes<T>() 型付き scan ──────────────────────────────────────
+    // ── Vertices<T>() 型付き scan ──────────────────────────────────────
 
     [Fact]
-    public void Nodes_typed_returns_all_of_type()
+    public void Vertices_typed_returns_all_of_type()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var all = g.Nodes<PersonModel>().ToList();
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var all = g.Vertices<PersonModel>().ToList();
         all.Should().HaveCount(3);
         all.Should().OnlyContain(p => !string.IsNullOrEmpty(p.Name));
     }
@@ -55,9 +55,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Has_expression_string_filters()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Alice")
             .ToList();
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
@@ -66,9 +66,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Has_expression_int_filters()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Age, 25)
             .ToList();
         result.Should().ContainSingle().Which.Name.Should().Be("Bob");
@@ -77,9 +77,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Has_expression_predicate_filters()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Age, P.Gt(28L))
             .ToList();
         result.Should().HaveCount(2);
@@ -91,9 +91,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Where_expression_filters()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Where(p => p.Age > 28 && p.Age < 34)
             .ToList();
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
@@ -104,9 +104,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Values_expression_extracts_property()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var names = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var names = g.Vertices<PersonModel>()
             .Values(p => p.Name)
             .ToList();
         names.Should().BeEquivalentTo("Alice", "Bob", "Carol");
@@ -117,9 +117,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Out_untyped_from_typed_traversal()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Alice")
             .Out("KNOWS")
             .ToList();
@@ -129,9 +129,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void In_untyped_from_typed_traversal()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Bob")
             .In("KNOWS")
             .ToList();
@@ -141,39 +141,39 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Both_untyped_from_typed_traversal()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Bob")
             .Both("KNOWS")
             .ToList();
         result.Should().HaveCount(2);
     }
 
-    // ── OutRelationships / InRelationships ────────────────────────────
+    // ── OutEdges / InEdges ────────────────────────────
 
     [Fact]
-    public void OutRelationships_from_typed_traversal()
+    public void OutEdges_from_typed_traversal()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var rels = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var edges = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Alice")
-            .OutRelationships("KNOWS")
+            .OutEdges("KNOWS")
             .ToList();
-        rels.Should().ContainSingle();
+        edges.Should().ContainSingle();
     }
 
     [Fact]
-    public void InRelationships_from_typed_traversal()
+    public void InEdges_from_typed_traversal()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var rels = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var edges = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Bob")
-            .InRelationships("KNOWS")
+            .InEdges("KNOWS")
             .ToList();
-        rels.Should().ContainSingle();
+        edges.Should().ContainSingle();
     }
 
     // ── 終端操作 ─────────────────────────────────────────────────────
@@ -181,9 +181,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void First_returns_first_entity()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var first = g.Nodes<PersonModel>().Has(p => p.Name, "Alice").First();
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var first = g.Vertices<PersonModel>().Has(p => p.Name, "Alice").First();
         first.Should().NotBeNull();
         first!.Name.Should().Be("Alice");
     }
@@ -191,26 +191,26 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void First_returns_null_on_empty()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        g.Nodes<GhostModel>().Count().Should().Be(0);
-        g.Nodes<GhostModel>().ToList().Should().BeEmpty();
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        g.Vertices<GhostModel>().Count().Should().Be(0);
+        g.Vertices<GhostModel>().ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Count_returns_correct_count()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        g.Nodes<PersonModel>().Count().Should().Be(3);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        g.Vertices<PersonModel>().Count().Should().Be(3);
     }
 
     [Fact]
     public void ToListWithIds_returns_id_entity_pairs()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var pairs = g.Nodes<PersonModel>().ToListWithIds();
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var pairs = g.Vertices<PersonModel>().ToListWithIds();
         pairs.Should().HaveCount(3);
         pairs.Should().OnlyContain(p => p.Id.IsValid && p.Entity.Name != null);
     }
@@ -220,9 +220,9 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Multiple_Has_chains_as_implicit_AND()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Name, "Alice")
             .Has(p => p.Age, 30)
             .ToList();
@@ -232,57 +232,57 @@ public sealed class TypedTraversalTests : IDisposable
     [Fact]
     public void Has_then_Where_chains_correctly()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
-        var result = g.Nodes<PersonModel>()
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
+        var result = g.Vertices<PersonModel>()
             .Has(p => p.Age, P.Gte(25L))
             .Where(p => p.Name.StartsWith("A"))
             .ToList();
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
     }
 
-    // ── 最小 IGraphNode 型 ───────────────────────────────────────────
+    // ── 最小 IGraphVertex 型 ───────────────────────────────────────────
 
-    private sealed class PersonModel : IGraphNode<PersonModel>
+    private sealed class PersonModel : IGraphVertex<PersonModel>
     {
         public string Name { get; set; } = "";
         public int Age { get; set; }
 
         public static string GraphLabel => "Person";
 
-        public static NodeId Insert(IGraphTransaction tx, PersonModel entity)
+        public static VertexId Insert(IWriteTransaction tx, PersonModel entity)
         {
-            var id = tx.CreateNode(GraphLabel);
+            var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
             return id;
         }
 
-        public static NodeId InsertIndexed(IGraphTransaction tx, PersonModel entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, PersonModel entity) => Insert(tx, entity);
 
-        public static PersonModel Load(IGraphTransaction tx, NodeId id)
+        public static PersonModel Load(IReadTransaction tx, VertexId id)
             => new()
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Age = tx.GetProperty(id, "Age").Int32Value,
             };
 
-        public static void Update(IGraphTransaction tx, NodeId id, PersonModel entity)
+        public static void Update(IWriteTransaction tx, VertexId id, PersonModel entity)
         {
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
         }
 
-        public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 
-    private sealed class GhostModel : IGraphNode<GhostModel>
+    private sealed class GhostModel : IGraphVertex<GhostModel>
     {
         public static string GraphLabel => "Ghost";
-        public static NodeId Insert(IGraphTransaction tx, GhostModel entity) => tx.CreateNode(GraphLabel);
-        public static NodeId InsertIndexed(IGraphTransaction tx, GhostModel entity) => Insert(tx, entity);
-        public static GhostModel Load(IGraphTransaction tx, NodeId id) => new();
-        public static void Update(IGraphTransaction tx, NodeId id, GhostModel entity) { }
-        public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
+        public static VertexId Insert(IWriteTransaction tx, GhostModel entity) => tx.CreateVertex(GraphLabel);
+        public static VertexId InsertIndexed(IWriteTransaction tx, GhostModel entity) => Insert(tx, entity);
+        public static GhostModel Load(IReadTransaction tx, VertexId id) => new();
+        public static void Update(IWriteTransaction tx, VertexId id, GhostModel entity) { }
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

@@ -23,7 +23,7 @@ namespace Quiver.Storage;
 /// <c>nextVersionPtr</c> を辿り最初に可視な version を返す。これにより xmin/xmax を
 /// レコードへ再内包した統一 MVCC レコードモデルを実現する。</para>
 ///
-/// <para>可視性は <see cref="VersionVisible"/> デリゲートで注入し、MvccContext に依存しない
+/// <para>可視性は <see cref="VersionVisible"/> デリゲートで注入し、ambient state に依存しない
 /// (単体テスト容易性のため)。</para>
 /// </summary>
 internal sealed class VersionedRecordHeap
@@ -107,7 +107,7 @@ internal sealed class VersionedRecordHeap
 
     /// <summary>
     /// <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> の拡張。選ばれた version の
-    /// xmin / xmax も返す (NodeReadHandle 等が MVCC スタンプを必要とするため)。
+    /// xmin / xmax も返す (VertexReadHandle 等が MVCC スタンプを必要とするため)。
     /// </summary>
     public bool TryReadVisible(long seq, VersionVisible visible, out byte[] payload, out long xmin, out long xmax)
     {
@@ -207,7 +207,7 @@ internal sealed class VersionedRecordHeap
     /// payload 先頭をコピー (収まる分だけ) し、head の xmin/xmax と「より古い版が続くか」
     /// (<paramref name="hasOlderVersion"/>) を返す。戻り値 = payload 全長 (0 = エントリ無し)。
     ///
-    /// <para>構造フィールドだけ要る呼出側 (<see cref="Records.VersionedRelationshipStore.Read"/>) は固定長
+    /// <para>構造フィールドだけ要る呼出側 (<see cref="Records.VersionedEdgeStore.Read"/>) は固定長
     /// prefix span を渡せばよい (payload 全長 &gt; <c>dest.Length</c> でも先頭はコピー済み)。可視性は
     /// 呼出側が xmin/xmax で判定し、head 不可視かつ <paramref name="hasOlderVersion"/> のときだけ
     /// <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> へフォールバックする
@@ -492,8 +492,8 @@ internal sealed class VersionedRecordHeap
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("versionedheap", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("versionedheap", v, StorageFormatVersion.Current);
     }
 
     private void SaveHeader(bool initialise = false)
@@ -502,12 +502,12 @@ internal sealed class VersionedRecordHeap
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaAppendPage..], _appendPage);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreePageHead..], _freePageHead);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
     }
 }
 
 /// <summary>
-/// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> を MvccContext から
+/// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> へ transaction snapshot を
 /// 切り離し、<see cref="Quiver.Core.Visibility"/> を注入できるようにする。
 /// </summary>
 internal delegate bool VersionVisible(long xmin, long xmax);

@@ -1,4 +1,4 @@
-﻿using Quiver.Api.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
@@ -11,14 +11,31 @@ namespace Quiver.Api.Match;
 /// </summary>
 public sealed class MatchQuery
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
-    private readonly GraphPattern _pattern;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
+    private readonly CompileFunc _compile;
     private readonly List<(string variable, string key, PropertyPredicate pred)> _wherePredicates = new();
 
-    internal MatchQuery(IGraphTransaction tx, ISchemaApi schema, GraphPattern pattern)
+    // vertex/edge パターンと星型Nexusパターンを同じ実行経路 (Execute) に載せるため、
+    // パターン種別ごとの compile 呼び出しをクロージャに閉じ込める。
+    internal delegate (IPhysicalOperator plan, Dictionary<string, int> varToColumn) CompileFunc(
+        IReadTransaction tx,
+        ISchemaCatalog schema,
+        List<(string variable, string key, PropertyPredicate pred)> where);
+
+    internal MatchQuery(IReadTransaction tx, ISchemaCatalog schema, GraphPattern pattern)
+        : this(tx, schema, (t, s, w) => MatchCompiler.Compile(t, s, pattern, w))
     {
-        _tx = tx; _schema = schema; _pattern = pattern;
+    }
+
+    internal MatchQuery(IReadTransaction tx, ISchemaCatalog schema, NexusPattern pattern)
+        : this(tx, schema, (t, s, w) => MatchCompiler.Compile(t, s, pattern, w))
+    {
+    }
+
+    private MatchQuery(IReadTransaction tx, ISchemaCatalog schema, CompileFunc compile)
+    {
+        _tx = tx; _schema = schema; _compile = compile;
     }
 
     /// <summary>
@@ -33,18 +50,19 @@ public sealed class MatchQuery
 
     /// <summary>射影クロージャを設定して <see cref="ReturnClause{TResult}"/> に進む。</summary>
     public ReturnClause<TResult> Return<TResult>(Func<MatchContext, TResult> selector)
-        => new(_tx, _schema, _pattern, _wherePredicates, selector);
+        => new(_tx, _schema, _compile, _wherePredicates, selector);
 
     /// <summary>マッチした行の件数を返す。</summary>
     public long Count()
     {
         long count = 0;
-        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _wherePredicates);
+        var (plan, varMap) = _compile(_tx, _schema, _wherePredicates);
         var result = _tx.Execute(plan);
         foreach (var _ in result.Rows())
             count++;
         return count;
     }
+
 }
 
 /// <summary>
@@ -54,26 +72,26 @@ public sealed class MatchQuery
 /// </summary>
 public sealed class ReturnClause<TResult>
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
-    private readonly GraphPattern _pattern;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
+    private readonly MatchQuery.CompileFunc _compile;
     private readonly List<(string variable, string key, PropertyPredicate pred)> _where;
     private readonly Func<MatchContext, TResult> _selector;
 
     internal ReturnClause(
-        IGraphTransaction tx, ISchemaApi schema,
-        GraphPattern pattern,
+        IReadTransaction tx, ISchemaCatalog schema,
+        MatchQuery.CompileFunc compile,
         List<(string variable, string key, PropertyPredicate pred)> where,
         Func<MatchContext, TResult> selector)
     {
-        _tx = tx; _schema = schema; _pattern = pattern; _where = where; _selector = selector;
+        _tx = tx; _schema = schema; _compile = compile; _where = where; _selector = selector;
     }
 
     /// <summary>すべての結果をリストとして返す。</summary>
     public List<TResult> ToList()
     {
         var results = new List<TResult>();
-        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        var (plan, varMap) = _compile(_tx, _schema, _where);
         var queryResult = _tx.Execute(plan);
         foreach (var row in queryResult.Rows())
         {
@@ -86,7 +104,7 @@ public sealed class ReturnClause<TResult>
     /// <summary>最初の 1 件を返す。結果が空のときは <see langword="default"/>。</summary>
     public TResult? First()
     {
-        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        var (plan, varMap) = _compile(_tx, _schema, _where);
         var queryResult = _tx.Execute(plan);
         foreach (var row in queryResult.Rows())
         {
@@ -102,7 +120,7 @@ public sealed class ReturnClause<TResult>
     /// </summary>
     public ITraversalCursor<TResult> AsCursor()
     {
-        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        var (plan, varMap) = _compile(_tx, _schema, _where);
         var inner = _tx.ExecuteCursor(plan);
         return new TraversalCursor<TResult>(inner, row => _selector(new MatchContext(row, _tx, varMap)));
     }
@@ -113,9 +131,10 @@ public sealed class ReturnClause<TResult>
     /// </summary>
     public IEnumerable<TResult> AsEnumerable()
     {
-        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        var (plan, varMap) = _compile(_tx, _schema, _where);
         using var cursor = _tx.ExecuteCursor(plan);
         while (cursor.MoveNext())
             yield return _selector(new MatchContext(cursor.Current, _tx, varMap));
     }
+
 }

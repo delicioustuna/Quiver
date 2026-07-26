@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -6,7 +6,7 @@ namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 上流のエンティティ ID 列からプロパティ値を読み取り、末尾に 1 列付加するオペレータ。
-/// ノードとリレーションシップの両方に対応する。
+/// VertexとEdgeの両方に対応する。
 /// </summary>
 internal sealed class PropertyLookupOperator : IPhysicalOperator
 {
@@ -15,8 +15,8 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     private readonly PropertyKeyId _keyId;
     private readonly string _outputColumnName;
     private readonly PropertyTypeFlags _expectedTypes;
-    // entity 列が Node か Relationship か。Relationship のときは rel ストアの
-    // 結合プロパティ列挙子を使う (g.Relationships() の row path フォールバック用)。
+    // entity 列が Vertex か Edge か。Edge のときは edge ストアの
+    // 結合プロパティ列挙子を使う (g.Edges() の row path フォールバック用)。
     private readonly EntityKind _entityKind;
     private ITransaction? _tx;
     private TupleSlot[]? _buffer;
@@ -28,7 +28,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         int entityIdColumn,
         PropertyKeyId keyId,
         string outputColumnName)
-        : this(source, entityIdColumn, keyId, outputColumnName, PropertyTypeFlags.Scalar, EntityKind.Node)
+        : this(source, entityIdColumn, keyId, outputColumnName, PropertyTypeFlags.Scalar, EntityKind.Vertex)
     {
     }
 
@@ -43,11 +43,11 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         PropertyKeyId keyId,
         string outputColumnName,
         PropertyTypeFlags expectedTypes)
-        : this(source, entityIdColumn, keyId, outputColumnName, expectedTypes, EntityKind.Node)
+        : this(source, entityIdColumn, keyId, outputColumnName, expectedTypes, EntityKind.Vertex)
     {
     }
 
-    /// <summary>entity kind を指定する overload (Relationship のとき rel プロパティを読む)。</summary>
+    /// <summary>entity kind を指定する overload (Edge のとき edge プロパティを読む)。</summary>
     public PropertyLookupOperator(
         IPhysicalOperator source,
         int entityIdColumn,
@@ -99,11 +99,16 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         _buffer![srcCols] = default; // Null by default
 
         // inline + overflow チェーンを結合して走査する。entity kind により
-        // node / relationship のどちらのストアを引くか切り替える。
+        // vertex / edge / nexus のプロパティストアを切り替える。
         long localId = cur[_entityIdColumn].LongValue;
-        var propEnum = _entityKind == EntityKind.Relationship
-            ? _tx!.Relationships.EnumerateProperties(new RelationshipId(localId), _tx!.Properties)
-            : _tx!.Nodes.EnumerateProperties(new NodeId(localId), _tx!.Properties);
+        var propEnum = _entityKind switch
+        {
+            EntityKind.Edge =>
+                _tx!.Edges.EnumerateProperties(new EdgeId(localId), _tx.Properties),
+            EntityKind.Nexus =>
+                _tx!.Nexuses.EnumerateProperties(new NexusId(localId), _tx.Properties),
+            _ => _tx!.Vertices.EnumerateProperties(new VertexId(localId), _tx.Properties),
+        };
         while (propEnum.MoveNext())
         {
             var prop = propEnum.Current;

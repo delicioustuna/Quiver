@@ -1,59 +1,86 @@
-﻿using Quiver.Core;
+using Quiver.Core;
+using Quiver.Storage;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
 
-// プロパティチェーンは所有ノードのロック (TxNodeStore で取得済み) で保護される。
-// このラッパーは追加ロックなしで全操作を委譲する。
 internal sealed class TxPropertyStore : IPropertyStore
 {
     private readonly IPropertyStore _inner;
-    private readonly TransactionId _txId;
+    private readonly TransactionId _transactionId;
     private readonly SnapshotState _snapshot;
-    private readonly CommittedTxRegistry? _committed;
-    // SSN read-sink。プロパティ操作でも ambient sink を維持し、直後/直前の
-    // traversal 等が sink を失わないようにする (プロパティ自体は node/rel 粒度の read で
-    // 既に捕捉されるため、PropertyStore は RecordRead を呼ばない)。
-    private readonly ISsnReadSink? _ssn;
+    private readonly VersionVisible _visibility;
+    private readonly bool _isReadOnly;
 
-    internal TxPropertyStore(IPropertyStore inner, TransactionId txId = default,
-        SnapshotState snapshot = default, CommittedTxRegistry? committed = null,
-        ISsnReadSink? ssn = null)
+    internal TxPropertyStore(
+        IPropertyStore inner,
+        TransactionId transactionId,
+        in SnapshotState snapshot,
+        CommittedTxRegistry committed,
+        bool isReadOnly)
     {
         _inner = inner;
-        _txId = txId;
-        _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
-        _committed = committed;
-        _ssn = ssn;
+        _transactionId = transactionId;
+        _snapshot = snapshot;
+        _visibility = (xmin, xmax) => Visibility.IsVisible(xmin, xmax, in _snapshot, _transactionId);
+        _isReadOnly = isReadOnly;
     }
 
-    public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst)
+    public PropertyVersionRef Create(
+        PropertyAddress address,
+        PropertyCardinality cardinality,
+        in PropertyValue value,
+        PropertyVersionRef currentFirst)
     {
-        ActivateMvccContext();
-        return _inner.Create(keyId, in value, currentFirst);
+        EnsureWritable();
+        return _inner is ITransactionPropertyStore store
+            ? store.Create(address, cardinality, in value, currentFirst, _transactionId, _visibility)
+            : _inner.Create(address, cardinality, in value, currentFirst);
     }
 
-    public PropertyId Delete(PropertyId propId, PropertyId currentFirst)
+    public PropertyVersionRef Delete(
+        EntityRef owner,
+        PropertyVersionRef version,
+        PropertyVersionRef currentFirst)
     {
-        ActivateMvccContext();
-        return _inner.Delete(propId, currentFirst);
+        EnsureWritable();
+        return _inner is ITransactionPropertyStore store
+            ? store.Delete(owner, version, currentFirst, _transactionId, _visibility)
+            : _inner.Delete(owner, version, currentFirst);
     }
 
-    public PropertyReadHandle Read(PropertyId propId)
+    public PropertyVersionRecord Read(
+        EntityRef owner,
+        PropertyVersionRef version)
     {
-        ActivateMvccContext();
-        return _inner.Read(propId);
+        return _inner is ITransactionPropertyStore store
+            ? store.Read(owner, version, _visibility)
+            : _inner.Read(owner, version);
     }
 
-    public PropertyEnumerator Enumerate(PropertyId firstPropId)
+    public PropertyVersionRecord Read(PropertyVersionRef version)
     {
-        ActivateMvccContext();
-        return _inner.Enumerate(firstPropId);
+        return _inner is ITransactionPropertyStore store
+            ? store.Read(version, _visibility)
+            : _inner.Read(version);
     }
 
-    private void ActivateMvccContext()
+    public PropertyCursor Enumerate(
+        EntityRef owner,
+        PropertyVersionRef firstVersion)
     {
-        if (_committed != null)
-            MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
+        return new PropertyCursor(this, owner, firstVersion);
+    }
+
+    internal void FlushMeta()
+    {
+        if (_inner is PropertyVersionStore store)
+            store.FlushMeta();
+    }
+
+    private void EnsureWritable()
+    {
+        if (_isReadOnly)
+            throw new TransactionException("Cannot mutate properties in a read-only transaction.");
     }
 }

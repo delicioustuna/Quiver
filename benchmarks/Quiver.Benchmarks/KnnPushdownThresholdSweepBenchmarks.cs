@@ -7,8 +7,8 @@ using Quiver.Core;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// VEC-12: vector-first フォールバック閾値を dim × sel の 2 軸で実測するクロスオーバー sweep。
-/// VEC-11 で <c>NodeByLabelScan</c> が O(N) → O(|L|) になり、VEC-10 の 0.30 一本の閾値が
+/// vector-first フォールバック閾値を dim × sel の 2 軸で実測するクロスオーバー sweep。
+/// <c>VertexByLabelScan</c> が O(N) → O(|L|) になったため、単一の0.30閾値が
 /// dim ごとに異なる crossover を表現できなくなったための再評価用。
 /// <para>
 /// 各 (dim, sel) で次の 3 メソッドを計測:
@@ -19,11 +19,11 @@ namespace Quiver.Benchmarks;
 ///     (vector-first 直結)。
 ///   </item>
 ///   <item>
-///     <c>GraphFirstForced</c> — VEC-11 後の graph-first 経路を強制。stats 不注入で構造ヒントのみで
+///     <c>GraphFirstForced</c> — graph-first経路を強制。stats 不注入で構造ヒントのみで
 ///     graph-first (FilteredKnn) を選ばせる。
 ///   </item>
 ///   <item>
-///     <c>VectorFirstForced</c> — VEC-10 fallback と同等の plan を強制。post-filter 物理プランを直接構築。
+///     <c>VectorFirstForced</c> — vector-first fallbackと同等のplanを強制。post-filter物理プランを直接構築。
 ///   </item>
 /// </list>
 /// <para>
@@ -50,7 +50,7 @@ public class KnnPushdownThresholdSweepBenchmarks
     private const string IndexName = "vec12-sweep";
 
     private string _dir = null!;
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private GraphStats _stats = null!;
     private float[] _query = null!;
 
@@ -59,25 +59,29 @@ public class KnnPushdownThresholdSweepBenchmarks
     {
         var rng = new Random(2026);
         _dir = BenchTempDir.Create("vec12");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
-            DistanceMetric.Cosine, "bench", null));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey("embedding");
+            schema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embedding"),
+                Dim));
+        });
 
         int hitCount = Math.Max(1, (int)((long)N * FractionPermille / 1000));
         var hitSet = new HashSet<int>();
         while (hitSet.Count < hitCount) hitSet.Add(rng.Next(N));
 
         var buf = new float[Dim];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
-                var n = tx.CreateNode(hitSet.Contains(i) ? "Hit" : "Miss");
+                var n = tx.CreateVertex(hitSet.Contains(i) ? "Hit" : "Miss");
                 for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-                _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, buf);
+                tx.SetVectorProperty(EntityRef.From(n), "embedding", buf);
             }
             tx.Commit();
         }
@@ -98,36 +102,36 @@ public class KnnPushdownThresholdSweepBenchmarks
 
     /// <summary>
     /// post-filter baseline。KNN top-K → label post-filter の物理プランを直接構築する
-    /// (ARCH-7: optimizer を介さない vector-first 基準)。
+    /// (: optimizer を介さない vector-first 基準)。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
         return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
     /// <summary>
-    /// VEC-11 後の graph-first 経路 (VEC-9 default)。stats 不注入で構造ヒントのみで
-    /// <see cref="FilteredKnnNodeSourceBuilder"/> を選ぶ。LabelNodeIndex sidecar が接続されていれば
-    /// <c>NodeByLabelScan</c> は O(|L|)。
+    /// graph-first経路。stats 不注入で構造ヒントのみで
+    /// <see cref="FilteredKnnVertexSourceBuilder"/> を選ぶ。LabelVertexIndex sidecar が接続されていれば
+    /// <c>VertexByLabelScan</c> は O(|L|)。
     /// </summary>
     [Benchmark]
     public int GraphFirstForced()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         return g.Knn(IndexName, _query, K).HasLabel("Hit").ToList().Count;
     }
 
     /// <summary>
-    /// VEC-10 fallback 経路と同等の plan を強制。KNN top-K → label post-filter の物理プランを
+    /// vector-first fallback経路と同等のplanを強制。KNN top-K → label post-filterの物理プランを
     /// 直接構築する (= PostFilter と同形、vector-first)。
     /// </summary>
     [Benchmark]
     public int VectorFirstForced()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
         return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 }

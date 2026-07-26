@@ -1,131 +1,75 @@
 # ベンチマーク結果
 
-基本性能（ノード作成、1-hop スキャン、BFS 等）は [README の「性能（基本計測）」](../README.md#性能基本計測) を参照。
-本ページは、運用ガイドや cookbook で参照される計測データの詳細を掲載する。
+本ページは、Quiver v0.2.0の性能特性を把握するための参考値を掲載する。
+計測値は異なる環境での性能を保証するものではない。
 
-計測環境は共通: AMD Ryzen 7 5700X (16 logical cores) / Windows 11 / SSD / .NET 10 / Release ビルド。
-計測法は in-process Stopwatch、warmup 後 best-of-N。
+計測環境はAMD Ryzen 7 5700X、Windows 11、SSD、.NET 10、Releaseビルドである。
 
----
+## 基本性能
 
-## 索引付き書き込みの WAL 増幅
+| 操作 | 実測値 |
+|---|---:|
+| Vertex作成、単一transaction内で償却 | 約3.5～4 µs/op |
+| Vertex作成とプロパティ設定 | 約6 µs/op |
+| Edge作成 | 約7 µs/op |
+| 1操作ごとのdurable commit | 約1.0 ms/commit |
+| degree 100の1-hop scan | 約0.35 µs |
+| degree 100の1-hop Fluent query | 約4.2 µs/query |
+| 10万Edgeの`BulkLoader` | 通常のbatch transaction比で約11.8倍 |
 
-索引（B+Tree）を持つノードの大量挿入で、書き込みパターンによって WAL サイズとスループットが
-桁違いに変わることを示す計測結果。
-[パフォーマンスチューニングガイド](operations/03_performance_tuning.md) の「鉄則」の根拠。
+同じ操作でも、トランザクション境界、索引数、プロパティ数、データの局所性によって結果は変わる。
 
-### ワークロード
+## HNSW true recall@10
 
-`Int64Equality` 索引（8-byte キー + 8-byte 値）付きノードの挿入。
-各シナリオで、ノード作成 + プロパティ設定 + 索引エントリ挿入を 1 操作として計測。
+固定seedのランダムコーパスについて、exact top-10とHNSW top-10の平均overlapを測定した。
+削除後は生存集合だけでexact top-10を再計算している。
 
-### 結果
+| N | 次元 | 距離 | M/Mmax0/efConstruction | 構築時間 | 検索平均 | 構築直後 | 30%削除後 |
+|---:|---:|---|---|---:|---:|---:|---:|
+| 10,000 | 384 | cosine | 32/64/400 | 10.00 s | 1.43 ms | 0.950 | 0.985 |
 
-| パス | エントリ数 | WAL bytes/entry | 実行時間 (ms) |
+検証コマンドは次のとおりである。
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
+```
+
+より軽い構築を優先する場合は、`VectorIndexDefinition`のHNSWパラメーターを明示的に調整する。
+小さい`efConstruction`や`efSearch`は構築時間と検索時間を短縮できるが、recallを下げる可能性がある。
+
+## 索引付き書き込みのWAL増幅
+
+`Int64Equality`索引を持つVertexについて、Vertex作成、プロパティ設定、索引エントリ追加を1操作として計測した。
+
+| 書き込み方法 | エントリ数 | WAL bytes/entry | 実行時間 |
 |---|---:|---:|---:|
-| **bulk (1 tx にまとめる)** | 1,000 | 71 B | 108 |
-| **bulk (1 tx にまとめる)** | 10,000 | 69 B | 183 |
-| **bulk (1 tx にまとめる)** | 100,000 | **69 B** | 963 |
-| per-tx (1 件 1 commit) | 1,000 | **27,108 B** | 1,227 |
-| per-tx (1 件 1 commit) | 10,000 | 2,532 B | 11,544 |
-| per-tx (1 件 1 commit) | 100,000 | 397 B | 112,897 |
+| 1 transactionに集約 | 1,000 | 71 B | 108 ms |
+| 1 transactionに集約 | 10,000 | 69 B | 183 ms |
+| 1 transactionに集約 | 100,000 | 69 B | 963 ms |
+| 1件ごとにcommit | 1,000 | 27,108 B | 1,227 ms |
+| 1件ごとにcommit | 10,000 | 2,532 B | 11,544 ms |
+| 1件ごとにcommit | 100,000 | 397 B | 112,897 ms |
 
-### 解釈
+同じtransaction内のページ変更はまとめてWALへ記録できるため、大量挿入は適切な大きさのtransactionへ集約する。
+1件ごとのcommitは、個別のdurability境界が必要な場合に限って使用する。
 
-**bulk パス**では、同一ページへの複数変更が 1 つの PageImage に coalesce されるため、
-エントリ数に対してほぼフラットな ~69 B/entry に収まる。100k エントリでも WAL は 7 MB 程度。
+## MergeEdgeのdegree依存コスト
 
-**per-tx パス**では、commit のたびに変更ページ（NodeStore + 索引 + meta）の PageImage を丸ごと WAL に書く。
+`MergeEdge`は、始点Vertexから同じ型のEdgeを調べて重複を判定する。
+したがって、呼び出しコストは始点の同一型out-degreeに比例する。
 
-- 小規模 (1k) ではエントリあたり ~27 KB の極端な増幅になる。1,000 回の commit が累積して WAL 27 MB。
-- 大規模 (100k) では checkpoint truncation（`CheckpointThresholdBytes` 超過時の WAL 切り詰め）が効き、
-  ~397 B/entry まで減衰する。WAL の絶対サイズは ~40 MB で頭打ち。
-- ただしスループットは bulk パスの約 100 分の 1 (~886 inserts/sec vs ~104k inserts/sec)。
-
-**実用上の指針**: 大量挿入は 1 トランザクションにまとめること。per-tx パターンは厳密な粒度の
-原子性が必要な場合にのみ使い、スループットの犠牲を許容する。
-
----
-
-## MergeRelationship の degree 依存コスト
-
-`MergeRelationship` は既存エッジの重複を防ぐ upsert 操作を提供する。
-内部では始点ノードの同一型 outgoing edge を線形スキャンして既存マッチを探すため、
-スキャンコストは **始点の同一型 out-degree に比例** する。
-[cookbook の MergeRelationship セクション](cookbook.md) の根拠。
-
-### 1. 単一呼び出し: hit (既存辺にマッチ)
-
-始点に指定本数の同一型 outgoing edge がある状態で、既存辺に対して MergeRelationship を呼ぶレイテンシ。
-
-| 同一型 out-degree | µs/call |
-|---:|---:|
-| 1 | 2.57 |
-| 10 | 1.67 |
-| 50 | 5.86 |
-| 100 | 11.71 |
-| 500 | 57.36 |
-| 1,000 | 116.44 |
-
-degree 50〜1,000 の回帰で **~116 ns/edge** の勾配。固定オーバーヘッド（列挙セットアップ + target 照合）は ~2.5µs。
-
-### 2. 単一呼び出し: miss (マッチなし、新規作成)
-
-始点に既存辺がある状態で、存在しない target への MergeRelationship。
-全辺をスキャンし終えてから `CreateRelationship` を 1 本実行する。
-
-| 同一型 out-degree | µs/call |
-|---:|---:|
-| 10 | 18.20 |
-| 50 | 22.56 |
-| 100 | 28.28 |
-| 500 | 75.69 |
-| 1,000 | 135.73 |
-
-miss ≈ full scan + CreateRelationship (~6µs)。degree 100 で hit 11.7µs、miss 28.3µs。
-
-### 3. CreateRelationship baseline (存在チェックなし)
-
-| µs/call |
-|---:|
-| 6.13 |
-
-### 4. 直積 upsert の実時間
-
-Traversal API の `MergeRelationship` (materialize → loop) による直積 upsert。
-`degree_before` は各始点に事前に張った同一型辺の本数。
-
-| sources | targets | degree_before | total ms | µs/pair |
-|---:|---:|---:|---:|---:|
-| 10 | 10 | 0 | 0.88 | 8.82 |
-| 10 | 10 | 100 | 2.00 | 19.95 |
-| 50 | 50 | 0 | 24.96 | 9.98 |
-| 50 | 50 | 100 | 55.15 | 22.06 |
-
-### コスト構造
-
-```
-MergeRelationship(src, tgt, type) =
-    スキャン: ~116 ns × (src の type 型 out-degree) + ~2.5µs 固定
-  + 作成 (miss のみ): ~6µs
-```
-
-hit/miss いずれでもスキャンコストが支配的。**degree が低い (< 50) うちは 1 回あたり数µs で実用上問題にならない。**
-
-### degree が高い場合の対処
-
-| out-degree | 1 回の hit コスト | 10×10 直積 (全 hit) 見積り |
+| 同一型out-degree | 既存Edgeへのhit | 新規Edgeとなるmiss |
 |---:|---:|---:|
-| 10 | ~2µs | ~0.2ms |
-| 100 | ~12µs | ~1.2ms |
-| 1,000 | ~116µs | ~12ms |
-| 10,000 | ~1,160µs (推定) | ~116ms |
+| 10 | 1.67 µs | 18.20 µs |
+| 50 | 5.86 µs | 22.56 µs |
+| 100 | 11.71 µs | 28.28 µs |
+| 500 | 57.36 µs | 75.69 µs |
+| 1,000 | 116.44 µs | 135.73 µs |
 
-degree 1,000 を超える始点ノードで MergeRelationship を多用するとコストが顕在化する。
-そのような高 fan-out ノードでは:
+重複確認が不要なら`AddEdge`を使う。
+高次数Vertexへ多数のEdgeを追加する場合は、既存Edgeを一度取得し、アプリケーション側の集合で重複を判定する方法も選べる。
 
-1. **`AddRelationship` を使う** — 存在チェックを省略 (~6µs/call で degree 非依存)
-2. **アプリ層で重複制御する** — `HashSet` 等で既存辺を 1 度だけ取得しチェック
+## 計測値の扱い
 
-RAG バックエンド想定の典型ワークロード (degree < 50、ペア数 < 数百) であれば
-MergeRelationship のコストは問題にならない。
+本番投入前には、実際のスキーマ、データ量、検索条件、ストレージで計測する。
+特にcommit頻度、長時間reader、索引数、ベクトル次元は、スループットとディスク使用量へ直接影響する。

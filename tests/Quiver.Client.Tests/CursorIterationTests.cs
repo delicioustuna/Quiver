@@ -11,17 +11,17 @@ namespace Quiver.Api.Tests;
 public sealed class CursorIterationTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public CursorIterationTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_cursor_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
         {
-            var n = tx.CreateNode("Item");
+            var n = tx.CreateVertex("Item");
             tx.SetProperty(n, "Index", PropertyValue.FromInt32(i));
         }
         tx.Commit();
@@ -38,10 +38,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void MoveNext_advances_through_all_results()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").AsCursor();
         int count = 0;
         while (cursor.MoveNext())
             count++;
@@ -52,10 +52,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Current_returns_correct_element_after_MoveNext()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").AsCursor();
         cursor.MoveNext().Should().BeTrue();
         cursor.Current.IsValid.Should().BeTrue();
     }
@@ -63,20 +63,20 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void MoveNext_returns_false_at_end()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Ghost").AsCursor();
+        using var cursor = g.Vertices().HasLabel("Ghost").AsCursor();
         cursor.MoveNext().Should().BeFalse();
     }
 
     [Fact]
     public void MoveNext_returns_false_after_exhaustion()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").Limit(1).AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").Limit(1).AsCursor();
         cursor.MoveNext().Should().BeTrue();
         cursor.MoveNext().Should().BeFalse();
     }
@@ -86,10 +86,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Dispose_releases_cursor_resources()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        var cursor = g.Nodes().HasLabel("Item").AsCursor();
+        var cursor = g.Vertices().HasLabel("Item").AsCursor();
         cursor.MoveNext();
         cursor.Dispose();
         // 二重 dispose は安全で、例外を投げない
@@ -99,10 +99,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Dispose_during_partial_iteration()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").AsCursor();
         cursor.MoveNext(); // advance partially
         // using 経由の Dispose で正常に解放する
     }
@@ -112,10 +112,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Empty_cursor_never_advances()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("NonExistent").AsCursor();
+        using var cursor = g.Vertices().HasLabel("NonExistent").AsCursor();
         cursor.MoveNext().Should().BeFalse();
     }
 
@@ -124,10 +124,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Cursor_respects_limit()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").Limit(3).AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").Limit(3).AsCursor();
         int count = 0;
         while (cursor.MoveNext())
             count++;
@@ -140,10 +140,10 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Cursor_with_HasLabel_and_Has_filter()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        using var cursor = g.Nodes().HasLabel("Item").Has("Index", 2).AsCursor();
+        using var cursor = g.Vertices().HasLabel("Item").Has("Index", 2).AsCursor();
         cursor.MoveNext().Should().BeTrue();
         cursor.Current.IsValid.Should().BeTrue();
         cursor.MoveNext().Should().BeFalse(); // only one match
@@ -154,17 +154,34 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Cursor_produces_same_results_as_ToList()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        var toListResults = g.Nodes().HasLabel("Item").ToList();
+        var toListResults = g.Vertices().HasLabel("Item").ToList();
 
-        using var cursor = g.Nodes().HasLabel("Item").AsCursor();
-        var cursorResults = new List<NodeId>();
+        using var cursor = g.Vertices().HasLabel("Item").AsCursor();
+        var cursorResults = new List<VertexId>();
         while (cursor.MoveNext())
             cursorResults.Add(cursor.Current);
 
         cursorResults.Should().BeEquivalentTo(toListResults);
+    }
+
+    [Fact]
+    public void Cursor_iteration_can_observe_cancellation_between_rows()
+    {
+        using var tx = _db.BeginReadTransaction();
+        using var cursor = tx.Query.Vertices().HasLabel("Item").AsCursor();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Action iterate = () =>
+        {
+            while (cursor.MoveNext())
+                cts.Token.ThrowIfCancellationRequested();
+        };
+
+        iterate.Should().Throw<OperationCanceledException>();
     }
 
     // ── Match cursor ─────────────────────────────────────────────────
@@ -172,12 +189,12 @@ public sealed class CursorIterationTests : IDisposable
     [Fact]
     public void Match_cursor_iterates_correctly()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
-        // relationship がないため Item の self-join は自明に空となる。
-        // 代わりに Nodes cursor を使う。
-        using var cursor = g.Nodes().HasLabel("Item").Id().AsCursor();
+        // edge がないため Item の self-join は自明に空となる。
+        // 代わりに Vertices cursor を使う。
+        using var cursor = g.Vertices().HasLabel("Item").Id().AsCursor();
         var ids = new List<long>();
         while (cursor.MoveNext())
             ids.Add(cursor.Current);

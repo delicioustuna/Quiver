@@ -9,7 +9,7 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Operators;
 
 /// <summary>
-/// TS-6 sentinel: <see cref="ApplyDyadicOperator"/> gather/score pipeline.
+///  sentinel: <see cref="ApplyDyadicOperator"/> gather/score pipeline.
 /// Measures engine overhead per candidate (target: &lt;= 2 us/candidate, 0 alloc during scan).
 /// </summary>
 [MemoryDiagnoser]
@@ -17,9 +17,9 @@ namespace Quiver.Benchmarks.Operators;
 public class ApplyDyadicOperatorBench
 {
     private string _dir = null!;
-    private GraphDatabase _db = null!;
-    private IGraphTransaction _readTx = null!;
-    private NodeId[] _candidates = null!;
+    private QuiverDatabase _db = null!;
+    private IReadTransaction _readTx = null!;
+    private VertexId[] _candidates = null!;
     private float[] _query = null!;
 
     [Params(50, 1000)]
@@ -32,24 +32,28 @@ public class ApplyDyadicOperatorBench
     public void Setup()
     {
         _dir = BenchTempDir.Create("dyadic");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("embed");
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
-            DistanceMetric.Cosine, "bench", null, VectorIndexKind.FlatOnly));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey("embed");
+            schema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embed", "N"),
+                Dim));
+        });
 
         var rng = new Random(2026);
         var buf = new float[Dim];
 
-        _candidates = new NodeId[CandidateCount];
-        using (var tx = _db.BeginTransaction())
+        _candidates = new VertexId[CandidateCount];
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < CandidateCount; i++)
             {
-                var n = tx.CreateNode("N");
+                var n = tx.CreateVertex("N");
                 for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-                _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, buf);
+                tx.SetVectorProperty(EntityRef.From(n), "embed", buf);
                 _candidates[i] = n;
             }
             tx.Commit();
@@ -57,7 +61,7 @@ public class ApplyDyadicOperatorBench
 
         _query = new float[Dim];
         for (int d = 0; d < Dim; d++) _query[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -76,7 +80,7 @@ public class ApplyDyadicOperatorBench
             var op = new CosineSimilarityOp();
             return op.Invoke(a, b, regions);
         };
-        var src = new NodeArraySource(_candidates);
+        var src = new VertexArraySource(_candidates);
         using var op = new ApplyDyadicOperator(
             src, 0, IndexName, _query, null, 0, null, 10, scorer, typeof(CosineSimilarityOp));
         return OperatorBenchDrain.Drain(op, _readTx);
@@ -86,7 +90,7 @@ public class ApplyDyadicOperatorBench
     public int NoOp_k10()
     {
         DyadicScoreFunc scorer = static (a, b, _) => 1.0f;
-        var src = new NodeArraySource(_candidates);
+        var src = new VertexArraySource(_candidates);
         using var op = new ApplyDyadicOperator(
             src, 0, IndexName, _query, null, 0, null, 10, scorer, typeof(CosineSimilarityOp));
         return OperatorBenchDrain.Drain(op, _readTx);

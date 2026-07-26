@@ -9,8 +9,8 @@ namespace Quiver;
 /// <summary>
 /// バイナリバックエンドの <see cref="IGraphAccessMethods"/> 実装。リンクリストと隣接ブロックの
 /// 選択を <see cref="BinaryExpandCursor"/> に委譲し、隣接 fast path が使えなかった頻度
-/// (= インデックス構築時にブロックが無かったノード、典型的には bulk load 後に作られたもの)
-/// を診断用カウンタとして公開する。<see cref="IAdjacencyBlockStore.OpenCursor"/> が
+/// (= インデックス構築時にブロックが無かったVertex、典型的には bulk load 後に作られたもの)
+/// を診断用カウンタとして公開する。<see cref="IAdjacencySegmentStore.OpenCursor"/> が
 /// ページチェーン全体を走査するため、cursor が走査途中で fast path を放棄することはない。
 /// カウンタは「ブロックが全く無い」経路でのみ発火する。
 /// </summary>
@@ -19,140 +19,306 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     // BinaryExpandCursor から Interlocked 経由でアクセスされる。
     internal long FallbackCountInternal;
 
-    private readonly IVectorStore _vectors;
-    // ラベル転置索引 (任意)。接続時はラベル付き ScanNodes/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
-    private LabelNodeIndex? _labelIndex;
+    private readonly IVectorDefinitionCatalog _vectorDefinitions;
+    private readonly EdgeDeltaStore _edgeDeltas;
+    private readonly LabelTokenStore _labels;
+    private readonly EdgeTypeTokenStore _edgeTypes;
+    private readonly NexusTypeTokenStore _nexusTypes;
+    // ラベル転置索引 (任意)。接続時はラベル付き ScanVertices/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
+    private LabelVertexIndex? _labelIndex;
 
-    internal BinaryGraphAccessMethods(IVectorStore vectors)
+    internal BinaryGraphAccessMethods(
+        IVectorDefinitionCatalog vectorDefinitions,
+        LabelTokenStore labels,
+        EdgeTypeTokenStore edgeTypes,
+        NexusTypeTokenStore nexusTypes,
+        EdgeDeltaStore? edgeDeltas = null)
     {
-        _vectors = vectors;
+        _vectorDefinitions = vectorDefinitions;
+        _labels = labels;
+        _edgeTypes = edgeTypes;
+        _nexusTypes = nexusTypes;
+        _edgeDeltas = edgeDeltas ?? EdgeDeltaStore.Shared;
     }
 
+    internal EdgeDeltaStore EdgeDeltas => _edgeDeltas;
+
     /// <summary>
-    /// factory が NodeStore に attach した後の index を共有する。
+    /// factory が VertexStore に attach した後の index を共有する。
     /// 接続前 (open 直後 / unit テスト) は <see cref="ScanByLabelSlow"/> にフォールバックする。
     /// </summary>
-    internal void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
+    internal void AttachLabelIndex(LabelVertexIndex labelIndex) => _labelIndex = labelIndex;
 
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
 
     /// <summary>
-    /// <c>LabelNodeIndex</c> sidecar が接続されているときに <c>true</c>。
+    /// <c>LabelVertexIndex</c> sidecar が接続されているときに <c>true</c>。
     /// factory が <see cref="AttachLabelIndex"/> を呼ぶ前 (open 直後 / 単体テスト) は <c>false</c>。
     /// </summary>
     public bool HasFastLabelIndex => _labelIndex is not null;
 
     /// <inheritdoc/>
-    public bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
-        => _vectors.TryGetIndex(indexName, out spec);
+    public bool TryGetVectorIndex(
+        string indexName,
+        out VectorIndexDescriptor descriptor)
+        => _vectorDefinitions.TryGet(indexName, out descriptor);
 
     /// <inheritdoc/>
-    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => _vectors.TryGetVector(kind, entityId, indexName, destination);
+    public bool TryGetVector(
+        ITransaction transaction,
+        EntityRef owner,
+        string indexName,
+        Span<float> destination)
+    {
+        if (!_vectorDefinitions.TryGet(
+                indexName,
+                out VectorIndexDescriptor descriptor)
+            || descriptor.OwnerKind != owner.Kind
+            || destination.Length < descriptor.Dimensions)
+            return false;
+        PropertyCursor properties = owner.Kind switch
+        {
+            EntityKind.Vertex => transaction.Vertices.EnumerateProperties(
+                new VertexId(owner.Value),
+                transaction.Properties),
+            EntityKind.Edge => transaction.Edges.EnumerateProperties(
+                new EdgeId(owner.Value),
+                transaction.Properties),
+            EntityKind.Nexus => transaction.Nexuses.EnumerateProperties(
+                new NexusId(owner.Value),
+                transaction.Properties),
+            _ => default,
+        };
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != descriptor.TargetPropertyKeyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != descriptor.Dimensions)
+                continue;
+            property.Value.FloatArrayValue.CopyTo(destination);
+            return true;
+        }
+        return false;
+    }
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
-        => _vectors.KnnSearch(indexName, query, k);
-
-    // in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
-    public VectorSearchCursor KnnSearchFiltered(
+    public VectorSearchCursor KnnSearch(
+        ITransaction transaction,
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        VectorSearchOptions? options = null)
     {
-        if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchFiltered(indexName, query, k, candidates);
-        // 永続ストアも gather-then-score / scan+post-filter を直接持つ。
-        if (_vectors is Storage.Records.PersistentVectorStore persistent)
-            return persistent.KnnSearchFiltered(indexName, query, k, candidates);
-        return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+        options = VectorSearchOptionsValidator.Normalize(options);
+        if (!_vectorDefinitions.TryGet(
+                indexName,
+                out VectorIndexDescriptor descriptor))
+            throw new VectorException($"Vector index '{indexName}' does not exist.");
+        if (query.Length != descriptor.Dimensions)
+            throw new VectorException(
+                $"Vector index '{indexName}' expects {descriptor.Dimensions} dimensions, got {query.Length}.");
+        if (k <= 0)
+            throw new ArgumentOutOfRangeException(nameof(k));
+
+        var heap = new VectorKnnHeap(k);
+        switch (descriptor.OwnerKind)
+        {
+            case EntityKind.Vertex:
+                foreach (VertexId id in transaction.Vertices.Scan())
+                {
+                    using VertexReadHandle owner = transaction.Vertices.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _labels.GetName(owner.Label) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Vertices.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+            case EntityKind.Edge:
+                foreach (EdgeId id in transaction.Edges.Scan())
+                {
+                    EdgeReadHandle owner = transaction.Edges.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _edgeTypes.GetName(owner.Type) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Edges.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+            case EntityKind.Nexus:
+                foreach (NexusId id in transaction.Nexuses.Scan())
+                {
+                    using NexusReadHandle owner = transaction.Nexuses.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _nexusTypes.GetName(owner.Type) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Nexuses.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+        }
+        return new MaterializedVectorSearchCursor(heap.ToSortedArray());
+    }
+
+    public VectorSearchCursor KnnSearchFiltered(
+        ITransaction transaction,
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        IReadOnlySet<EntityRef> candidates,
+        VectorSearchOptions? options = null)
+    {
+        if (candidates.Count == 0)
+            return EmptyVectorSearchCursor.Instance;
+        var hits = new List<VectorSearchResult>(k);
+        using var cursor = KnnSearch(
+            transaction,
+            indexName,
+            query,
+            Math.Max(k, candidates.Count),
+            options);
+        while (cursor.MoveNext())
+        {
+            VectorSearchResult hit = cursor.Current;
+            if (!candidates.Contains(hit.Owner))
+                continue;
+            hits.Add(hit);
+            if (hits.Count == k)
+                break;
+        }
+        return new MaterializedVectorSearchCursor(hits);
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        ITransaction transaction,
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
-        if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchBatch(indexName, queries, k);
-        return _vectors.KnnSearchBatch(indexName, queries, k);
+        var result = new VectorSearchCursor[queries.Count];
+        for (int i = 0; i < queries.Count; i++)
+            result[i] = KnnSearch(transaction, indexName, queries[i].Span, k, options);
+        return result;
     }
 
-    public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
+    private static void OfferPrimaryVector(
+        PropertyCursor properties,
+        EntityRef owner,
+        VectorIndexDescriptor descriptor,
+        ReadOnlySpan<float> query,
+        VectorKnnHeap heap)
     {
-        if (!label.HasValue) return tx.Nodes.Scan();
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != descriptor.TargetPropertyKeyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != descriptor.Dimensions)
+                continue;
+            heap.Offer(new VectorSearchResult(
+                owner,
+                VectorMetrics.Score(
+                    descriptor.Metric,
+                    query,
+                    property.Value.FloatArrayValue)));
+            return;
+        }
+    }
+
+    public IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null)
+    {
+        if (!label.HasValue) return tx.Vertices.Scan();
         // sidecar 接続済みなら O(|L|) lookup。factory が index を attach するまでは
         // 旧来の O(N) scan-and-filter にフォールバックし、スタンドアロンの
         // TransactionManager 構築 (backend なしのテスト等) でも動作する。
         if (_labelIndex is { } idx)
-            return idx.Lookup(tx.Nodes, label.Value);
+            return idx.Lookup(tx.Vertices, label.Value);
         return ScanByLabelSlow(tx, label.Value);
     }
 
-    private static IEnumerable<NodeId> ScanByLabelSlow(ITransaction tx, LabelId label)
+    private static IEnumerable<VertexId> ScanByLabelSlow(ITransaction tx, LabelId label)
     {
-        foreach (var id in tx.Nodes.Scan())
+        foreach (var id in tx.Vertices.Scan())
         {
-            if (tx.Nodes.Read(id).Label == label)
+            if (tx.Vertices.Read(id).Label == label)
                 yield return id;
         }
     }
 
-    public IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key)
-    {
-        // PropertyValue は ref struct なので yield を跨いで保持できない。
-        IEnumerable<long> ids = key.Type switch
-        {
-            PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
-                tx.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
-            PropertyValueType.Double =>
-                tx.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
-            PropertyValueType.String =>
-                tx.Indexes.CreateStringIndex(indexName)
-                    .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
-            _ => [],
-        };
-        // パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
-        return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
-    }
+    public IEnumerable<VertexId> SeekVerticesByIndex(
+        ITransaction tx,
+        ScalarIndexDefinition definition,
+        PropertyKeyId propertyKey,
+        LabelId? scope,
+        PropertyValue key)
+        => IndexValueResolver.SeekVisibleVertexPropertyOwners(
+            tx,
+            definition,
+            propertyKey,
+            scope,
+            in key);
 
     public ExpandCursor Expand(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
         => new BinaryExpandCursor(tx, source, direction, typeFilter, this);
 
     public double EstimateExpandCardinality(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
     {
+        var materializer = new EntityIdentityMaterializer(tx.Vertices);
+        if (!materializer.TryVertex(source, out source))
+            return 0;
+
         // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
         // なければチェーンを走査する。
-        var adj = tx.AdjacencyBlocks;
+        var adj = tx.AdjacencySegments;
         if (adj != null && adj.HasBlock(source))
         {
             var probe = new AdjacencyEntry[64];
-            int n = adj.ReadEdges(source, direction, typeFilter, probe);
-            return n < probe.Length ? n : probe.Length;
+            int baseCount = adj.ReadEdges(source, direction, typeFilter, probe);
+            int deltaLimit = Math.Max(0, probe.Length - Math.Min(baseCount, probe.Length));
+            int deltaCount = _edgeDeltas.Count(
+                tx, source, direction, typeFilter, adj.BaseEdgeHwm, deltaLimit);
+            int total = Math.Min(probe.Length, baseCount + deltaCount);
+            return total;
         }
 
         double count = 0;
-        var relId = tx.Nodes.Read(source).FirstRelationshipId;
-        while (relId.IsValid)
+        var edgeId = tx.Vertices.Read(source).FirstEdgeId;
+        while (edgeId.IsValid)
         {
-            var rel = tx.Relationships.Read(relId);
-            bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
+            var edge = tx.Edges.Read(edgeId);
+            bool typeOk = !typeFilter.HasValue || edge.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source == source,
-                Direction.Incoming => rel.Target == source,
+                Direction.Outgoing => edge.Source.Sequence == source.Sequence,
+                Direction.Incoming => edge.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source == source ? rel.SourceNext : rel.TargetNext;
+            edgeId = edge.Source.Sequence == source.Sequence ? edge.SourceNext : edge.TargetNext;
         }
         return count;
     }

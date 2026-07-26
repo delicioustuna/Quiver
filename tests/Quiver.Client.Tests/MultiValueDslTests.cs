@@ -29,22 +29,40 @@ public sealed class MultiValueDslTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
+    private static void EnsureProperty(
+        QuiverDatabase db,
+        string key,
+        PropertyCardinality cardinality = PropertyCardinality.Set)
+    {
+        using var tx = db.BeginWriteTransaction();
+        tx.EditSchema.GetOrCreatePropertyKey(key, cardinality);
+        tx.Commit();
+    }
+
+    private static void EnsureIndexes<T>(QuiverDatabase db)
+        where T : IGraphVertex<T>, IGraphVertexSchema<T>
+    {
+        using var tx = db.BeginWriteTransaction();
+        tx.EditSchema.EnsureIndexes<T>();
+        tx.Commit();
+    }
+
     // ── DSL で multi-value set を作る AddPropertyValue ──────────────
 
     [Fact]
     public void AddPropertyValue_string_builds_set()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("alpha"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("beta"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("gamma"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = CollectStrings(ro.GetPropertyValues(n, "tags"));
         values.Should().HaveCount(3);
         values.Should().BeEquivalentTo("alpha", "beta", "gamma");
@@ -53,17 +71,17 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void RemovePropertyValue_string_removes_from_set()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("alpha"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("beta"));
         tx.RemovePropertyValue(n, "tags", PropertyValue.FromString("alpha"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = CollectStrings(ro.GetPropertyValues(n, "tags"));
         values.Should().ContainSingle().Which.Should().Be("beta");
     }
@@ -71,14 +89,14 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void GetPropertyValues_on_empty_set_returns_empty()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = CollectStrings(ro.GetPropertyValues(n, "tags"));
         values.Should().BeEmpty();
     }
@@ -86,56 +104,56 @@ public sealed class MultiValueDslTests : IDisposable
     // ── Set cardinality の Has traversal (包含 query) ───────────────
 
     [Fact]
-    public void Has_containment_query_finds_nodes_with_matching_value()
+    public void Has_containment_query_finds_vertices_with_matching_value()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n1 = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n1 = tx.CreateVertex("Item");
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("red"));
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("blue"));
-        var n2 = tx.CreateNode("Item");
+        var n2 = tx.CreateVertex("Item");
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("green"));
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("blue"));
-        var n3 = tx.CreateNode("Item");
+        var n3 = tx.CreateVertex("Item");
         tx.AddPropertyValue(n3, "tags", PropertyValue.FromString("red"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         // "red" -> n1, n3
-        var reds = g.Nodes().HasLabel("Item").Has("tags", "red").ToList();
+        var reds = g.Vertices().HasLabel("Item").Has("tags", "red").ToList();
         reds.Should().HaveCount(2);
         reds.Should().Contain(n1);
         reds.Should().Contain(n3);
 
         // "blue" -> n1, n2
-        var blues = g.Nodes().HasLabel("Item").Has("tags", "blue").ToList();
+        var blues = g.Vertices().HasLabel("Item").Has("tags", "blue").ToList();
         blues.Should().HaveCount(2);
         blues.Should().Contain(n1);
         blues.Should().Contain(n2);
 
         // "green" -> n2
-        var greens = g.Nodes().HasLabel("Item").Has("tags", "green").ToList();
+        var greens = g.Vertices().HasLabel("Item").Has("tags", "green").ToList();
         greens.Should().ContainSingle().Which.Should().Be(n2);
     }
 
     [Fact]
     public void Has_containment_query_nonexistent_value_returns_empty()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("red"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
-        g.Nodes().HasLabel("Item").Has("tags", "nonexistent").ToList().Should().BeEmpty();
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
+        g.Vertices().HasLabel("Item").Has("tags", "nonexistent").ToList().Should().BeEmpty();
     }
 
     // ── Has 包含と他の filter の chain ───────────────────────────────
@@ -143,40 +161,40 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void Has_containment_chains_with_HasLabel()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n1 = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n1 = tx.CreateVertex("Item");
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("red"));
-        var n2 = tx.CreateNode("Other");
+        var n2 = tx.CreateVertex("Other");
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("red"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
-        var result = g.Nodes().HasLabel("Item").Has("tags", "red").ToList();
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
+        var result = g.Vertices().HasLabel("Item").Has("tags", "red").ToList();
         result.Should().ContainSingle().Which.Should().Be(n1);
     }
 
     [Fact]
     public void Has_containment_chains_with_Has_single_value()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n1 = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n1 = tx.CreateVertex("Item");
         tx.SetProperty(n1, "Color", PropertyValue.FromString("bright"));
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("red"));
-        var n2 = tx.CreateNode("Item");
+        var n2 = tx.CreateVertex("Item");
         tx.SetProperty(n2, "Color", PropertyValue.FromString("dark"));
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("red"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
-        var result = g.Nodes().HasLabel("Item")
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
+        var result = g.Vertices().HasLabel("Item")
             .Has("tags", "red")
             .Has("Color", "bright")
             .ToList();
@@ -188,27 +206,27 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void TypedTraversal_Has_List_string_containment()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.EnsureIndexes<TaggedItem>();
+        using var db = QuiverDatabase.Open(_path);
+        EnsureIndexes<TaggedItem>(db);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new TaggedItem { Label = "A", Tags = ["x", "y"] });
-            g.InsertIndexed(new TaggedItem { Label = "B", Tags = ["y", "z"] });
-            g.InsertIndexed(new TaggedItem { Label = "C", Tags = ["z"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "A", Tags = ["x", "y"] });
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "B", Tags = ["y", "z"] });
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "C", Tags = ["z"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g2 = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g2 = ro.Query;
 
-        var yItems = g2.Nodes<TaggedItem>()
+        var yItems = g2.Vertices<TaggedItem>()
             .Has(i => i.Tags, "y")
             .ToList();
         yItems.Select(i => i.Label).Should().BeEquivalentTo("A", "B");
 
-        var zItems = g2.Nodes<TaggedItem>()
+        var zItems = g2.Vertices<TaggedItem>()
             .Has(i => i.Tags, "z")
             .ToList();
         zItems.Select(i => i.Label).Should().BeEquivalentTo("B", "C");
@@ -217,22 +235,22 @@ public sealed class MultiValueDslTests : IDisposable
     // ── TypedGraphTraversal Values<List<TElem>> ──────────────────────
 
     [Fact]
-    public void TypedTraversal_Values_List_returns_per_node_lists()
+    public void TypedTraversal_Values_List_returns_per_vertex_lists()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.EnsureIndexes<TaggedItem>();
+        using var db = QuiverDatabase.Open(_path);
+        EnsureIndexes<TaggedItem>(db);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new TaggedItem { Label = "A", Tags = ["x", "y"] });
-            g.InsertIndexed(new TaggedItem { Label = "B", Tags = ["z"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "A", Tags = ["x", "y"] });
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "B", Tags = ["z"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var allTags = ro.G(db.Schema)
-            .Nodes<TaggedItem>()
+        using var ro = db.BeginReadTransaction();
+        var allTags = ro.Query
+            .Vertices<TaggedItem>()
             .Values(i => i.Tags)
             .ToList();
 
@@ -243,19 +261,19 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void TypedTraversal_Values_List_empty_tags_returns_empty_list()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.EnsureIndexes<TaggedItem>();
+        using var db = QuiverDatabase.Open(_path);
+        EnsureIndexes<TaggedItem>(db);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new TaggedItem { Label = "A", Tags = [] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "A", Tags = [] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var tags = ro.G(db.Schema)
-            .Nodes<TaggedItem>()
+        using var ro = db.BeginReadTransaction();
+        var tags = ro.Query
+            .Vertices<TaggedItem>()
             .Values(i => i.Tags)
             .ToList();
 
@@ -267,21 +285,21 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void TypedTraversal_Has_List_chains_with_Where_expression()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.EnsureIndexes<TaggedItem>();
+        using var db = QuiverDatabase.Open(_path);
+        EnsureIndexes<TaggedItem>(db);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new TaggedItem { Label = "A", Priority = 1, Tags = ["important"] });
-            g.InsertIndexed(new TaggedItem { Label = "B", Priority = 2, Tags = ["important"] });
-            g.InsertIndexed(new TaggedItem { Label = "C", Priority = 3, Tags = ["minor"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "A", Priority = 1, Tags = ["important"] });
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "B", Priority = 2, Tags = ["important"] });
+            tx.Mutate.InsertIndexed(new TaggedItem { Label = "C", Priority = 3, Tags = ["minor"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var result = ro.G(db.Schema)
-            .Nodes<TaggedItem>()
+        using var ro = db.BeginReadTransaction();
+        var result = ro.Query
+            .Vertices<TaggedItem>()
             .Has(i => i.Tags, "important")
             .Where(i => i.Priority > 1)
             .ToList();
@@ -294,23 +312,23 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void TypedTraversal_Has_List_int_containment()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("scores", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "scores");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Data");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Data");
         tx.SetProperty(n, "Name", PropertyValue.FromString("test"));
         tx.AddPropertyValue(n, "scores", PropertyValue.FromInt32(10));
         tx.AddPropertyValue(n, "scores", PropertyValue.FromInt32(20));
         tx.AddPropertyValue(n, "scores", PropertyValue.FromInt32(30));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
-        var found = g.Nodes().HasLabel("Data").Has("scores", 20).ToList();
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
+        var found = g.Vertices().HasLabel("Data").Has("scores", 20).ToList();
         found.Should().ContainSingle().Which.Should().Be(n);
 
-        var notFound = g.Nodes().HasLabel("Data").Has("scores", 99).ToList();
+        var notFound = g.Vertices().HasLabel("Data").Has("scores", 99).ToList();
         notFound.Should().BeEmpty();
     }
 
@@ -319,11 +337,11 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void SetProperty_on_Set_cardinality_key_throws()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         var act = () => tx.SetProperty(n, "tags", PropertyValue.FromString("x"));
         act.Should().Throw<InvalidOperationException>();
     }
@@ -331,11 +349,11 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void AddPropertyValue_on_Single_cardinality_key_throws()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "name", PropertyCardinality.Single);
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         var act = () => tx.AddPropertyValue(n, "name", PropertyValue.FromString("x"));
         act.Should().Throw<InvalidOperationException>();
     }
@@ -345,17 +363,17 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void AddPropertyValue_duplicate_is_idempotent()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("x"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("x"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("y"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = CollectStrings(ro.GetPropertyValues(n, "tags"));
         values.Should().HaveCount(2);
     }
@@ -365,16 +383,16 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void RemovePropertyValue_nonexistent_value_is_noop()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        using var db = QuiverDatabase.Open(_path);
+        EnsureProperty(db, "tags");
 
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("x"));
         tx.RemovePropertyValue(n, "tags", PropertyValue.FromString("nonexistent"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = CollectStrings(ro.GetPropertyValues(n, "tags"));
         values.Should().ContainSingle().Which.Should().Be("x");
     }
@@ -384,9 +402,9 @@ public sealed class MultiValueDslTests : IDisposable
     [Fact]
     public void GetPropertyValues_unknown_key_returns_empty()
     {
-        using var db = GraphDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Item");
+        using var db = QuiverDatabase.Open(_path);
+        using var tx = db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Item");
         var values = CollectStrings(tx.GetPropertyValues(n, "nonexistent"));
         values.Should().BeEmpty();
     }
@@ -402,7 +420,7 @@ public sealed class MultiValueDslTests : IDisposable
     }
 }
 
-[Node("TaggedItem")]
+[Vertex("TaggedItem")]
 internal partial class TaggedItem
 {
     [Indexed("idx_taggeditem_label")]

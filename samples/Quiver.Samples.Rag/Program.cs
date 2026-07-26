@@ -9,7 +9,7 @@ using Quiver.Rag;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_rag_sample_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
 
     var embedder = new HashEmbedder(dim: 16);
     var store = new RagStore(db, new RagStoreOptions
@@ -44,12 +44,14 @@ try
     foreach (var doc in docs)
     {
         var r = await store.UpsertDocumentAsync(doc, embedder);
-        Console.WriteLine($"取込 {doc.SourceId}: chunks={r.ChunkCount} unchanged={r.Unchanged}");
+        Console.WriteLine(
+            $"取込 {doc.SourceId}: document={r.DocumentVertexId} chunks={r.ChunkCount} unchanged={r.Unchanged}");
     }
 
     // 同一内容の再取込は contentHash 一致で no-op。
     var again = await store.UpsertDocumentAsync(docs[0], embedder);
-    Console.WriteLine($"再取込(同一) {docs[0].SourceId}: unchanged={again.Unchanged}");
+    Console.WriteLine(
+        $"再取込(同一) {docs[0].SourceId}: document={again.DocumentVertexId} unchanged={again.Unchanged}");
     Console.WriteLine();
 
     var searcher = new RagSearcher(store);
@@ -84,8 +86,15 @@ try
         {
             string head = string.IsNullOrEmpty(h.HeadingPath) ? "" : $" [{h.HeadingPath}]";
             Console.WriteLine($"  #{h.Rank} 〈{h.Document.Title}〉{head}");
+            Console.WriteLine(
+                $"      score={h.Score.FusedScore:F6} method={h.Score.FusionMethod}" +
+                $" bm25={FormatDouble(h.Score.Bm25Score)} vector={FormatFloat(h.Score.VectorSimilarity)}" +
+                $" rrfK={h.Score.ReciprocalRankConstant}");
             Console.WriteLine($"      {h.ChunkText.Replace("\n\n", " / ").Replace("\n", " ")}");
         }
+
+        static string FormatDouble(double? value) => value?.ToString("F6") ?? "-";
+        static string FormatFloat(float? value) => value?.ToString("F6") ?? "-";
     }
 }
 finally

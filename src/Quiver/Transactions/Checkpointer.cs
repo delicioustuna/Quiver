@@ -26,23 +26,24 @@ namespace Quiver.Transactions;
 /// 順序が重要: Begin → page fsync → End → truncate。truncate は必ず End 観測後に発生する。
 /// チェックポイントを「いつ」打つか (契機) は <see cref="TransactionManager"/> が判断する。
 /// 本クラスは「どう」打つか (機構) のみを担当する。
-/// 前提: 案C により、WAL 上の PageImage はコミット時にまとめて追記される。よって
-/// 任意のチェックポイント時点の WAL には「未コミットトランザクションの宙ぶらりんな
-/// PageImage」が存在しない。さらに <see cref="TransactionManager"/> はアクティブ
-/// トランザクションが 0 のときにのみ本チェックポイントを呼ぶため、シャープ
-/// チェックポイント (全ダーティページ = コミット済み) として安全に truncate できる。
+/// 前提: WAL 上の PageImage は transaction-owned write set から commit 時にまとめて追記される。
+/// <see cref="TransactionManager"/> は同じ writer lease を取得してから本チェックポイントを呼ぶため、
+/// writer の PageImage や dirty page が途中に混ざらない。
+/// reader は page を変更しないため、active reader がいても sharp checkpoint として安全に truncate できる。
 /// </summary>
 internal sealed class Checkpointer(
     IPageManager pageManager,
     IWriteAheadLog wal,
     Func<long> oldestActiveLsn,
-    IIndexManager? indexManager = null)
+    IIndexManager? indexManager = null,
+    Action? prepareCheckpoint = null)
 {
     private readonly IPageManager _pageManager = pageManager;
     private readonly IWriteAheadLog _wal = wal;
     private readonly Func<long> _oldestActiveLsn = oldestActiveLsn;
     // null 可。null の場合は索引 flush をスキップ (索引を持たないバックエンド向け)。
     private readonly IIndexManager? _indexManager = indexManager;
+    private readonly Action? _prepareCheckpoint = prepareCheckpoint;
 
     /// <summary>
     /// テスト用: チェックポイントの各 phase 完了後にフックを呼ぶ。テストはここで
@@ -53,7 +54,7 @@ internal sealed class Checkpointer(
 
     /// <summary>
     /// チェックポイントを 1 回実行する。呼び出し側 (<see cref="TransactionManager"/>) が
-    /// 同時実行を排他し、アクティブトランザクションが無いことを保証すること。
+    /// 同時実行を排他し、active writer が無いことを保証すること。
     /// </summary>
     public void Checkpoint()
     {
@@ -68,14 +69,16 @@ internal sealed class Checkpointer(
         long beginLsn = _wal.WriteCheckpointBegin(_oldestActiveLsn(), dirtyPageCount: 0);
         PhaseInjector?.Invoke(CheckpointPhase.AfterBegin);
 
+        // committed high-water / next TxId などの recovery catalog も、この sharp
+        // checkpoint が flush する dirty set に含める。
+        _prepareCheckpoint?.Invoke();
+
         // 2. データページを永続化 (fsync)。途中で kill されると partial 状態だが、End が
         //   まだ書かれていないので recovery は前回 End からやり直し redo で収束する。
         _pageManager.FlushAll();
         PhaseInjector?.Invoke(CheckpointPhase.AfterDataFlush);
 
-        // 3.: 索引ファイルも永続化。後続の WAL truncate で IndexMutation レコードが
-        //   捨てられても、ここで .idx に書き出された内容が durable なので復旧時の起点として
-        //   使える。
+        // 3. 索引ページも永続化。索引は同じ page-WAL と単一コンテナに含まれる。
         _indexManager?.FlushAll();
         PhaseInjector?.Invoke(CheckpointPhase.AfterIndexFlush);
 
@@ -92,8 +95,8 @@ internal sealed class Checkpointer(
         PhaseInjector?.Invoke(CheckpointPhase.AfterTruncate);
         QuiverTelemetry.CheckpointDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetTag("quiver.checkpoint.begin_lsn", beginLsn);
-        // 構造化ログ。Information は運用上「実際にチェックポイントが完走した」マイルストーンとして残す。
-        QuiverLog.CheckpointCompleted(QuiverLog.CheckpointLogger, beginLsn, sw.Elapsed.TotalMilliseconds);
+        // 運用上「実際にチェックポイントが完走した」マイルストーンとして残す。
+        QuiverEventSource.Log.CheckpointCompleted(beginLsn, sw.Elapsed.TotalMilliseconds);
     }
 }
 

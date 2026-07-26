@@ -2,7 +2,7 @@
 
 Quiver の主要な概念。
 
-- [Node / Relationship モデル](node-relationship.md) — ノードとリレーションシップの表現
+- [Vertex / Edge モデル](vertex-edge.md) — VertexとEdgeの表現
 - [Transaction](transaction.md) — トランザクション境界、分離レベル、コミットフック
 - [Traversal](traversal.md) — Gremlin 風トラバーサル DSL
 - [MERGE / UPSERT](merge.md) — Cypher の `MERGE` 相当の挙動

@@ -1,11 +1,11 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Quiver.SourceGen;
 
 namespace Quiver.SourceGen.Tests;
 
-public class GraphNodeGeneratorTests
+public class GraphVertexGeneratorTests
 {
     [Fact]
     public void Generator_runs_without_exception_on_empty_compilation()
@@ -13,7 +13,7 @@ public class GraphNodeGeneratorTests
         var compilation = CSharpCompilation.Create("TestAssembly",
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphNodeGenerator();
+        var generator = new GraphVertexGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
@@ -22,16 +22,16 @@ public class GraphNodeGeneratorTests
     }
 
     [Fact]
-    public void Generator_emits_partial_class_for_GraphNode()
+    public void Generator_emits_partial_class_for_GraphVertex()
     {
-        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [Node("Person")]
+            [Vertex("Person")]
             public partial class Person
             {
                 [Property]
@@ -55,17 +55,17 @@ public class GraphNodeGeneratorTests
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphNodeGenerator();
+        var generator = new GraphVertexGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
         var result = driver.GetRunResult();
         var generated = result.GeneratedTrees;
-        generated.Should().NotBeEmpty("generator should emit code for [Node] class");
+        generated.Should().NotBeEmpty("generator should emit code for [Vertex] class");
 
         var generatedSource = generated[0].ToString();
         generatedSource.Should().Contain("public static string GraphLabel => \"Person\"");
-        generatedSource.Should().Contain("public static Quiver.Core.NodeId Insert(");
+        generatedSource.Should().Contain("public static Quiver.Core.VertexId Insert(");
         generatedSource.Should().Contain("public static Person Load(");
         generatedSource.Should().Contain("public static void Update(");
         generatedSource.Should().Contain("public static void Delete(");
@@ -74,14 +74,14 @@ public class GraphNodeGeneratorTests
     [Fact]
     public void Generator_emits_FloatArray_property_accessors()
     {
-        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [Node("Sensor")]
+            [Vertex("Sensor")]
             public partial class Sensor
             {
                 [Property]
@@ -105,7 +105,7 @@ public class GraphNodeGeneratorTests
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphNodeGenerator();
+        var generator = new GraphVertexGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
@@ -121,15 +121,15 @@ public class GraphNodeGeneratorTests
     [Fact]
     public void Generator_emits_MultiValue_List_property()
     {
-        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using System.Collections.Generic;
             using Quiver.Api;
             namespace MyApp;
 
-            [Node("Sensor")]
+            [Vertex("Sensor")]
             public partial class Sensor
             {
                 [Property]
@@ -154,7 +154,7 @@ public class GraphNodeGeneratorTests
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphNodeGenerator();
+        var generator = new GraphVertexGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
@@ -175,7 +175,7 @@ public class GraphNodeGeneratorTests
     }
 }
 
-public class GraphRelationshipGeneratorTests
+public class GraphEdgeGeneratorTests
 {
     [Fact]
     public void Generator_runs_without_exception_on_empty_compilation()
@@ -183,7 +183,7 @@ public class GraphRelationshipGeneratorTests
         var compilation = CSharpCompilation.Create("TestAssembly",
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphRelationshipGenerator();
+        var generator = new GraphEdgeGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
@@ -191,23 +191,23 @@ public class GraphRelationshipGeneratorTests
     }
 
     [Fact]
-    public void Generator_emits_partial_class_for_GraphRelationship()
+    public void Generator_emits_partial_class_for_GraphEdge()
     {
-        var attributeRef = typeof(Quiver.Api.RelationshipAttribute<,>).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.EdgeAttribute<,>).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [Node("Person")]
+            [Vertex("Person")]
             public partial class Person
             {
                 [Property]
                 public string Name { get; set; } = "";
             }
 
-            [Relationship<Person, Person>("KNOWS")]
+            [Edge<Person, Person>("KNOWS")]
             public partial class Knows
             {
                 [Property]
@@ -228,17 +228,17 @@ public class GraphRelationshipGeneratorTests
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generator = new GraphRelationshipGenerator();
+        var generator = new GraphEdgeGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
         driver = driver.RunGenerators(compilation);
 
         var result = driver.GetRunResult();
-        result.GeneratedTrees.Should().NotBeEmpty("generator should emit code for [Relationship] class");
+        result.GeneratedTrees.Should().NotBeEmpty("generator should emit code for [Edge] class");
 
         var generatedSource = result.GeneratedTrees[0].ToString();
         generatedSource.Should().Contain("public static string GraphType => \"KNOWS\"");
-        generatedSource.Should().Contain("public static Quiver.Core.RelationshipId Insert(");
-        generatedSource.Should().Contain("tx.CreateRelationship(from, to, \"KNOWS\")");
+        generatedSource.Should().Contain("public static Quiver.Core.EdgeId Insert(");
+        generatedSource.Should().Contain("tx.CreateEdge(from, to, \"KNOWS\")");
         generatedSource.Should().Contain("public static Knows Load(");
         generatedSource.Should().Contain("public static void Update(");
         generatedSource.Should().Contain("public static void Delete(");

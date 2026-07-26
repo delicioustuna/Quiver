@@ -5,7 +5,7 @@ using Quiver.Index;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-10: B+Tree write-path allocation reduction.
+/// B+Tree write-path allocation reduction.
 /// Measures Insert/Delete allocation on Int64 keys (the dominant hot path).
 /// </summary>
 [SimpleJob(RunStrategy.Monitoring, launchCount: 1, warmupCount: 1, iterationCount: 3)]

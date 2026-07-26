@@ -4,21 +4,21 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="PathDedupOperator"/> drops duplicates by node id column.</summary>
+/// <summary> sentinel: <see cref="PathDedupOperator"/> drops duplicates by vertex id column.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class PathDedupOperatorBench
 {
     private OperatorBenchSeed _seed = null!;
-    private NodeId[] _withDupes = null!;
+    private VertexId[] _withDupes = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _seed = new OperatorBenchSeed("dedup");
-        _withDupes = new NodeId[OperatorBenchSeed.NodeCount];
-        for (int i = 0; i < OperatorBenchSeed.NodeCount; i++)
-            _withDupes[i] = _seed.PersonNodes[i % 100];
+        _withDupes = new VertexId[OperatorBenchSeed.VertexCount];
+        for (int i = 0; i < OperatorBenchSeed.VertexCount; i++)
+            _withDupes[i] = _seed.PersonVertices[i % 100];
     }
 
     [GlobalCleanup]
@@ -27,7 +27,7 @@ public class PathDedupOperatorBench
     [Benchmark]
     public int Dedup_column0()
     {
-        var src = new NodeArraySource(_withDupes);
+        var src = new VertexArraySource(_withDupes);
         using var op = new PathDedupOperator(src, 0);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

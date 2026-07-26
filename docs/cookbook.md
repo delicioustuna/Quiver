@@ -11,52 +11,62 @@ Quiver の典型ユースケースをすぐに動かせるレシピ集。各レ�
 ## 1. 重み付き shortest-path (Dijkstra / A*)
 
 エッジに重みプロパティを乗せ、重み合計が最小の経路を求める。
-`g.WeightedShortestPath(...)` は距離だけでなく経路 (ノード列 / エッジ列) も返す。
+`g.WeightedShortestPath(...)` は距離だけでなく経路 (Vertex列 / エッジ列) も返す。
 
 ```csharp
-var g = tx.G(db.Schema);
+using var tx = db.BeginWriteTransaction();
+var m = tx.Mutate;
+var g = tx.Query;
 
 // 重み付きの道路網を構築
-var s = g.AddNode("Junction").P("name", "S").Next();
-var a = g.AddNode("Junction").P("name", "A").Next();
-var b = g.AddNode("Junction").P("name", "B").Next();
-var t = g.AddNode("Junction").P("name", "T").Next();
+var s = m.AddVertex("Junction").P("name", "S").Next();
+var a = m.AddVertex("Junction").P("name", "A").Next();
+var b = m.AddVertex("Junction").P("name", "B").Next();
+var t = m.AddVertex("Junction").P("name", "T").Next();
 
-g.AddRelationship("ROAD").From(s).To(a).P("weight", 1.0).Next();
-g.AddRelationship("ROAD").From(s).To(b).P("weight", 5.0).Next();
-g.AddRelationship("ROAD").From(a).To(t).P("weight", 2.0).Next();
-g.AddRelationship("ROAD").From(b).To(t).P("weight", 1.0).Next();
+m.AddEdge("ROAD").From(s).To(a).P("weight", 1.0).Next();
+m.AddEdge("ROAD").From(s).To(b).P("weight", 5.0).Next();
+m.AddEdge("ROAD").From(a).To(t).P("weight", 2.0).Next();
+m.AddEdge("ROAD").From(b).To(t).P("weight", 1.0).Next();
 
 // 重み付き最短経路 (Dijkstra)。weight プロパティをエッジ重みとして読む。
 var path = g.WeightedShortestPath(s, t, weightKey: "weight", type: "ROAD");
 if (path.Found)
-    Console.WriteLine($"S→T 最短重み: {path.Distance}, 経由ノード数: {path.Nodes.Count}");
+    Console.WriteLine($"S→T 最短重み: {path.Distance}, 経由Vertex数: {path.Vertices.Count}");
 //  → S→A→T (1.0 + 2.0 = 3.0) が S→B→T (5.0 + 1.0 = 6.0) より短い
 
 // ホップ数だけが必要なら従来どおり ShortestPathTo も使える
-var hops = g.Node(s).ShortestPathTo(t, type: "ROAD").TryNext();
+var hops = g.Vertex(s).ShortestPathTo(t, type: "ROAD").TryNext();
+tx.Commit();
 ```
 
-> A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でノードの座標プロパティから
-> ヒューリスティックを自動生成するか、`WeightedShortestPath(s, t, "weight", heuristic: node => ...)` で
+> A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でVertexの座標プロパティから
+> ヒューリスティックを自動生成するか、`WeightedShortestPath(s, t, "weight", heuristic: vertex => ...)` で
 > 推定残コストを渡す。ヒューリスティックが admissible (consistent) なら Dijkstra と同じ最適解を、
-> より少ないノード展開で得られる。エッジ重みは非負である必要がある。
+> より少ないVertex展開で得られる。エッジ重みは非負である必要がある。
 
 ---
 
 ## 2. MERGE で upsert
 
-冪等な書き込みパターン。同じキーで何度実行しても重複ノードを増やさない。
+冪等な書き込みパターン。同じキーで何度実行しても重複Vertexを増やさない。
 
-> `MergeNode` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (ノード数次第で秒オーダー)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
+> `MergeVertex` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (Vertex数次第で秒オーダー)。MERGE を多用する業務キーには事前に `EditSchema` で索引を作成しておく。
 
 ```csharp
 // データベース起動直後に一度だけ
-db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 
-using var tx = db.BeginTransaction();
+using var tx = db.BeginWriteTransaction();
 
-var (id, created) = tx.MergeNode(
+var (id, created) = tx.MergeVertex(
     "Person",
     "email",
     PropertyValue.FromString("alice@example.com"));
@@ -79,7 +89,7 @@ tx.Commit();
 
 ```csharp
 // graph-first: 先にラベル/プロパティで絞ってから KNN
-var candidates = g.Nodes().HasLabel("Document")
+var candidates = g.Vertices().HasLabel("Document")
                   .Has("language", "ja")
                   .FilterByKnn("doc_v1", queryVec, k: 20)
                   .Has("isPublic", true)
@@ -101,8 +111,8 @@ Cypher の `MATCH (n:Person)-[:KNOWS]->(m:Person)` 相当のパターンを書�
 
 ```csharp
 var pairs = g.Match(
-    GraphPattern.Node("n", "Person")
-                .Out("KNOWS", GraphPattern.Node("m", "Person"))
+    GraphPattern.Vertex("n", "Person")
+                .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
 )
 .Where("n", "age", P.Gt(25L))
 .Return(v => new
@@ -122,14 +132,20 @@ var pairs = g.Match(
 ```csharp
 using var loader = db.BeginStreamingBulkLoad(buildAdjacencyIndex: true);
 
-var personLabel = db.Schema.GetOrCreateLabel("Person");
-var knowsType   = db.Schema.GetOrCreateRelationshipType("KNOWS");
+LabelId personLabel;
+EdgeTypeId knowsType;
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    personLabel = schemaTx.EditSchema.GetOrCreateLabel("Person");
+    knowsType = schemaTx.EditSchema.GetOrCreateEdgeType("KNOWS");
+    schemaTx.Commit();
+}
 
 for (long i = 0; i < 10_000_000; i++)
-    loader.AppendNode(new NodeId(i), personLabel);
+    loader.AppendVertex(new VertexId(i), personLabel);
 
 for (long i = 0; i < 9_999_999; i++)
-    loader.AppendRelationship(new RelationshipId(i), new NodeId(i), new NodeId(i + 1), knowsType);
+    loader.AppendEdge(new EdgeId(i), new VertexId(i), new VertexId(i + 1), knowsType);
 
 loader.Commit();
 ```
@@ -140,10 +156,10 @@ loader.Commit();
 
 ボイラープレートを削減し、リファクタリング耐性を上げる。
 
-> `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは `db.EnsureIndexes<T>()` (一括) もしくは `db.CreateIndex<T>(p => p.Prop)` (単一) で作成する。文字列直書きの `db.Schema.CreateIndex(...)` も引き続き使えるが、属性値との二重管理になる。
+> `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは書き込みトランザクションの `EditSchema.EnsureIndexes<T>()` または `EditSchema.CreateIndex<T>(p => p.Prop)` で作成する。
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person
 {
     [Indexed]   // SourceGen マーカー — 実体インデックスは下で作成
@@ -154,16 +170,20 @@ public partial class Person
     public int Age { get; set; }
 }
 
-// 初期化時に一度だけ — [Indexed] 付きプロパティを SourceGen 情報からまとめて作成。
-db.EnsureIndexes<Person>();
+// 初期化時に一度だけ。
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.EnsureIndexes<Person>();
+    schemaTx.Commit();
+}
 
-using var tx = db.BeginTransaction();
-var g = tx.G(db.Schema);
+using var tx = db.BeginWriteTransaction();
+var g = tx.Query;
 
-var id = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
+var id = tx.Mutate.InsertIndexed(new Person { Name = "Alice", Age = 30 });
 var loaded = g.Load<Person>(id);
 loaded.Age = 31;
-g.Update(id, loaded);
+tx.Mutate.Update(id, loaded);
 
 var found = Person.FindByName(tx, "Alice");
 ```
@@ -175,22 +195,22 @@ var found = Person.FindByName(tx, "Alice");
 WAL の PageImage replay によりコミット済みデータはクラッシュ後も完全復元される。
 
 ```csharp
-NodeId savedId;
+VertexId savedId;
 
 // 書き込み
-using (var db = GraphDatabase.Open(dir))
-using (var tx = db.BeginTransaction())
+using (var db = QuiverDatabase.Open(dir))
+using (var tx = db.BeginWriteTransaction())
 {
-    savedId = tx.CreateNode("Config");
+    savedId = tx.CreateVertex("Config");
     tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
     tx.Commit();
 }
 
 // 再オープン: コミット済みデータは復元される
-using (var db = GraphDatabase.Open(dir))
-using (var tx = db.BeginTransaction())
+using (var db = QuiverDatabase.Open(dir))
+using (var tx = db.BeginWriteTransaction())
 {
-    System.Diagnostics.Debug.Assert(tx.NodeExists(savedId));
+    System.Diagnostics.Debug.Assert(tx.VertexExists(savedId));
 }
 ```
 
@@ -202,7 +222,7 @@ using (var tx = db.BeginTransaction())
 
 ```csharp
 var stats = db.Diagnostics.GetStatistics();
-Console.WriteLine($"Nodes={stats.NodeCount}, Rels={stats.RelationshipCount}");
+Console.WriteLine($"Vertices={stats.VertexCount}, Edges={stats.EdgeCount}");
 Console.WriteLine($"BufferPool ヒット率 = {stats.BufferPoolHits} / {stats.BufferPoolHits + stats.BufferPoolMisses}");
 
 var report = db.Diagnostics.CheckConsistency();
@@ -248,9 +268,12 @@ dotnet-counters monitor -p <pid> --counters Quiver-EventSource
 | `active-tx-count` | gauge | アクティブな transaction 数 |
 | `tx-commit-per-sec` | rate | コミットスループット |
 | `tx-abort-per-sec` | rate | アボートスループット |
-| `tx-deadlock-victim-count` | rate | DeadlockDetector が中断した犠牲者 / 秒 |
-| `lock-wait-avg-ms` | gauge | 平均ロック取得待ち (ms) |
-| `lock-contention-count` | gauge | 累計コンテンション件数 |
+| `writer-wait-duration-ms` | gauge | writer lease 取得待ち時間の累計 (ms) |
+| `writer-contention-count` | gauge | writer lease の競合を観測した累計回数 |
+| `active-snapshot-count` | gauge | active な reader snapshot 数 |
+| `oldest-snapshot-age-seconds` | gauge | 最古 reader snapshot の経過時間 |
+| `maintenance-rebuild-active` | gauge | 実行中の derived index rebuild 数 |
+| `maintenance-gc-active` | gauge | 実行中の garbage collection 数 |
 | `index-orphan-count` | gauge | `CheckIndexConsistency()` 最新観測の orphan 件数 |
 | `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) |
 | `crash-recovery-count` | rate | crash recovery 起動回数 (通常 0) |
@@ -287,7 +310,7 @@ sealed class MyEmbedder(MyModel model) : IChunkEmbedder
 using Quiver;
 using Quiver.Rag;
 
-using var db = GraphDatabase.Open("rag.quiver");
+using var db = QuiverDatabase.Open("rag.quiver");
 
 // 索引 (sourceId / ベクトル / 全文) はコンストラクタで冪等作成される。
 var store = new RagStore(db, new RagStoreOptions
@@ -309,6 +332,8 @@ var doc = new IngestedDocument(
 
 var result = await store.UpsertDocumentAsync(doc, embedder);
 // result.Unchanged == true なら contentHash 一致の no-op (再取込はべき等)。
+// 内容変更なら result.ReplacedDocumentVertexId が旧 ID、
+// result.DocumentVertexId が新 ID。必要な利用者関係だけを明示的に再アンカーする。
 
 // 検索: queryText + queryVector の両方で RRF ハイブリッド、片方だけでも可。
 var searcher = new RagSearcher(store);
@@ -324,10 +349,16 @@ IReadOnlyList<RagHit> hits = searcher.Search(
     });
 
 foreach (var h in hits)
-    Console.WriteLine($"#{h.Rank} 〈{h.Document.Title}〉{h.HeadingPath}: {h.ChunkText}");
+{
+    Console.WriteLine(
+        $"#{h.Rank} {h.Score.FusionMethod} score={h.Score.FusedScore:F6} " +
+        $"bm25={h.Score.Bm25Score} vector={h.Score.VectorSimilarity}");
+    Console.WriteLine($"〈{h.Document.Title}〉{h.HeadingPath}: {h.ChunkText}");
+}
 
 // 文書差し替え (内容変更時) と削除。どちらも単一トランザクションで原子的。
-await store.UpsertDocumentAsync(updatedDoc, embedder);  // 旧チャンクを消して入れ直す
+UpsertResult replaced = await store.UpsertDocumentAsync(updatedDoc, embedder);
+// 旧 Document、旧チャンク、旧 ID に接続した Edge と参加 Nexus は cascade 済み。
 store.DeleteDocument("docs/intro.md");
 ```
 
@@ -341,6 +372,12 @@ store.DeleteDocument("docs/intro.md");
   `Title` / `Metadata` だけ変更しても no-op になり既存値が保たれる (再チャンク・再埋め込み回避)。
 - **差し替え・削除は単一トランザクション。** 取込中にプロセスが落ちても「旧版が無傷」か
   「新版が完全」のどちらかで、中間状態は残らない。クラッシュ安全性はこの原子性に委ねている。
+- **内容変更は Document ID を維持しない。** `UpsertResult` は `ReplacedDocumentVertexId` と
+  `DocumentVertexId` の対応を返す。旧 ID に接続した利用者 Edge と参加 Nexus は cascade 削除され、
+  新 ID へ暗黙継承されない。呼び出し側は返却された対応から、所有する関係だけを明示的に再アンカーする。
+- **`RagHit.Score` は検索経路の内訳を返す。** `Bm25Score`、`VectorSimilarity`、
+  `FusedScore`、`FusionMethod`、`ReciprocalRankConstant` を使い、片方のチャンネルを使わない場合は
+  対応する生 score が `null` になる。
 - **埋め込みはトランザクションの外で先に実行される。** `IChunkEmbedder` が失敗しても DB は無変更。
   `Dimensions` は `RagStoreOptions.EmbeddingDimensions` と一致している必要がある。
 - **見出し語は BM25 でも引ける。** 見出しパスを前置した `searchText` を全文索引の対象にしているため、
@@ -348,7 +385,7 @@ store.DeleteDocument("docs/intro.md");
 - **メタデータの絞り込みは 2 系統。** 等値条件は `MetadataEquals` (検索前に母集団を絞る candidate-side
   push-down → recall hole が起きない)。範囲条件など複雑な述語は `MetadataFilter` (後段フィルタ。上位 K 件
   取得後に除外するため、フィルタが大半を弾くと該当文書があっても 0 件になり得る)。
-- **頻繁な再取込でも ANN グラフは劣化しにくい。** 削除/上書きで HNSW を再リンクし (近傍修復 + 物理削除)、
+- **頻繁な再取込でも ANN グラフを in-place 更新しない。** 削除と上書きは flat delta へ記録し、
   削除が累積すると自動再構築する。長期間きわめて高頻度の churn を続ける場合のみ手動再構築を検討する。
 - 全文索引が未作成の場合 `RagStore.FullTextEnabled == false` となり、
   検索は KNN のみで動作する。
@@ -364,7 +401,7 @@ store.DeleteDocument("docs/intro.md");
 
 ```csharp
 // KNOWS 先があればその先を、無ければ自分自身を返す。
-var names = g.Nodes().HasLabel("Person")
+var names = g.Vertices().HasLabel("Person")
     .Coalesce(s => s.Out("KNOWS"), s => s)
     .Values("name").ToList();
 ```
@@ -372,8 +409,8 @@ var names = g.Nodes().HasLabel("Person")
 ### Optional — マッチしなければ元のまま
 
 ```csharp
-// Cypher の OPTIONAL MATCH 相当。Out("KNOWS") が空なら元ノードをそのまま通す。
-var names = g.Nodes().HasLabel("Person")
+// Cypher の OPTIONAL MATCH 相当。Out("KNOWS") が空なら元Vertexをそのまま通す。
+var names = g.Vertices().HasLabel("Person")
     .Optional(s => s.Out("KNOWS"))
     .Dedup().Values("name").ToList();
 ```
@@ -382,7 +419,7 @@ var names = g.Nodes().HasLabel("Person")
 
 ```csharp
 // KNOWS 先と USE 先を両方放出する。
-var names = g.Nodes().HasLabel("Person").Has("name", "Alice")
+var names = g.Vertices().HasLabel("Person").Has("name", "Alice")
     .Union(s => s.Out("KNOWS"), s => s.Out("USE"))
     .Values("name").ToList();
 ```
@@ -391,41 +428,41 @@ var names = g.Nodes().HasLabel("Person").Has("name", "Alice")
 
 ```csharp
 // (Person)→KNOWS→(Person) のペアを射影で取り出す。
-var pairs = g.Nodes().HasLabel("Person").As("src")
+var pairs = g.Vertices().HasLabel("Person").As("src")
     .Out("KNOWS").As("dst")
     .Select(t => (
-        Src: Encoding.UTF8.GetString(tx.GetProperty(t.Node("src"), "name").Utf8StringValue),
-        Dst: Encoding.UTF8.GetString(tx.GetProperty(t.Node("dst"), "name").Utf8StringValue)));
+        Src: Encoding.UTF8.GetString(tx.GetProperty(t.Vertex("src"), "name").Utf8StringValue),
+        Dst: Encoding.UTF8.GetString(tx.GetProperty(t.Vertex("dst"), "name").Utf8StringValue)));
 ```
 
 ### 型安全 Where (式ツリー)
 
 ```csharp
 // LINQ ライクな式ツリー。&&、比較、StartsWith/EndsWith/Contains に対応。
-var result = g.Nodes<Person>()
+var result = g.Vertices<Person>()
     .Where(p => p.Age > 26 && p.Name.StartsWith("C"))
     .ToList();
 ```
 
 ---
 
-## 12. 型安全な集合 write シンク (AddRelationship / MergeRelationship)
+## 12. 型安全な集合 write シンク (AddEdge / MergeEdge)
 
 `TypedGraphTraversal<TSource>` の拡張メソッドで、始点集合と終点集合の直積に対して
-辺を一括生成 / upsert する。端点の型整合は `IGraphRelationship<TRel,TSource,TTarget>`
+辺を一括生成 / upsert する。端点の型整合は `IGraphEdge<TRel,TSource,TTarget>`
 制約でコンパイル時に強制される。
 
 > **Coalesce / Optional ブランチ内での変異 (upsert) は非対応。**
 > Quiver のブランチは読み取り専用で、`fold` / `unfold` / `constant` も非対応のため、
 > Gremlin の `coalesce(V().has(...), addV(...))` パターンは成立しない。
-> 代替として `MergeNode` / `MergeRelationship` + C# `if` を使う (§2 / §6 参照)。
+> 代替として `MergeVertex` / `MergeEdge` + C# `if` を使う (§2 / §6 参照)。
 
-### AddRelationship — 直積で常に辺を生成
+### AddEdge — 直積で常に辺を生成
 
 ```csharp
 // B で始まる Person × C で始まる Tool に Use 辺を張る (プロパティ付き)。
-long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-    .AddRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+long n = g.Vertices<Person>().Where(p => p.Name.StartsWith("B"))
+    .AddEdge(g.Vertices<Tool>().Where(t => t.Name.StartsWith("C")),
              (p, t) => new Use { Note = $"{p.Name}→{t.Name}" });
 // → Bob × {Cutter, Compiler} = 2 本
 ```
@@ -433,15 +470,15 @@ long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
 プロパティ無し版は SourceGen 糖衣で型引数を省ける:
 
 ```csharp
-long n = g.Nodes<Person>().AddUse(g.Nodes<Tool>());
+long n = g.Vertices<Person>().AddUse(g.Vertices<Tool>());
 ```
 
-### MergeRelationship — 冪等 upsert
+### MergeEdge — 冪等 upsert
 
 ```csharp
 // 2 回目は全て既存ヒット (Matched)。プロパティは ON CREATE のみ書かれる。
-var (created, matched) = g.Nodes<Person>()
-    .MergeRelationship(g.Nodes<Tool>(),
+var (created, matched) = g.Vertices<Person>()
+    .MergeEdge(g.Vertices<Tool>(),
                (p, t) => new Use { Note = "auto" });
 ```
 
@@ -449,8 +486,8 @@ var (created, matched) = g.Nodes<Person>()
 
 ```csharp
 // 各 Person の頭文字で始まる Tool だけに辺を張る。
-long n = g.Nodes<Person>()
-    .AddRelationship(p => g.Nodes<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
+long n = g.Vertices<Person>()
+    .AddEdge(p => g.Vertices<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
              (p, t) => new Use { Note = p.Name });
 ```
 
@@ -464,7 +501,7 @@ SourceGenerator が生成する型保存ホップ糖衣 (§6) とシームレス
 ### スキーマ定義 (前提)
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person
 {
     [Property] public string Name { get; set; } = "";
@@ -472,7 +509,7 @@ public partial class Person
     [Property] public string Role { get; set; } = "";
 }
 
-[Node]
+[Vertex]
 public partial class Post
 {
     [Property] public string Title { get; set; } = "";
@@ -480,7 +517,7 @@ public partial class Post
     [Property] public bool Featured { get; set; }
 }
 
-[Relationship<Person, Post>("WROTE")]
+[Edge<Person, Post>("WROTE")]
 public partial class Wrote
 {
     [Property] public string Note { get; set; } = "";
@@ -513,7 +550,7 @@ public static class BlogDsl
 {
     // ── 起点 ──
     public static TypedGraphTraversal<Person> Authors(this GraphTraversalSource g)
-        => g.Nodes<Person>().Where(p => p.Role == "author");
+        => g.Vertices<Person>().Where(p => p.Role == "author");
 
     // ── Person フィルタ ──
     public static TypedGraphTraversal<Person> Adults(this TypedGraphTraversal<Person> t)
@@ -543,7 +580,7 @@ var hits = g.Authors()
     .ToList();   // List<Post>
 
 // エッジ述語付き生成メソッドとの組み合わせ
-var drafts = g.Nodes<Person>()
+var drafts = g.Vertices<Person>()
     .Adults()
     .Wrote(e => e.Note.Contains("draft"))
     .Since(cutoff)
@@ -552,30 +589,30 @@ var drafts = g.Nodes<Person>()
 
 ### 型なしトラバーサルとの境界
 
-`TypedGraphTraversal<T>` から `.Out(string)` 等で `GraphTraversal<NodeId>` に降格すると、`TypedGraphTraversal<T>` 用の DSL メソッドは使えなくなる。型付きホップで辿れるなら常にそちらを使う。
+`TypedGraphTraversal<T>` から `.Out(string)` 等で `GraphTraversal<VertexId>` に降格すると、`TypedGraphTraversal<T>` 用の DSL メソッドは使えなくなる。型付きホップで辿れるなら常にそちらを使う。
 
 ```csharp
-// NG: .Out("WROTE") は GraphTraversal<NodeId> を返すため .Featured() が見えない
-g.Nodes<Person>().Adults()
-    .Out("WROTE")    // → GraphTraversal<NodeId>
+// NG: .Out("WROTE") は GraphTraversal<VertexId> を返すため .Featured() が見えない
+g.Vertices<Person>().Adults()
+    .Out("WROTE")    // → GraphTraversal<VertexId>
     .Featured();     // ❌ コンパイルエラー
 
 // OK: SourceGenerator の .Wrote() は TypedGraphTraversal<Post> を返す
-g.Nodes<Person>().Adults()
+g.Vertices<Person>().Adults()
     .Wrote()         // → TypedGraphTraversal<Post>
     .Featured();     // ✅
 ```
 
-`GraphTraversal<NodeId>` (型なし) 用の DSL を書くこともできるが、ドメイン固有の型安全性は失われる:
+`GraphTraversal<VertexId>` (型なし) 用の DSL を書くこともできるが、ドメイン固有の型安全性は失われる:
 
 ```csharp
 // 型なし DSL も定義可能 (ラベル名の文字列指定)
 public static class UntypedBlogDsl
 {
-    public static GraphTraversal<NodeId> People(this GraphTraversalSource g)
-        => g.Nodes().HasLabel("Person");
+    public static GraphTraversal<VertexId> People(this GraphTraversalSource g)
+        => g.Vertices().HasLabel("Person");
 
-    public static GraphTraversal<NodeId> Adults(this GraphTraversal<NodeId> t)
+    public static GraphTraversal<VertexId> Adults(this GraphTraversal<VertexId> t)
         => t.Has("Age", P.Gte(18L));
 }
 
@@ -583,9 +620,9 @@ public static class UntypedBlogDsl
 var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 ```
 
-### MergeRelationship のコスト
+### MergeEdge のコスト
 
-`MergeRelationship` の存在判定は始点ノードの同一型 outgoing edge を線形スキャン
+`MergeEdge` の存在判定は始点Vertexの同一型 outgoing edge を線形スキャン
 する (**O(out-degree)**)。実測で **~116 ns/edge** の勾配 + ~2.5µs の固定コスト。
 
 | 同一型 out-degree | 1 回の hit | 1 回の miss (scan + create) |
@@ -595,9 +632,26 @@ var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 | 1,000 | ~116µs | ~136µs |
 
 低 fan-out (degree < 50) では 1 回数µs で実用上問題にならない。
-**degree 1,000 を超える高 fan-out ノードで大量の直積 MergeRelationship を回す場合は
+**degree 1,000 を超える高 fan-out Vertexで大量の直積 MergeEdge を回す場合は
 コストが顕在化する** (10×10 直積 × degree 1,000 ≈ 12ms)。その場合は
-`AddRelationship` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
+`AddEdge` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
 アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
-詳細: [MergeRelationship の degree 依存コスト](benchmark-results.md#mergerelationship-の-degree-依存コスト)。
+詳細は[MergeEdgeのdegree依存コスト](benchmark-results.md#mergeedgeのdegree依存コスト)を参照。
+
+---
+
+## 14. 同期カーソルのキャンセル
+
+```csharp
+using var cursor = traversal.AsCursor();
+while (cursor.MoveNext())
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    Process(cursor.Current);
+}
+```
+
+長い走査をキャンセル可能にする場合は、`AsCursor()` で同期カーソルを取得し、各反復で
+`CancellationToken.ThrowIfCancellationRequested()` を呼ぶ。カーソルは `using` で必ず破棄する。
+同じトランザクションと列挙子を複数の操作フローから同時に使わない。
 

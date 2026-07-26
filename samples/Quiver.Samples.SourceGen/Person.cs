@@ -2,9 +2,9 @@ using Quiver.Api;
 
 namespace Quiver.Samples.SourceGen;
 
-// [Node] / [Indexed] / [Property] を付けると、Roslyn SourceGenerator が
+// [Vertex] / [Indexed] / [Property] を付けると、Roslyn SourceGenerator が
 // Insert / InsertIndexed / Load / Update / Delete / FindByName を自動生成する。
-[Node("Person")]
+[Vertex("Person")]
 public partial class Person
 {
     [Indexed("idx_person_name")]
@@ -26,7 +26,7 @@ public partial class Person
     public List<string> Tags { get; set; } = [];
 }
 
-[Relationship<Person, Person>("KNOWS")]
+[Edge<Person, Person>("KNOWS")]
 public partial class Knows
 {
     [Property]

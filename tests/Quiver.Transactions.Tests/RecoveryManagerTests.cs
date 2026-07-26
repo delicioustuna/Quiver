@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage;
 using Quiver.Storage.Wal;
@@ -35,7 +35,7 @@ public class RecoveryManagerTests : IDisposable
     public void Recover_returns_last_lsn_after_begin_and_commit()
     {
         var txId = new TransactionId(1);
-        _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+        _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
         long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
         _wal.FlushTo(commitLsn);
 
@@ -47,7 +47,7 @@ public class RecoveryManagerTests : IDisposable
     public void Recover_returns_last_lsn_after_aborted_transaction()
     {
         var txId = new TransactionId(2);
-        _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+        _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
         long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
         _wal.FlushTo(abortLsn);
 
@@ -61,7 +61,7 @@ public class RecoveryManagerTests : IDisposable
         for (int i = 0; i < 5; i++)
         {
             var txId = new TransactionId(i);
-            _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+            _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
             _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
         }
         long lastLsn = _wal.CurrentLsn;
@@ -77,8 +77,8 @@ public class RecoveryManagerTests : IDisposable
         var committed = new TransactionId(10);
         var aborted = new TransactionId(11);
 
-        _wal.Append(WalRecordType.Begin, committed, ReadOnlySpan<byte>.Empty);
-        _wal.Append(WalRecordType.Begin, aborted, ReadOnlySpan<byte>.Empty);
+        _wal.Append(WalRecordType.BeginWrite, committed, ReadOnlySpan<byte>.Empty);
+        _wal.Append(WalRecordType.BeginWrite, aborted, ReadOnlySpan<byte>.Empty);
         _wal.Append(WalRecordType.Commit, committed, ReadOnlySpan<byte>.Empty);
         long lastLsn = _wal.Append(WalRecordType.Abort, aborted, ReadOnlySpan<byte>.Empty);
         _wal.FlushTo(lastLsn);
@@ -104,16 +104,17 @@ public class RecoveryManagerTests : IDisposable
                 IPagedFile srcFile = new PagedFile(srcPath);
                 srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(42);
-                _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
-                WalPageContext.Begin(_wal, txId);
-                dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
+                _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
+                dataPage = srcFile.AllocatePage(PageKind.VertexRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("RECOVERED").CopyTo(ph.Data);
                 ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
-                WalPageContext.FlushPending(); // 案C: コミット直前にバッファを WAL へ追記
+                writeSet.FlushPending(); // コミット直前にバッファをWALへ追記
                 long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(commitLsn);
-                WalPageContext.End();
+                _wal.ActiveWriteSet = null;
                 srcFile.Dispose();
             }
 
@@ -151,18 +152,19 @@ public class RecoveryManagerTests : IDisposable
                 IPagedFile srcFile = new PagedFile(srcPath);
                 srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(99);
-                _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
-                WalPageContext.Begin(_wal, txId);
-                dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
+                _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
+                dataPage = srcFile.AllocatePage(PageKind.VertexRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("ABORTED!").CopyTo(ph.Data);
                 ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
                 // PageImage を WAL へ追記したうえで、Commit ではなく Abort で終える。
                 // recovery は「WAL に PageImage はあるが Commit が無い」場合に skip するはず。
-                WalPageContext.FlushPending();
+                writeSet.FlushPending();
                 long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(abortLsn);
-                WalPageContext.End();
+                _wal.ActiveWriteSet = null;
                 srcFile.Dispose();
             }
 
@@ -175,6 +177,64 @@ public class RecoveryManagerTests : IDisposable
             // フェーズ 3: abort されたページが replay されないことを確認する。
             // dst file には page 0 (meta) だけがあり、dataPage (page 1) は適用されない。
             dstFile.PageCount.Should().Be(1, "aborted PageImage must not be written to the recovery target");
+        }
+        finally
+        {
+            Directory.Delete(dataDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ApplyPageImage_does_not_replace_a_page_with_a_newer_lsn()
+    {
+        string dataDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dataDir);
+        string sourcePath = Path.Combine(dataDir, "source.db");
+        string destinationPath = Path.Combine(dataDir, "destination.db");
+        try
+        {
+            PageId pageId;
+            var txId = new TransactionId(77);
+            using (IPagedFile source = new PagedFile(sourcePath))
+            {
+                source.EnableWalLogging(1, _wal);
+                pageId = source.AllocatePage(PageKind.VertexRecord);
+                _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
+                using (var page = source.PinForWrite(pageId))
+                    System.Text.Encoding.UTF8.GetBytes("OLDER").CopyTo(page.Data);
+                writeSet.FlushPending();
+                long commitLsn = _wal.Append(
+                    WalRecordType.Commit,
+                    txId,
+                    ReadOnlySpan<byte>.Empty);
+                _wal.FlushTo(commitLsn);
+                _wal.ActiveWriteSet = null;
+            }
+
+            using IPagedFile destination = new PagedFile(destinationPath);
+            PageId destinationPage = destination.AllocatePage(PageKind.VertexRecord);
+            destinationPage.Should().Be(pageId);
+            var destinationWrite = destination.PinForWrite(destinationPage);
+            try
+            {
+                System.Text.Encoding.UTF8.GetBytes("NEWER").CopyTo(destinationWrite.Data);
+                destinationWrite.Lsn = 10_000;
+            }
+            finally
+            {
+                destinationWrite.Dispose();
+            }
+            destination.Flush();
+
+            var registry = new Dictionary<byte, IPagedFile> { { 1, destination } };
+            new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
+
+            using var recovered = destination.PinForRead(destinationPage);
+            System.Text.Encoding.UTF8.GetString(recovered.Data[..5])
+                .Should().Be("NEWER");
+            PageHeader.ReadLsn(recovered.Raw).Should().Be(10_000);
         }
         finally
         {

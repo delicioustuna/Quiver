@@ -1,85 +1,118 @@
-# MVCC & トランザクション
+# MVCC とトランザクション
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+
+## 公開トランザクション能力 {#public-capabilities}
+
+公開 API は読み取り能力を `IReadTransaction`、書き込み能力を `IWriteTransaction` として分離する。
+`BeginReadTransaction()` は `IReadTransaction` を返し、query、スキーマ参照、エンティティ参照だけを公開する。
+`BeginWriteTransaction()` は `IWriteTransaction` を返し、読み取り能力に加えて mutation、スキーマ編集、commit、rollback、savepoint を公開する。
+トラバーサルは `Query`、mutation DSL は書き込みハンドルの `Mutate` から開始する。
+読み取りハンドルに書き込みメソッドを持たせて実行時に拒否する設計は採用しない。
 
 ## 分離レベル {#isolation}
 
-Quiver は **snapshot isolation** をサポートする。各トランザクションは、その開始時の LSN
-(`SnapshotLsn`) 時点におけるデータベースの一貫したスナップショットを見る。ライタはリーダを
-ブロックせず、並行するリーダはそれぞれ自分の一貫したスナップショットを見る。
+Quiver は snapshot isolation を提供する。
+データベースインスタンスごとの `TransactionManager` は、一つの `WriterLease` と `SnapshotRegistry` を所有する。
+書き込みトランザクションは同じ lease で直列化し、読み取りトランザクションは writer を待たずに開始する。
+読み取り開始時の状態は `Snapshot(CommittedHighWater, AbortedGaps, ActiveWriterId?)` として固定する。
+読み取りは自分の snapshot より後に commit した version を参照しない。
+開始時に active だった writer の version も、その reader からは commit 後まで不可視のままである。
+writer 自身の `xmin` と `xmax` は自己可視性として扱う。
 
-## トランザクションのライフサイクル {#lifecycle}
+## entity と property {#entities-and-properties}
 
-```
-Active → Preparing → Committed
-  │
-  └──────────────→ Aborted
+グラフ entity は `Vertex`、`Edge`、`Nexus` の三種類である。
+`Property` は独立した entity ではない。
+Property は owner の identity と property key に束縛された versioned value である。
+永続 identity は `PropertyAddress(Owner, Key)` であり、public な property ID は持たない。
+各 owner header は `PropertyVersionRef` の先頭を保持し、列挙 API は ID を公開しない `PropertyCursor` を返す。
+
+Single cardinality の更新は、現在の可視 version に `xmax` を設定して新しい version を chain の先頭へ追加する。
+Set cardinality の追加は既存 version を終了せずに新しい version を追加し、削除は一致する version に `xmax` を設定する。
+property record に保存した owner と読み取り側の owner が一致しない chain は corruption として拒否する。
+
+Vertex、Edge、Nexus の Generation は各 entity version sidecar を正本とする。
+Property version は `xmin`、`xmax`、Generation を 84 バイトの version record に保持する。
+同じ Sequence でも Generation が異なる参照は別 incarnation として扱い、stale な参照を返さない。
+Vertex、Edge、Nexus の `EntityVersionMeta` は `xmin`、`xmax`、Generation だけを持つ 24 バイト record である。
+sidecar format version は 4 であり、旧 40 バイト record は読み替えない。
+
+## ライフサイクル {#lifecycle}
+
+```text
+Active -> Preparing -> Committed
+  |
+  +-----------------> Aborted
 ```
 
 | 状態 | 値 | 意味 |
-|---|---|---|
-| `Active` | 1 | 進行中、読み書き可能 |
-| `Preparing` | 2 | コミット準備フェーズ |
-| `Committed` | 3 | 永続的にコミット済み（WAL フラッシュ済み） |
-| `Aborted` | 4 | ロールバック済み（明示的、または Commit なしの Dispose 時） |
+|---|---:|---|
+| `Active` | 1 | 読み書きを受け付ける |
+| `Preparing` | 2 | commit を準備している |
+| `Committed` | 3 | `Commit` が WAL へ永続化された |
+| `Aborted` | 4 | プロセス内の変更を巻き戻した |
 
-## トランザクション ID {#tx-id}
+`TransactionId` は単調に増える識別子である。
+`CommittedTxRegistry` は durable commit の高水位と、高水位以下で中止した writer の gap を記録する。
+可視性は高水位、gap、開始時の active writer、自己 transaction ID だけで判定する。
 
-`TransactionId` は単調増加する識別子である。`CommittedTxRegistry` は、どのトランザクション ID が
-コミット済みかを追跡し、可視性の判断を可能にする。
+writer lease の取得は既定で最大 5 秒待機する。
+`WriterContentionMode.Wait` は `WriterWaitTimeout` まで待ち、取得できなければ `WriterBusyException` を送出する。
+`WriterContentionMode.FailFast` は二本目の writer を待たずに同じ例外を送出する。
+facade、backend、manager、bulk、schema、maintenance の mutation 入口は同じ lease を使う。
 
-## スナップショット状態 {#snapshot}
+## commit {#commit}
 
-`SnapshotState` は、あるトランザクションから見えるコミット済みトランザクションの集合を捕捉する。
-列スキャン集約はこれを直接用いて、オペレータパイプラインを介さずに可視性チェックを行う。
+書き込みトランザクションは変更ページを transaction-owned write set に保持する。
+commit は最終 `PageImage` を WAL へ出力し、`Commit` を追記して、その LSN まで fsync する。
+この fsync が成功した時点が durability の境界である。
 
-## コミット {#commit}
+durable commit 後に checkpoint や通知処理が失敗しても、トランザクションを abort 状態へ戻さない。
+`Commit` の後へ `Abort` を追記しない。
+durable commit 後の導出 view publish が失敗したインスタンスは faulted となり、新しい operation を拒否する。
 
-1. `Commit` レコードを WAL に書き込む
-2. WAL をディスクにフラッシュ（同期）
-3. `OnCommitted` フックを発火
-4. しきい値到達かつアクティブトランザクションが無い場合、チェックポイントを起動
+active writer の dirty page は commit fsync 前にデータファイルへ書かない。
+commit はデータページの flush を待たず、dirty page は後続 checkpoint または退避で書く。
+バッファプール内に退避可能な frame がなくなると `TransactionTooLargeException` を送出し、その writer を自動 abort して lease を解放する。
 
-## アボート / ロールバック {#abort}
+## abort と savepoint {#abort-savepoint}
 
-`AbortUndoHandler` が undo を処理する:
+各 write pin は変更前のページを transaction-owned write set に保存する。
+明示 abort と commit なしの dispose は before-image を LIFO 順に適用してプロセス内の変更を復元し、`Abort` を WAL へ記録する。
 
-1. **物理 undo**: `_beforeImageStack` から before-image を LIFO 順で復元する
-   （CLR レコードによるページ単位の undo）
-2. **論理 undo**: `UndoFtLogical` が FT リーフ mutation を LIFO 順で巻き戻す
-3. `Abort` レコードを WAL に書き込む
-4. `OnRolledBack` フックを発火
+`Savepoint` は現在の before-image 境界を記録する。
+`RollbackTo` は指定境界より後の before-image を逆順に適用し、後から作られた savepoint を無効にする。
+`ReleaseSavepoint` は境界だけを解放し、変更を親スコープへ残す。
 
-Commit なしの Dispose は暗黙のアボートを引き起こす。
+全文 definition catalog の更新は同じ page write set を使う。
+全文 delta segment body は commit 前に fsyncし、artifact参照を持つmanifest pageをprimary propertyと同じwrite setへ追加する。
+commit hook は durable manifest generation を in-memory snapshotへ反映し、abort時はtransaction-local overlayを破棄する。
+`RollbackTo` は savepoint 後の全文 mutation buffer も同じ境界まで切り戻す。
+全文専用の論理 undo stack や補償 WAL record は持たない。
 
-## セーブポイント {#savepoints}
+## スキーマのスナップショット {#schema-snapshot}
 
-`SavepointId` はトランザクション内のセーブポイントを識別する。セーブポイントは SQL のセマンティクスに従う:
+ラベル、Edge 型、Nexus 型、ロール、プロパティキー、索引定義はデータと同じ書き込みトランザクションに属する。
+書き込みトランザクションは `EditSchema` で未コミットの変更を参照できる。
+別の reader と `QuiverDatabase.Schema` は、その変更が commit されるまで参照できない。
+reader の `Schema` は開始時の不変な `ISchemaCatalog` を保持し、後続 commit によって変化しない。
+rollback と `RollbackTo` はスキーマページと索引定義を同じ before-image 境界まで戻す。
+未知の名前を読み取り API に渡した場合は空結果または missing を返し、トークンを作成しない。
 
-- `Savepoint(name?)` → セーブポイントを作成し、`SavepointId` を返す
-- `RollbackTo(SavepointId)` → セーブポイント以降の変更を undo し、内側のセーブポイントを無効化する
-- `ReleaseSavepoint(SavepointId)` → セーブポイントを消費し、変更を親スコープにマージする
+## crash recovery {#crash-recovery}
 
-### Before-Image スタック {#before-image-stack}
+crash recovery の winner は checksum が有効な明示的な `Commit` record だけで決める。
+winner の `PageImage` は redo し、commit record を持たない transaction の image は適用しない。
+page LSN が image LSN 以上なら適用済みとして読み飛ばし、loser undo pass は実行しない。
 
-`WalPageContext` は、セーブポイントごとのバケットからなる `_beforeImageStack` を保持する。各
-`PinForWrite` は現在のバケットに before-image を取得する。`RollbackTo` は対象セーブポイントより
-新しいバケットから before-image を復元する。
-
-### 全文の論理 Undo {#ft-logical-undo}
-
-全文 postings / norms のリーフは（page-image ではなく）論理 WAL を用いるため、その undo も論理的である。
-FT 論理 undo ログ (`_ftUndoStack`) は `_beforeImageStack` と並行して、セーブポイントレベルごとに
-バケット化される:
-
-- **完全アボート** は全バケットの逆操作を（LIFO で）ライブ FT ツリーに再生する。
-- **`RollbackTo(savepoint)`** は `>= level` のバケットのみを再生し、加えて各逆操作を
-  **補償用の `FtLeafMutation`** として WAL に書き込む。FT リーフ mutation は eager にログされるため、
-  セーブポイントで破棄された前向きレコードはコミット中のトランザクションの WAL に既に存在する。
-  補償レコードはリカバリの redo (Pass 2b) をロールバック後の状態に収束させる。補償レコード自体は
-  undo スタックに積まれないため、後の完全アボートで二重に巻き戻されることはない。
+詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。
 
 ## 読み取り専用トランザクション {#read-only}
 
-読み取り専用トランザクションはスナップショットを取得するが、WAL への書き込みや write ロックの取得は
-行わない。`IsolationLevel.SnapshotIsolation` を `readOnly: true` で用いる。
+読み取り専用トランザクションは snapshot を取得するが、WAL record と page before-image を生成しない。
+読み取り専用 transaction から write API を呼び出すことはできない。
+`SnapshotRegistry` は active reader 数、最古 reader の経過時間、開始位置、高水位を保持する。
+長時間 reader は警告対象にできるが、強制失効しない。
+`IDiagnosticsApi.GetSnapshotDiagnostics()` はこの状態を public な診断値として返す。
+OpenTelemetry と EventSource は active snapshot 数と最古 snapshot age を同じ registry から観測する。

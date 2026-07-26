@@ -6,7 +6,7 @@ namespace Quiver.Transactions;
 public enum CheckpointPolicy
 {
     /// <summary>
-    /// <c>GraphDatabaseOptions.CheckpointThresholdBytes</c> の固定値を使い続ける既定挙動。
+    /// <c>QuiverDatabaseOptions.CheckpointThresholdBytes</c> の固定値を使い続ける既定挙動。
     /// </summary>
     Fixed,
 

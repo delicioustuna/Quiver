@@ -15,13 +15,13 @@ public sealed class FullTextSearchTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FullTextSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts3_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -30,19 +30,19 @@ public sealed class FullTextSearchTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body)
+    private VertexId AddDoc(string body)
     {
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
         return n;
     }
 
-    private List<NodeId> Search(string query, int k)
+    private List<VertexId> Search(string query, int k)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     [Fact]
@@ -81,14 +81,72 @@ public sealed class FullTextSearchTests : IDisposable
     {
         // DoD: a document written earlier in a transaction is found by g.Search
         // within that same (uncommitted) transaction.
-        using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        using var tx = _db.BeginWriteTransaction();
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("inflight searchable text"));
 
-        var hits = tx.G(_db.Schema).Search(Index, "inflight", k: 10).ToList();
+        var hits = tx.Query.Search(Index, "inflight", k: 10).ToList();
         hits.Should().ContainSingle().Which.Should().Be(n);
 
         tx.Commit();
+    }
+
+    [Fact]
+    public void Read_your_own_update_replaces_committed_text()
+    {
+        VertexId document = AddDoc("old text");
+        Search("old", 10).Should().ContainSingle();
+
+        using var tx = _db.BeginWriteTransaction();
+        tx.SetProperty(document, "body", PropertyValue.FromString("new text"));
+
+        tx.Query.Search(Index, "old", 10).ToList().Should().BeEmpty();
+        tx.Query.Search(Index, "new", 10).ToList()
+            .Should().ContainSingle().Which.Should().Be(document);
+        tx.Commit();
+    }
+
+    [Fact]
+    public void Reader_keeps_manifest_visible_at_its_snapshot()
+    {
+        VertexId document = AddDoc("before update");
+        using var oldReader = _db.BeginReadTransaction();
+
+        using (var update = _db.BeginWriteTransaction())
+        {
+            update.SetProperty(
+                document,
+                "body",
+                PropertyValue.FromString("after update"));
+            update.Commit();
+        }
+
+        oldReader.Query.Search(Index, "before", 10).ToList()
+            .Should().ContainSingle().Which.Should().Be(document);
+        using var newReader = _db.BeginReadTransaction();
+        newReader.Query.Search(Index, "before", 10).ToList().Should().BeEmpty();
+        newReader.Query.Search(Index, "after", 10).ToList()
+            .Should().ContainSingle().Which.Should().Be(document);
+    }
+
+    [Fact]
+    public void Rolled_back_overlay_does_not_enter_later_snapshots()
+    {
+        AddDoc("committed text");
+        using (var write = _db.BeginWriteTransaction())
+        {
+            VertexId transient = write.CreateVertex("Doc");
+            write.SetProperty(
+                transient,
+                "body",
+                PropertyValue.FromString("transient text"));
+            write.Query.Search(Index, "transient", 10).ToList()
+                .Should().ContainSingle().Which.Should().Be(transient);
+            write.Rollback();
+        }
+
+        Search("transient", 10).Should().BeEmpty();
+        Search("committed", 10).Should().ContainSingle();
     }
 
     [Fact]
@@ -114,14 +172,14 @@ public sealed class FullTextSearchTests : IDisposable
     }
 
     [Fact]
-    public void Deleted_node_is_not_returned()
+    public void Deleted_vertex_is_not_returned()
     {
         var doc = AddDoc("secret content");
         Search("secret", k: 10).Should().ContainSingle().Which.Should().Be(doc);
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            tx.DeleteNode(doc);
+            tx.DeleteVertex(doc);
             tx.Commit();
         }
 
@@ -131,19 +189,19 @@ public sealed class FullTextSearchTests : IDisposable
     [Fact]
     public void Search_composes_with_Out_traversal()
     {
-        NodeId author;
-        NodeId doc;
-        using (var tx = _db.BeginTransaction())
+        VertexId author;
+        VertexId doc;
+        using (var tx = _db.BeginWriteTransaction())
         {
-            author = tx.CreateNode("Author");
-            doc = tx.CreateNode("Doc");
+            author = tx.CreateVertex("Author");
+            doc = tx.CreateVertex("Doc");
             tx.SetProperty(doc, "body", PropertyValue.FromString("quiver report"));
-            tx.CreateRelationship(doc, author, "WROTE");
+            tx.CreateEdge(doc, author, "WROTE");
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var authors = rtx.G(_db.Schema).Search(Index, "quiver", k: 10).Out("WROTE").ToList();
+        using var rtx = _db.BeginReadTransaction();
+        var authors = rtx.Query.Search(Index, "quiver", k: 10).Out("WROTE").ToList();
 
         authors.Should().ContainSingle().Which.Should().Be(author);
     }

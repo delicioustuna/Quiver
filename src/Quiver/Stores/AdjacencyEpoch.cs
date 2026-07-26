@@ -5,8 +5,8 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 不変の base 隣接ビューの永続メタデータ: base と delta を分離する relationship-id watermark、
-/// 単調増加する compact epoch、および最後のビルド以降に削除された base リレーションシップの集合
+/// 不変の base 隣接ビューの永続メタデータ: base と delta を分離する edge-id watermark、
+/// 単調増加する compact epoch、および最後のビルド以降に削除された base Edgeの集合
 /// (tombstone)。
 ///
 /// 旧来は <c>adj.epoch</c> サイドカーファイルに置かれていたが、
@@ -16,7 +16,7 @@ namespace Quiver.Storage.Records;
 /// 透過的に巻き戻る (in-memory ハッシュセットは <see cref="Reload"/> で再同期する)。
 ///
 /// テナントレイアウト:
-///   論理 page 1 (header): Magic(4) "QEPC" | Version(2) | Reserved(2) | Epoch(8) | BaseRelHwm(8) |
+///   論理 page 1 (header): Magic(4) "QEPC" | Version(2) | Reserved(2) | Epoch(8) | BaseEdgeHwm(8) |
 ///                          TombstoneCount(4)
 ///   論理 page 2+        : ソート済み int64 tombstone 配列 (1 ページ 1020 件)
 ///
@@ -32,50 +32,50 @@ internal sealed class AdjacencyEpoch
     private readonly IPagedFile _file;
     private readonly object _lock = new();
     private long _epoch;
-    private long _baseRelHwm;
+    private long _baseEdgeHwm;
     private HashSet<long> _tombstones;
 
     public long Epoch { get { lock (_lock) return _epoch; } }
-    public long BaseRelHwm { get { lock (_lock) return _baseRelHwm; } }
+    public long BaseEdgeHwm { get { lock (_lock) return _baseEdgeHwm; } }
     public int TombstoneCount { get { lock (_lock) return _tombstones.Count; } }
 
-    private AdjacencyEpoch(IPagedFile file, long epoch, long baseRelHwm, IEnumerable<long>? tombstones)
+    private AdjacencyEpoch(IPagedFile file, long epoch, long baseEdgeHwm, IEnumerable<long>? tombstones)
     {
         _file = file;
         _epoch = epoch;
-        _baseRelHwm = baseRelHwm;
+        _baseEdgeHwm = baseEdgeHwm;
         _tombstones = tombstones is null ? new HashSet<long>() : new HashSet<long>(tombstones);
     }
 
-    public bool IsTombstoned(long relId)
+    public bool IsTombstoned(long edgeId)
     {
-        lock (_lock) return _tombstones.Contains(relId);
+        lock (_lock) return _tombstones.Contains(edgeId);
     }
 
     /// <summary>
-    /// <paramref name="relId"/> を削除済みとしてマークする。base 範囲外の id は no-op —
-    /// delta の削除はリレーションシップストア自身のリンクリスト解除で吸収され、tombstone は不要。
+    /// <paramref name="edgeId"/> を削除済みとしてマークする。base 範囲外の id は no-op —
+    /// delta の削除はEdgeストア自身のリンクリスト解除で吸収され、tombstone は不要。
     /// </summary>
-    public void Tombstone(long relId)
+    public void Tombstone(long edgeId)
     {
         lock (_lock)
         {
-            if (relId >= _baseRelHwm) return;
-            if (_tombstones.Add(relId))
+            if (edgeId >= _baseEdgeHwm) return;
+            if (_tombstones.Add(edgeId))
                 PersistLocked();
         }
     }
 
     /// <summary>
     /// compact 後にメタデータを差し替える: <see cref="Epoch"/> をインクリメント、
-    /// 新しい <see cref="BaseRelHwm"/> を採用、tombstone をすべて破棄する。
+    /// 新しい <see cref="BaseEdgeHwm"/> を採用、tombstone をすべて破棄する。
     /// </summary>
-    public void ResetAfterCompact(long newBaseRelHwm)
+    public void ResetAfterCompact(long newBaseEdgeHwm)
     {
         lock (_lock)
         {
             _epoch++;
-            _baseRelHwm = newBaseRelHwm;
+            _baseEdgeHwm = newBaseEdgeHwm;
             _tombstones.Clear();
             PersistLocked();
         }
@@ -83,7 +83,7 @@ internal sealed class AdjacencyEpoch
 
     /// <summary>
     /// abort / recovery がテナントページをディスク内容へ戻した後、in-memory の
-    /// epoch / baseRelHwm / tombstone をテナントから読み直す。<see cref="BinaryGraphStorageBackendFactory"/>
+    /// epoch / baseEdgeHwm / tombstone をテナントから読み直す。<see cref="BinaryGraphStorageBackendFactory"/>
     /// の ReloadStoreMeta から呼ばれる。
     /// </summary>
     public void Reload()
@@ -92,15 +92,15 @@ internal sealed class AdjacencyEpoch
         {
             var (epoch, hwm, tombs) = ReadFile(_file);
             _epoch = epoch;
-            _baseRelHwm = hwm;
+            _baseEdgeHwm = hwm;
             _tombstones = tombs;
         }
     }
 
     /// <summary>新規 base ビュー構築時 (bulk load) に epoch=1 / 指定 hwm / tombstone 空で初期化する。</summary>
-    public static AdjacencyEpoch CreateNew(IPagedFile file, long baseRelHwm)
+    public static AdjacencyEpoch CreateNew(IPagedFile file, long baseEdgeHwm)
     {
-        var e = new AdjacencyEpoch(file, 1, baseRelHwm, null);
+        var e = new AdjacencyEpoch(file, 1, baseEdgeHwm, null);
         lock (e._lock) e.PersistLocked();
         return e;
     }
@@ -171,21 +171,21 @@ internal sealed class AdjacencyEpoch
             BinaryPrimitives.WriteUInt32LittleEndian(body, Magic);
             BinaryPrimitives.WriteUInt16LittleEndian(body[4..], Version);
             BinaryPrimitives.WriteInt64LittleEndian(body[8..], _epoch);
-            BinaryPrimitives.WriteInt64LittleEndian(body[16..], _baseRelHwm);
+            BinaryPrimitives.WriteInt64LittleEndian(body[16..], _baseEdgeHwm);
             BinaryPrimitives.WriteInt32LittleEndian(body[24..], sorted.Length);
         }
         finally { hh.Dispose(); }
 
-        long node = 0;
+        long vertex = 0;
         for (int page = 0; page < dataPages; page++)
         {
             var dh = _file.PinForWrite(new PageId(2 + page));
             try
             {
                 var body = dh.Data;
-                int slots = (int)Math.Min(TombstonesPerPage, sorted.Length - node);
-                for (int s = 0; s < slots; s++, node++)
-                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], sorted[node]);
+                int slots = (int)Math.Min(TombstonesPerPage, sorted.Length - vertex);
+                for (int s = 0; s < slots; s++, vertex++)
+                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], sorted[vertex]);
             }
             finally { dh.Dispose(); }
         }

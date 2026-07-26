@@ -5,33 +5,35 @@ namespace Quiver.Transactions;
 
 /// <summary>
 /// バックエンドの access methods コントラクト。
-/// オペレータは <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
-/// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
+/// オペレータは <see cref="ITransaction.Vertices"/> / <see cref="ITransaction.Edges"/> /
+/// <see cref="ITransaction.AdjacencySegments"/> を直接叩く代わりに、scan / seek / expand を
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
-/// (リンクリスト、隣接ブロック、リレーションシップスキャン等) を選択できる。
+/// (リンクリスト、隣接ブロック、Edgeスキャン等) を選択できる。
 /// </summary>
 internal interface IGraphAccessMethods
 {
-    /// <summary>生存中のノードを列挙する。任意でラベル 1 件に絞り込める。</summary>
-    IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
+    /// <summary>生存中のVertexを列挙する。任意でラベル 1 件に絞り込める。</summary>
+    IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null);
 
     /// <summary>
     /// ラベル絞り込みが O(|L|) で走るかを backend が申告する capability。
-    /// バイナリ backend は <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
+    /// バイナリ backend は <c>LabelVertexIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> / 単体テストや ANN bypass 等 sidecar の無い backend では <c>false</c>。
     /// optimizer (PendingKnnBuilder の push-down 閾値) が graph-first / vector-first の選択に用いる。
     /// </summary>
     bool HasFastLabelIndex => false;
 
     /// <summary>
-    /// 登録済みベクトルインデックスの <see cref="VectorIndexSpec"/> を取得する。
+    /// 登録済みベクトルインデックスの内部 descriptor を取得する。
     /// PendingKnnBuilder が dim を取得して dim-aware piecewise threshold を引くのに使う。
     /// 既定実装は <c>false</c> — ベクトルメタを expose しない backend では dim awareness を無効化し、
     /// 単一閾値経路にフォールバックする。
     /// </summary>
-    bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
+    bool TryGetVectorIndex(
+        string indexName,
+        out VectorIndexDescriptor descriptor)
     {
-        spec = default!;
+        descriptor = default!;
         return false;
     }
 
@@ -40,7 +42,12 @@ internal interface IGraphAccessMethods
     /// <see cref="PropertyValue.Type"/> に基づき型ごとのインデックスへルーティングする。
     /// インデックスが存在しないか、型が未対応の場合は空シーケンスを返す。
     /// </summary>
-    IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key);
+    IEnumerable<VertexId> SeekVerticesByIndex(
+        ITransaction tx,
+        ScalarIndexDefinition definition,
+        PropertyKeyId propertyKey,
+        LabelId? scope,
+        PropertyValue key);
 
     /// <summary>
     /// <paramref name="source"/> に接続するエッジのうち、要求された方向と任意の型フィルタに
@@ -50,9 +57,9 @@ internal interface IGraphAccessMethods
     /// </summary>
     ExpandCursor Expand(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter);
+        EdgeTypeId? typeFilter);
 
     /// <summary>
     /// <see cref="Expand"/> が放出するエッジ数の推定値。オプティマイザのプラン選択で
@@ -60,9 +67,9 @@ internal interface IGraphAccessMethods
     /// </summary>
     double EstimateExpandCardinality(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter);
+        EdgeTypeId? typeFilter);
 
     /// <summary>
     /// expand カーソルが fast path (例: 隣接ブロックバッファが満杯になった場合) を諦めて
@@ -76,12 +83,16 @@ internal interface IGraphAccessMethods
     /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
     /// 未設定 / 削除済み / 世代不一致は <c>false</c>。
     /// </summary>
-    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+    bool TryGetVector(
+        ITransaction transaction,
+        EntityRef owner,
+        string indexName,
+        Span<float> destination)
         => false;
 
     /// <summary>
-    /// KNN access path。バックエンドの <see cref="IVectorStore"/> に委譲し、
-    /// オペレータがベクトル検索をファーストクラスのスキャンソースとして扱えるようにする。
+    /// KNN access path。オペレータがベクトル検索をファーストクラスの
+    /// スキャンソースとして扱えるようにする。
     /// query スパンは内部でコピーするので、呼び出し側が呼び出し以降も保持する必要はない。
     /// </summary>
     /// <remarks>
@@ -89,9 +100,14 @@ internal interface IGraphAccessMethods
     /// 符号反転して "高いほど近い" スコアに揃える) で結果を返す。
     /// ベクトルストアを持たないバックエンドは <see cref="NotSupportedException"/> を投げる。
     /// </remarks>
-    VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+    VectorSearchCursor KnnSearch(
+        ITransaction transaction,
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
         => throw new NotSupportedException(
-            "このバックエンドは KnnSearch を実装していません。access methods に IVectorStore を接続してください。");
+            "このバックエンドはtransaction-scoped KNNを実装していません。");
 
     /// <summary>
     /// 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる access path。
@@ -99,14 +115,16 @@ internal interface IGraphAccessMethods
     /// 単一 snapshot で Q×N をスコアリングするオーバーライドを提供する。
     /// </summary>
     IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        ITransaction transaction,
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(queries);
         var arr = new VectorSearchCursor[queries.Count];
         for (int i = 0; i < queries.Count; i++)
-            arr[i] = KnnSearch(indexName, queries[i].Span, k);
+            arr[i] = KnnSearch(transaction, indexName, queries[i].Span, k, options);
         return arr;
     }
 
@@ -119,56 +137,40 @@ internal interface IGraphAccessMethods
     /// </summary>
     /// <remarks>
     /// スコア順序は維持され、類似度降順で返る。
-    /// <paramref name="candidates"/> の <see cref="EntityCandidateSet.Kind"/> がインデックスの
-    /// <see cref="EntityKind"/> と異なる場合は常に一致無しになる — これは構成誤りで、
+    /// <paramref name="candidates"/> の owner kind がインデックスの
+    /// <see cref="EntityKind"/> と異なる場合は常に一致無しになる。これは構成誤りで、
     /// オペレータ層が顕在化させる責務であり、本契約違反ではない。
     /// </remarks>
     VectorSearchCursor KnnSearchFiltered(
+        ITransaction transaction,
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
-        => KnnSearchFilteredOversample(this, indexName, query, k, candidates);
-
-    /// <summary>
-    /// 既定実装の共有ヘルパ。クラス側 override が高速経路を選んだあと、
-    /// fallback 経路 (非 InMemory backend) でも同じオーバーサンプル挙動を呼べるよう抽出した。
-    /// </summary>
-    internal static VectorSearchCursor KnnSearchFilteredOversample(
-        IGraphAccessMethods access,
-        string indexName,
-        ReadOnlySpan<float> query,
-        int k,
-        EntityCandidateSet candidates)
+        IReadOnlySet<EntityRef> candidates,
+        VectorSearchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k は正の整数である必要があります。");
-
         if (candidates.Count == 0)
             return EmptyVectorSearchCursor.Instance;
-
-        int oversampleCap = Math.Max(k * 64, candidates.Count * 2);
-        int candidateK = Math.Min(Math.Max(k * 4, k + candidates.Count / 4), oversampleCap);
-
-        while (true)
+        var hits = new List<VectorSearchResult>(k);
+        using (var cursor = KnnSearch(
+                   transaction,
+                   indexName,
+                   query,
+                   Math.Max(k, candidates.Count),
+                   options))
         {
-            var hits = new List<VectorSearchResult>(k);
-            using (var cursor = access.KnnSearch(indexName, query, candidateK))
+            while (cursor.MoveNext())
             {
-                while (cursor.MoveNext())
-                {
-                    var hit = cursor.Current;
-                    if (!candidates.Contains(hit.EntityKind, hit.EntityId)) continue;
-                    hits.Add(hit);
-                    if (hits.Count >= k) break;
-                }
+                VectorSearchResult hit = cursor.Current;
+                if (!candidates.Contains(hit.Owner))
+                    continue;
+                hits.Add(hit);
+                if (hits.Count >= k)
+                    break;
             }
-
-            if (hits.Count >= k || candidateK >= oversampleCap)
-                return new MaterializedVectorSearchCursor(hits);
-
-            candidateK = Math.Min(candidateK * 2, oversampleCap);
         }
+        return new MaterializedVectorSearchCursor(hits);
     }
 }
 
@@ -197,14 +199,14 @@ internal abstract class ExpandCursor : IDisposable
     /// <summary>次のエッジに進む。エッジを使い切ったら false を返す。</summary>
     public abstract bool MoveNext();
 
-    /// <summary>現在エッジの隣接ノード ID。</summary>
-    public abstract NodeId Neighbor { get; }
+    /// <summary>現在エッジの隣接Vertex ID。</summary>
+    public abstract VertexId Neighbor { get; }
 
-    /// <summary>現在エッジのリレーションシップ ID。</summary>
-    public abstract RelationshipId Relationship { get; }
+    /// <summary>現在エッジのEdge ID。</summary>
+    public abstract EdgeId Edge { get; }
 
     /// <summary>
-    /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの
+    /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。adjacency segment 裏付けの
     /// カーソルは inline payload lane を転送する。それ以外のカーソルは 0 を返す。
     /// 有効な payload 種別が Double のときは <see cref="BitConverter.Int64BitsToDouble"/> で
     /// <see cref="double"/> として再解釈する。

@@ -1,7 +1,6 @@
 namespace Quiver.Core;
 
-// EntityKind は EntityId.cs で定義。ベクトルコードは Node / Relationship のみを使用し、
-// Property は診断 / カタログ用に予約されている (IVectorStore 実装は拒否する)。
+// EntityKind は EntityId.cs で定義。ベクトルコードは Vertex / Edge / Nexus を使用する。
 
 /// <summary>
 /// ベクトルインデックスが用いる距離尺度。インデックス作成時に固定され以後変更できない —
@@ -17,50 +16,159 @@ public enum DistanceMetric : byte
     Euclidean = 3,
 }
 
+// ElementType は現時点で Float32 のみだが、量子化埋め込み (int8 / binary 等) をモデル側が
+// 直接出力する将来に備え、格納表現をインデックス作成時の契約として今のうちに固定しておく。
+// これにより新しい表現の追加が「既存 DB の再解釈」ではなく「新フィールド値の追加」になり、
+// 旧バージョンのリーダーも未知の表現を明確なエラーで拒否できる。演算経路の抽象化
+// (スコアリングカーネルの切替) は 2 つ目の表現を実装するときに内部リファクタとして導入する。
+
 /// <summary>
-/// ベクトルインデックスの構造種別。<see cref="HnswFlat"/> は HNSW ANN グラフ + payload を保持し
-/// KNN 検索 (vector-first / graph-first) の両方に使える。<see cref="FlatOnly"/> は payload のみ
-/// 保持し HNSW を構築しない — <c>ApplyDyadic</c> (brute-force graph-first) 専用。
+/// ベクトルの要素がインデックス内でどう表現されるか (格納と距離計算の数値型)。
+/// インデックス作成時に固定され、以後変更できない。
 /// </summary>
-public enum VectorIndexKind : byte
+/// <remarks>
+/// 現在サポートされるのは <see cref="Float32"/> のみ。このプロパティは、埋め込みモデルが
+/// 量子化ベクトル (8 ビット整数など) を直接出力する場合に将来対応できるよう、
+/// フォーマット契約として予約されている。未対応の値を指定すると
+/// <see cref="VectorException"/> が発生する。
+/// </remarks>
+public enum VectorElementType : byte
 {
-    /// <summary>HNSW ANN グラフ + payload (既定)。KNN / ApplyDyadic 両対応。</summary>
-    HnswFlat = 0,
-    /// <summary>payload のみ。HNSW を構築せず <c>SetVector</c> の upsert コストを削減する。
-    /// vector-first <c>KnnSearch</c> は <see cref="VectorException"/> を投げる。</summary>
-    FlatOnly = 1,
+    /// <summary>32 ビット浮動小数点 (IEEE 754 single)。既定。</summary>
+    Float32 = 0,
+}
+
+internal sealed record VectorIndexDescriptor(
+    string Name,
+    EntityKind OwnerKind,
+    PropertyKeyId TargetPropertyKeyId,
+    string? TargetScope,
+    int Dimensions,
+    DistanceMetric Metric,
+    VectorElementType ElementType = VectorElementType.Float32,
+    int HnswM = 32,
+    int HnswMMax0 = 64,
+    int HnswMaxLayers = 8,
+    int HnswEfConstruction = 400,
+    VectorSegmentPolicy? SegmentPolicy = null);
+
+internal static class VectorIndexDescriptorValidator
+{
+    public static void Validate(VectorIndexDescriptor descriptor)
+    {
+        if (string.IsNullOrEmpty(descriptor.Name))
+            throw new VectorException("Vector index name must not be empty.");
+        // 新しい要素表現の追加時はここの許可リストを広げ、スコアリングカーネル /
+        // payload レコード長 / cache slab の型をあわせて分岐させること。
+        if (descriptor.ElementType != VectorElementType.Float32)
+            throw new VectorException(
+                $"Vector index '{descriptor.Name}' has unsupported element type " +
+                $"{descriptor.ElementType}; this version supports only {VectorElementType.Float32}.");
+        if (descriptor.Dimensions <= 0)
+            throw new VectorException(
+                $"Vector index '{descriptor.Name}' must have positive dimensions (was {descriptor.Dimensions}).");
+        if (descriptor.HnswM is < 2 or > byte.MaxValue)
+            throw Invalid(descriptor, nameof(descriptor.HnswM), descriptor.HnswM, "2..255");
+        if (descriptor.HnswMMax0 < descriptor.HnswM || descriptor.HnswMMax0 > byte.MaxValue)
+            throw Invalid(
+                descriptor,
+                nameof(descriptor.HnswMMax0),
+                descriptor.HnswMMax0,
+                $"{descriptor.HnswM}..255");
+        if (descriptor.HnswMaxLayers is < 1 or > byte.MaxValue)
+            throw Invalid(
+                descriptor,
+                nameof(descriptor.HnswMaxLayers),
+                descriptor.HnswMaxLayers,
+                "1..255");
+        if (descriptor.HnswEfConstruction < descriptor.HnswM
+            || descriptor.HnswEfConstruction > 1_000_000)
+            throw Invalid(
+                descriptor,
+                nameof(descriptor.HnswEfConstruction),
+                descriptor.HnswEfConstruction,
+                $"{descriptor.HnswM}..1000000");
+        VectorSegmentPolicy policy = descriptor.SegmentPolicy ?? new();
+        if (policy.MaximumDeltaEntries <= 0)
+            throw Invalid(
+                descriptor,
+                nameof(policy.MaximumDeltaEntries),
+                policy.MaximumDeltaEntries,
+                "1..2147483647");
+        if (policy.MaximumSegments <= 0)
+            throw Invalid(
+                descriptor,
+                nameof(policy.MaximumSegments),
+                policy.MaximumSegments,
+                "1..2147483647");
+    }
+
+    private static VectorException Invalid(
+        VectorIndexDescriptor descriptor,
+        string parameter,
+        int value,
+        string expected) =>
+        new(
+            $"Vector index '{descriptor.Name}' has invalid {parameter}={value}; expected {expected}.");
+}
+
+/// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
+/// <param name="Owner">マッチしたownerのfull typed identity。</param>
+/// <param name="Score">類似度スコア。</param>
+public readonly record struct VectorSearchResult(
+    EntityRef Owner,
+    float Score)
+{
+    internal VectorSearchResult(EntityKind kind, long localId, float score)
+        : this(EntityRef.Create(
+            kind,
+            EntityRef.UnpackSequence(localId),
+            EntityRef.UnpackGeneration(localId)),
+            score)
+    {
+    }
+
+    internal EntityKind EntityKind => Owner.Kind;
+    internal long EntityId => Owner.Value;
 }
 
 /// <summary>
-/// ベクトルインデックスの宣言的仕様。インデックス作成時に確定し backend カタログに永続化される。
-/// <see cref="SourcePropertyKeyId"/> は埋め込み元となる値を持つプロパティを指す — プロバイダ /
-/// 正規化の扱いは <c>Quiver.Embedding</c> 側にある。
+/// KNN 検索の精度と探索量を制御する実行時オプション。
+/// 永続フォーマットやインデックス構築品質には影響しない。
 /// </summary>
-/// <param name="Name">インデックス名 (一意)。</param>
-/// <param name="EntityKind">対象エンティティ種別 (Node / Relationship)。</param>
-/// <param name="SourcePropertyKeyId">埋め込み元の値を持つプロパティキー。</param>
-/// <param name="Dimensions">ベクトルの次元数。</param>
-/// <param name="Metric">スコアリングに使う距離尺度。</param>
-/// <param name="ProviderId">埋め込みプロバイダ識別子。</param>
-/// <param name="NormalizationProfile">正規化プロファイル名 (任意)。</param>
-public sealed record VectorIndexSpec(
-    string Name,
-    EntityKind EntityKind,
-    PropertyKeyId SourcePropertyKeyId,
-    int Dimensions,
-    DistanceMetric Metric,
-    string ProviderId,
-    string? NormalizationProfile = null,
-    VectorIndexKind IndexKind = VectorIndexKind.HnswFlat);
+public sealed class VectorSearchOptions
+{
+    /// <summary>
+    /// HNSW の探索ビーム幅。大きいほど再現率が上がりやすい一方、検索時間と一時メモリが増える。
+    /// 既定値 200 は従来の固定値と同一。
+    /// </summary>
+    public int EfSearch { get; init; } = 200;
 
-/// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
-/// <param name="EntityKind">マッチしたエンティティの種別。</param>
-/// <param name="EntityId">マッチしたエンティティの ID。</param>
-/// <param name="Score">類似度スコア。</param>
-public readonly record struct VectorSearchResult(
-    EntityKind EntityKind,
-    long EntityId,
-    float Score);
+    /// <summary>
+    /// フィルタ付き HNSW 検索で <c>k</c> に掛ける候補のオーバーサンプル係数。
+    /// 既定値 8 は従来の固定値と同一。
+    /// </summary>
+    public int FilteredOversampleFactor { get; init; } = 8;
+}
+
+internal static class VectorSearchOptionsValidator
+{
+    private static readonly VectorSearchOptions DefaultOptions = new();
+
+    public static VectorSearchOptions Normalize(VectorSearchOptions? options)
+    {
+        options ??= DefaultOptions;
+        if (options.EfSearch is < 1 or > 1_000_000)
+            throw new VectorException(
+                $"{nameof(VectorSearchOptions.EfSearch)} must be in 1..1000000 " +
+                $"(was {options.EfSearch}).");
+        if (options.FilteredOversampleFactor is < 1 or > 1_024)
+            throw new VectorException(
+                $"{nameof(VectorSearchOptions.FilteredOversampleFactor)} must be in 1..1024 " +
+                $"(was {options.FilteredOversampleFactor}).");
+        return options;
+    }
+}
 
 /// <summary>
 /// KNN 結果を遅延列挙するカーソル。<see cref="MoveNext"/> が <c>false</c> を返すまで呼び続け、
@@ -78,76 +186,20 @@ public abstract class VectorSearchCursor : IDisposable
 }
 
 /// <summary>
-/// float ベクトルの格納と KNN 実行を担う最小のコア契約。テキスト処理 / プロバイダ呼び出し /
-/// リトライ / タスクログは意図的に除外され、それらは <c>Quiver.Embedding</c> にある
-/// 。
+/// float ベクトルの格納と KNN 実行を担う最小のコア契約。
+/// テキスト処理、モデル呼び出し、リトライは呼び出し側が担う。
 /// </summary>
-public interface IVectorStore
+internal interface IVectorDefinitionCatalog
 {
-    /// <summary>新しいベクトルインデックスを作成する。</summary>
-    void CreateVectorIndex(VectorIndexSpec spec);
+    void Create(VectorIndexDescriptor descriptor);
 
-    /// <summary>指定名のベクトルインデックスを削除する。</summary>
-    void DropVectorIndex(string name);
+    void Drop(string name);
 
-    /// <summary>
-    /// 登録済み index の <see cref="VectorIndexSpec"/> を取得する。
-    /// optimizer / push-down rewrite が dim 等のメタ情報を必要とするために用いる。
-    /// 既定実装は <c>false</c> を返す — メタを取得できない backend は dim awareness 無しの
-    /// 旧経路にフォールバックする。
-    /// </summary>
-    bool TryGetIndex(string name, out VectorIndexSpec spec)
-    {
-        spec = default!;
-        return false;
-    }
+    bool TryGet(string name, out VectorIndexDescriptor descriptor);
 
-    /// <summary>登録済みベクトルインデックスの一覧を返す。</summary>
-    IReadOnlyList<VectorIndexSpec> ListVectorIndexes() => [];
+    IReadOnlyList<VectorIndexDescriptor> List();
 
-    /// <summary>指定エンティティのベクトルを設定 (上書き) する。</summary>
-    void SetVector(
-        EntityKind kind,
-        long entityId,
-        string indexName,
-        ReadOnlySpan<float> vector);
-
-    /// <summary>指定エンティティのベクトルをインデックスから除去する。</summary>
-    void RemoveVector(EntityKind kind, long entityId, string indexName);
-
-    /// <summary>
-    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
-    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
-    /// 未設定 / 削除済み / 世代不一致 (slot 再利用による stale binding) は <c>false</c>。
-    /// </summary>
-    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => false;
-
-    /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を検索する。</summary>
-    VectorSearchCursor KnnSearch(
-        string indexName,
-        ReadOnlySpan<float> query,
-        int k);
-
-    /// <summary>
-    /// 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる。
-    /// <see cref="ReadOnlySpan{T}"/> は <see cref="IReadOnlyList{T}"/> に格納できないため、
-    /// 入力は <see cref="ReadOnlyMemory{T}"/> 配列で受ける。既定実装は個別 <see cref="KnnSearch"/>
-    /// を Q 回呼ぶフォールバック。in-memory backend は単一 snapshot 上で
-    /// 「Q 個のクエリ × N 件のコーパス」を gather-then-score でまとめて評価する。
-    /// </summary>
-    /// <remarks>返却順序は入力 <paramref name="queries"/> と一致する。</remarks>
-    IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
-        string indexName,
-        IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
-    {
-        ArgumentNullException.ThrowIfNull(queries);
-        var arr = new VectorSearchCursor[queries.Count];
-        for (int i = 0; i < queries.Count; i++)
-            arr[i] = KnnSearch(indexName, queries[i].Span, k);
-        return arr;
-    }
+    void Reload();
 }
 
 /// <summary>
@@ -155,4 +207,4 @@ public interface IVectorStore
 /// 不正な <c>k</c> 等) を表す例外。
 /// </summary>
 public sealed class VectorException(string message, Exception? inner = null)
-    : GraphDbException(message, inner!);
+    : QuiverException(message, inner!);

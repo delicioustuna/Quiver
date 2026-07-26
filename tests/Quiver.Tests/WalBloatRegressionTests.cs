@@ -6,12 +6,12 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// 案A (checkpoint+truncate 配線) + 案C (TX 内ページイメージ・コアレス) の回帰センチネル。
+/// checkpoint + truncate 配線とトランザクション内 PageImage coalescing の回帰センチネル。
 ///
 /// FilterChainExpandBenchmarks の GlobalSetup で WAL が単発 160 GB に肥大した不具合の再発防止。
 /// 根本原因は (1) UnpinDirty が毎回フルページ 8KB を WAL に追記し、(2) checkpoint/truncate が
 /// production から一度も呼ばれず、(3) FlushMeta() がエッジ作成ごとに同一ヘッダページを再ログ
-/// していたこと。案C で 1 トランザクション内の同一ページを最新版 1 件に畳み込み、案A で
+/// していたこと。1 トランザクション内の同一ページを最新版 1 件に畳み込み、
 /// しきい値超過時に全データページを flush して WAL を truncate する。
 /// </summary>
 public sealed class WalBloatRegressionTests : IDisposable
@@ -38,41 +38,41 @@ public sealed class WalBloatRegressionTests : IDisposable
     }
 
     /// <summary>
-    /// filterchain ベンチ GlobalSetup を縮小したグラフ構築 — ノードを 1 TX、
+    /// filterchain ベンチ GlobalSetup を縮小したグラフ構築 — Vertexを 1 TX、
     /// エッジを <paramref name="batchSize"/> 本ごとにバッチ commit する。生成したエッジ数を返す。
     /// 各バッチ commit 後に WAL サイドカーの peak サイズを <see cref="_peakWalBytes"/> へ記録する。
     /// </summary>
-    private long BuildGraph(GraphDatabaseOptions? options, int nodeCount, int avgDegree, int batchSize)
+    private long BuildGraph(QuiverDatabaseOptions? options, int vertexCount, int avgDegree, int batchSize)
     {
         var rnd = new Random(42);
-        var nodeIds = new NodeId[nodeCount];
+        var vertexIds = new VertexId[vertexCount];
         _peakWalBytes = 0;
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            for (int i = 0; i < nodeCount; i++)
-                nodeIds[i] = tx.CreateNode("Person");
+            for (int i = 0; i < vertexCount; i++)
+                vertexIds[i] = tx.CreateVertex("Person");
             tx.Commit();
         }
         SampleWal();
 
         long created = 0;
-        var batchTx = db.BeginTransaction();
+        var batchTx = db.BeginWriteTransaction();
         try
         {
-            for (int i = 0; i < nodeCount; i++)
+            for (int i = 0; i < vertexCount; i++)
             {
                 for (int d = 0; d < avgDegree; d++)
                 {
-                    batchTx.CreateRelationship(nodeIds[i], nodeIds[rnd.Next(nodeCount)], "KNOWS");
+                    batchTx.CreateEdge(vertexIds[i], vertexIds[rnd.Next(vertexCount)], "KNOWS");
                     if (++created % batchSize == 0)
                     {
                         SampleWal(); // checkpoint compaction 直前のサイズも測る
                         batchTx.Commit();
                         batchTx.Dispose();
                         SampleWal();
-                        batchTx = db.BeginTransaction();
+                        batchTx = db.BeginWriteTransaction();
                     }
                 }
             }
@@ -89,17 +89,17 @@ public sealed class WalBloatRegressionTests : IDisposable
     [Fact]
     public void Wal_stays_bounded_while_building_graph_with_default_options()
     {
-        const int nodeCount = 6_000;
+        const int vertexCount = 6_000;
         const int avgDegree = 8;
-        long edges = BuildGraph(options: null, nodeCount, avgDegree, batchSize: 10_000);
+        long edges = BuildGraph(options: null, vertexCount, avgDegree, batchSize: 10_000);
 
         long walBytes = _peakWalBytes;
 
         // 旧挙動 (毎エッジ 6 ページ × 8KB のフルページログ、truncate 無し) なら
-        // edges × ~48KB に達する。案C のコアレス + 案A の checkpoint コンパクションでこれが桁違いに縮む。
+        // edges × ~48KB に達する。PageImage coalescing と checkpoint compaction でこれが桁違いに縮む。
         long oldBehaviorEstimate = edges * 6 * 8192;
         walBytes.Should().BeLessThan(oldBehaviorEstimate / 8,
-            "案C のコアレスで WAL の peak は旧フルページログより桁違いに小さいはず");
+            "PageImage coalescingでWALのpeakは旧フルページログより桁違いに小さいはず");
         walBytes.Should().BeLessThan(256L * 1024 * 1024,
             "WAL が数百 MB を超えて肥大してはならない");
 
@@ -115,14 +115,13 @@ public sealed class WalBloatRegressionTests : IDisposable
     public void Checkpoint_compacts_single_wal_file_and_data_survives_reopen()
     {
         // 小さい checkpoint しきい値でコンパクションを確実に発火させる。
-        var options = new GraphDatabaseOptions
+        var options = new QuiverDatabaseOptions
         {
-            WalSegmentSize = 256 * 1024, // ARCH-4 増分7: 単一ファイルでは未使用だが API 互換のため残す
             CheckpointThresholdBytes = 256 * 1024,
         };
-        const int nodeCount = 5_000;
+        const int vertexCount = 5_000;
         const int avgDegree = 8;
-        long edges = BuildGraph(options, nodeCount, avgDegree, batchSize: 8_000);
+        long edges = BuildGraph(options, vertexCount, avgDegree, batchSize: 8_000);
 
         // 単一ファイル WAL はチェックポイント時の圧縮で先頭の不要部分を詰め、
         // 構築中の peak でも数 MB に収まるはず (旧挙動なら 40k エッジで数十 MB+)。
@@ -142,11 +141,11 @@ public sealed class WalBloatRegressionTests : IDisposable
     /// 構築時の各エッジは source → target の KNOWS なので、全 Person の Out("KNOWS") 合計が
     /// エッジ総数に一致する。reopen 時の WAL リカバリが正しく働いたことの検証になる。
     /// </summary>
-    private long CountKnowsEdges(GraphDatabaseOptions? options = null)
+    private long CountKnowsEdges(QuiverDatabaseOptions? options = null)
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
-        return g.Nodes().HasLabel("Person").Out("KNOWS").ToList().Count;
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
+        return g.Vertices().HasLabel("Person").Out("KNOWS").ToList().Count;
     }
 }

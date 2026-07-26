@@ -1,15 +1,12 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.IO.Hashing;
-using System.Threading.Channels;
 using Quiver.Core;
 using Quiver.Telemetry;
 
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// 単一ファイル WAL。旧来の <c>wal/</c> セグメント群 (<c>wal.NNNNNNNN.log</c>) を
-/// 1 本のサイドカーファイル (例: <c>graph.quiver-wal</c>) に統合する。
+/// QUIVER-SW 形式の単一ファイル WAL。
 /// <list type="bullet">
 ///   <item><see cref="Truncate"/> はセグメント削除の代わりにファイルをコンパクション
 ///     (truncate 対象 prefix を捨てて live tail を前詰め) する。checkpoint は
@@ -17,32 +14,17 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット / 案C コアレス / group commit / PageImage coalesce は据え置き。
+/// レコードフォーマット、同期 flush、checkpoint 用コンパクションを提供する。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
-    // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 バイト
+    // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32(4) = 25 バイト
     internal const int HeaderSize = 25;
     private const int WriteBufferSize = 1024 * 1024;
     internal const int MaxPayloadSize = 8 * 1024 * 1024;
 
     private readonly string _path;
     private readonly object _writeLock = new();
-    private readonly Channel<FlushRequest> _flushChannel;
-    private readonly Task _flushTask;
-    // group commit window を Stopwatch tick に変換して保持 (0 = 無効)。
-    private readonly long _groupCommitWindowTicks;
-    // 観測用カウンタ。
-    private long _flushBatchCount;
-    private long _flushRequestCount;
-
-    // 複数 tx の PageImage を Commit/CheckpointBegin/CheckpointEnd の直前にまとめて
-    // drain する共有 coalesce バッファ。`(fileKind, pageId)` ごとに「最後に書いた tx」の
-    // payload を 1 件だけ保持し、同一ページに対する重複 PageImage 出力を抑制する。
-    private readonly Dictionary<(byte FileKind, long PageId), CoalescedPageImage> _coalescedPageImages = new();
-    private long _coalescedPageImageCount;
-    private long _drainedPageImageCount;
-
     private long _nextLsn;
     private long _flushedLsn = -1;
     private long _bytesWritten;
@@ -52,46 +34,26 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private bool _disposed;
     // クリーン終了時に WAL ファイルを削除するフラグ。backend が最終 flush 後に立てる。
     private bool _deleteOnDispose;
+    private WalWriteSet? _activeWriteSet;
 
     public long CurrentLsn => Volatile.Read(ref _nextLsn) - 1;
     public long FlushedLsn => Volatile.Read(ref _flushedLsn);
     public long BytesWritten => Volatile.Read(ref _bytesWritten);
-
-    /// <summary>バックグラウンドフラッシュループが実際に fsync を起動した回数。</summary>
-    public long FlushBatchCount => Volatile.Read(ref _flushBatchCount);
-
-    /// <summary><see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。</summary>
-    public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
-
-    /// <summary>cross-tx de-dup ヒット数。</summary>
-    public long CoalescedPageImageCount => Volatile.Read(ref _coalescedPageImageCount);
-
-    /// <summary>coalesce バッファから drain された PageImage 件数の累計。</summary>
-    public long DrainedPageImageCount => Volatile.Read(ref _drainedPageImageCount);
+    public WalWriteSet? ActiveWriteSet
+    {
+        get => Volatile.Read(ref _activeWriteSet);
+        set => Volatile.Write(ref _activeWriteSet, value);
+    }
 
     public WriteAheadLog(string path)
-        : this(path, 0, TimeSpan.Zero) { }
-
-    public WriteAheadLog(string path, long segmentCapacity)
-        : this(path, segmentCapacity, TimeSpan.Zero) { }
-
-    public WriteAheadLog(string path, long segmentCapacity, TimeSpan groupCommitWindow)
     {
         _path = path;
-        _ = segmentCapacity; // 単一ファイルでは未使用 (旧 API 互換のため受け取る)
-        _groupCommitWindowTicks = groupCommitWindow > TimeSpan.Zero
-            ? (long)(groupCommitWindow.TotalSeconds * Stopwatch.Frequency)
-            : 0;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        _flushChannel = Channel.CreateUnbounded<FlushRequest>(
-            new UnboundedChannelOptions { SingleReader = true });
         RebuildState();
         _stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        WalFormat.Initialize(_stream);
         _stream.Seek(0, SeekOrigin.End);
-        _flushTask = Task.Factory.StartNew(
-            RunFlushLoopAsync, CancellationToken.None,
-            TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
     }
 
     /// <summary>
@@ -102,6 +64,8 @@ internal sealed class WriteAheadLog : IWriteAheadLog
 
     public long Append(WalRecordType type, TransactionId tx, ReadOnlySpan<byte> payload)
     {
+        if (!WalFormat.IsKnownRecordType(type))
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown WAL record type.");
         if (payload.Length > MaxPayloadSize)
             throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
 
@@ -109,17 +73,31 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            // Commit / Checkpoint sentinel / Abort の直前で coalesce バッファを drain。
-            if (type == WalRecordType.Commit ||
-                type == WalRecordType.CheckpointBegin ||
-                type == WalRecordType.CheckpointEnd ||
-                type == WalRecordType.Checkpoint ||
-                type == WalRecordType.Abort)
-            {
-                DrainCoalesceBufferLocked();
-            }
-
             return WriteRecordLocked(type, tx.Value, payload);
+        }
+    }
+
+    public long AppendPageImage(
+        TransactionId tx,
+        byte fileKind,
+        long pageId,
+        ReadOnlySpan<byte> pageBytes)
+    {
+        if (pageBytes.Length != WalPageImageCodec.FullPageBytes)
+            throw new ArgumentException(
+                $"PageImage must contain exactly {WalPageImageCodec.FullPageBytes} bytes.",
+                nameof(pageBytes));
+
+        lock (_writeLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            long expectedLsn = _nextLsn;
+            byte[] stampedPage = pageBytes.ToArray();
+            PageHeader.UpdateLsnAndChecksum(stampedPage, expectedLsn);
+            byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, stampedPage);
+            long actualLsn = WriteRecordLocked(WalRecordType.PageImage, tx.Value, payload);
+            Debug.Assert(actualLsn == expectedLsn);
+            return actualLsn;
         }
     }
 
@@ -146,71 +124,9 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         return lsn;
     }
 
-    /// <summary>
-    /// PageImage を共有 coalesce バッファへ投入する (詳細は旧実装と同一)。
-    /// </summary>
-    public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
-    {
-        if (payload == null) throw new ArgumentNullException(nameof(payload));
-        if (payload.Length > MaxPayloadSize)
-            throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
-
-        var key = (fileKind, pageId);
-        lock (_writeLock)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_coalescedPageImages.TryGetValue(key, out var existing))
-            {
-                if (existing.Tx.Value != tx.Value)
-                {
-                    // 別 tx が同一ページに書こうとした: 既存エントリを drain して per-tx 帰属を保持。
-                    WriteRecordLocked(WalRecordType.PageImage, existing.Tx.Value, existing.Payload);
-                    Interlocked.Increment(ref _drainedPageImageCount);
-                }
-                else
-                {
-                    Interlocked.Increment(ref _coalescedPageImageCount);
-                }
-            }
-            _coalescedPageImages[key] = new CoalescedPageImage(tx, payload);
-        }
-    }
-
-    /// <summary><paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。</summary>
-    public void EvictCoalescedPageImagesFor(TransactionId tx)
-    {
-        lock (_writeLock)
-        {
-            if (_disposed || _coalescedPageImages.Count == 0) return;
-            List<(byte, long)>? remove = null;
-            foreach (var kv in _coalescedPageImages)
-            {
-                if (kv.Value.Tx.Value == tx.Value)
-                    (remove ??= new()).Add(kv.Key);
-            }
-            if (remove == null) return;
-            foreach (var key in remove)
-                _coalescedPageImages.Remove(key);
-        }
-    }
-
-    private void DrainCoalesceBufferLocked()
-    {
-        if (_coalescedPageImages.Count == 0) return;
-        foreach (var entry in _coalescedPageImages.Values)
-        {
-            WriteRecordLocked(WalRecordType.PageImage, entry.Tx.Value, entry.Payload);
-            Interlocked.Increment(ref _drainedPageImageCount);
-        }
-        _coalescedPageImages.Clear();
-    }
-
-    private readonly record struct CoalescedPageImage(TransactionId Tx, byte[] Payload);
-
     public void FlushTo(long lsn)
     {
         if (Volatile.Read(ref _flushedLsn) >= lsn) return;
-        Interlocked.Increment(ref _flushRequestCount);
         using var activity = QuiverTelemetry.WalFlushActivitySource.StartActivity(
             "wal.flush", ActivityKind.Internal);
         activity?.SetTag("quiver.wal.target_lsn", lsn);
@@ -218,30 +134,24 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         QuiverEventSource.Log.WalFlushRequestStarted();
         try
         {
-            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
+            lock (_writeLock)
             {
-                if (Volatile.Read(ref _flushedLsn) >= lsn) return;
-                throw new ObjectDisposedException(nameof(WriteAheadLog));
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_flushedLsn < lsn)
+                {
+                    FlushBufferLocked();
+                    _stream?.Flush(flushToDisk: true);
+                    long highestLsn = _nextLsn > 0 ? _nextLsn - 1 : -1;
+                    Volatile.Write(ref _flushedLsn, highestLsn);
+                }
             }
-            tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverLog.WalFlushed(QuiverLog.WalLogger, lsn, sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.WalFlushed(lsn, sw.Elapsed.TotalMilliseconds);
         }
         finally
         {
             QuiverEventSource.Log.WalFlushRequestCompleted();
         }
-    }
-
-    public long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn)
-    {
-        Span<byte> payload = stackalloc byte[16];
-        BinaryPrimitives.WriteInt64LittleEndian(payload, oldestActiveLsn);
-        BinaryPrimitives.WriteInt64LittleEndian(payload[8..], lastFlushedDataLsn);
-        long lsn = Append(WalRecordType.Checkpoint, new TransactionId(-1), payload);
-        FlushTo(lsn);
-        return lsn;
     }
 
     public long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount)
@@ -290,13 +200,12 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             _stream.Flush();
 
             long keepFromOffset = FindOffsetOfFirstLsnGreaterThan(uptoLsn);
-            if (keepFromOffset == 0) return; // 何も捨てない (先頭から live)
+            if (keepFromOffset == WalFormat.FileHeaderSize) return;
 
             if (keepFromOffset < 0)
             {
-                // 全レコードが uptoLsn 以下 → ファイルを空にする。
-                _stream.SetLength(0);
-                _stream.Seek(0, SeekOrigin.Begin);
+                _stream.SetLength(WalFormat.FileHeaderSize);
+                _stream.Seek(WalFormat.FileHeaderSize, SeekOrigin.Begin);
                 return;
             }
 
@@ -314,8 +223,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             // クリーン終了: データは graph.quiver へ durable 済み。WAL は捨てるので最終フラッシュ不要。
             _disposed = true;
-            _flushChannel.Writer.TryComplete();
-            try { _flushTask.GetAwaiter().GetResult(); } catch { }
             lock (_writeLock)
             {
                 _stream?.Dispose();
@@ -325,14 +232,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             return;
         }
 
-        // Dispose 完了前に coalesce バッファを最終 drain する。
-        lock (_writeLock)
-        {
-            DrainCoalesceBufferLocked();
-        }
         _disposed = true;
-        _flushChannel.Writer.TryComplete();
-        try { _flushTask.GetAwaiter().GetResult(); } catch { }
         lock (_writeLock)
         {
             FlushBufferLocked();
@@ -399,11 +299,11 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private long FindOffsetOfFirstLsnGreaterThan(long uptoLsn)
     {
         using var rs = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite);
+        WalFormat.ValidateAndPosition(rs);
         while (true)
         {
             long recStart = rs.Position;
             if (!WalReader.TryReadRecord(rs, out var rec)) return -1;
-            if (rec.Type == WalRecordType.EndOfSegment) continue; // 旧形式互換 (新規には現れない)
             if (rec.Lsn > uptoLsn) return recStart;
         }
     }
@@ -421,6 +321,10 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         string tmp = _path + ".compact";
         using (var ts = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
         {
+            Span<byte> fileHeader = stackalloc byte[WalFormat.FileHeaderSize];
+            _stream.Seek(0, SeekOrigin.Begin);
+            _stream.ReadExactly(fileHeader);
+            ts.Write(fileHeader);
             ts.Write(tail, 0, tailLen);
             ts.Flush(flushToDisk: true);
         }
@@ -429,7 +333,8 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             File.Move(tmp, _path, overwrite: true);
         }
-        catch (IOException)
+        catch (Exception exception)
+            when (exception is IOException or UnauthorizedAccessException)
         {
             // 並行ハンドル (snapshot のファイルコピー等) が _path を開いていて rename できない場合は
             // 今回のコンパクションを諦める。File.Move は atomic なので _path は元の全内容のまま。
@@ -444,50 +349,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     }
 
     // -----------------------------------------------------------------------
-    // フラッシュループ (バックグラウンドタスク — グループコミット)
-    // -----------------------------------------------------------------------
-
-    private async Task RunFlushLoopAsync()
-    {
-        var pending = new List<FlushRequest>();
-        while (await _flushChannel.Reader.WaitToReadAsync())
-        {
-            // group commit window。
-            if (_groupCommitWindowTicks > 0 && !_disposed)
-            {
-                long deadline = Stopwatch.GetTimestamp() + _groupCommitWindowTicks;
-                while (Stopwatch.GetTimestamp() < deadline && !_disposed)
-                    Thread.SpinWait(50);
-            }
-
-            while (_flushChannel.Reader.TryRead(out var req))
-                pending.Add(req);
-
-            long highestLsn;
-            lock (_writeLock)
-            {
-                FlushBufferLocked();
-                _stream?.Flush(flushToDisk: true);
-                highestLsn = _nextLsn > 0 ? _nextLsn - 1 : -1;
-                Volatile.Write(ref _flushedLsn, highestLsn);
-            }
-            Interlocked.Increment(ref _flushBatchCount);
-
-            for (int i = pending.Count - 1; i >= 0; i--)
-            {
-                if (pending[i].TargetLsn <= highestLsn)
-                {
-                    pending[i].Tcs.TrySetResult(true);
-                    pending.RemoveAt(i);
-                }
-            }
-        }
-
-        foreach (var req in pending)
-            req.Tcs.TrySetCanceled();
-    }
-
-    // -----------------------------------------------------------------------
     // 状態復元
     // -----------------------------------------------------------------------
 
@@ -497,19 +358,15 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         if (!File.Exists(_path)) return;
 
         long maxLsn = -1;
-        try
+        using (var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
-            using var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            WalFormat.ValidateAndPosition(fs);
             while (WalReader.TryReadRecord(fs, out WalRecord rec))
             {
-                if (rec.Type == WalRecordType.EndOfSegment) continue;
                 if (rec.Lsn > maxLsn) maxLsn = rec.Lsn;
             }
         }
-        catch { }
 
         _nextLsn = maxLsn >= 0 ? maxLsn + 1 : 0;
     }
-
-    private readonly record struct FlushRequest(long TargetLsn, TaskCompletionSource<bool> Tcs);
 }

@@ -9,37 +9,37 @@ namespace Quiver;
 /// <summary>
 /// バイナリバックエンド用の expand cursor。
 ///
-/// ソースノードに隣接ブロックがある場合、<see cref="IAdjacencyBlockStore.OpenCursor"/> で
+/// ソースVertexに隣接ブロックがある場合、<see cref="IAdjacencySegmentStore.OpenCursor"/> で
 /// ブロックチェーンを走査する。次数にかかわらず途中で fallback しない。
 ///
 /// ブロックは bulk load / compact 時点のイミュータブルな <em>base</em> ビューのみを覆う。
-/// それ以降に作成されたリレーションシップは <em>delta</em> としてリンクリストに存在する。
+/// それ以降に作成されたEdgeは <em>delta</em> としてリンクリストに存在する。
 /// 隣接ブロックを使い切った後 (tombstone 済み base エントリをスキップしつつ)、リンクリストを
-/// 辿って delta を走査する。<c>relId &lt; BaseRelHwm</c> のエントリは base から既に出力済みなので
+/// 辿って delta を走査する。<c>edgeId &lt; BaseEdgeHwm</c> のエントリは base から既に出力済みなので
 /// フィルタし、チェーンは ID 降順なのでその境界を超えた時点で打ち切れる。
 /// </summary>
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private readonly NodeId _source;
+    private VertexId _source;
     private readonly Direction _direction;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
     private readonly BinaryGraphAccessMethods _owner;
 
     private AdjacencyCursor? _adjCursor;
+    private AdjacencyCursor? _deltaCursor;
     private bool _adjActive;     // phase 1: walking the immutable base view
     private bool _opened;
-    private long _baseRelHwm;    // delta-vs-base partition for phase 2
+    private bool _validSource;
 
-    private RelationshipId _nextRelId;
-    private NodeId _neighbor;
-    private RelationshipId _relId;
+    private VertexId _neighbor;
+    private EdgeId _edgeId;
 
     internal BinaryExpandCursor(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         BinaryGraphAccessMethods owner)
     {
         _tx = tx;
@@ -47,90 +47,95 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         _direction = direction;
         _typeFilter = typeFilter;
         _owner = owner;
-        _nextRelId = RelationshipId.Invalid;
-        _neighbor = NodeId.Invalid;
-        _relId = RelationshipId.Invalid;
+        _neighbor = VertexId.Invalid;
+        _edgeId = EdgeId.Invalid;
     }
 
-    public override NodeId Neighbor => _neighbor;
-    public override RelationshipId Relationship => _relId;
+    public override VertexId Neighbor => _neighbor;
+    public override EdgeId Edge => _edgeId;
     public override long WeightRaw => _adjActive ? (_adjCursor?.WeightRaw ?? 0) : 0;
 
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
+        if (!_validSource) return false;
 
-        // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
-        // base リレーションシップの削除を読み手から不可視にする。
+        // まず segment の base ビューを走査する。tombstone をここでフィルタし、
+        // base Edgeの削除を読み手から不可視にする。
         if (_adjActive)
         {
-            var adj = _tx.AdjacencyBlocks!;
+            var adj = _tx.AdjacencySegments!;
             while (_adjCursor!.MoveNext())
             {
-                var rid = _adjCursor.Relationship;
-                if (adj.IsTombstoned(rid)) continue;
-                _neighbor = _adjCursor.Neighbor;
-                _relId = rid;
+                // adjacency base は physical edge Sequence だけを持つ。
+                // current Generation を付与して primary Read し、candidate validation と
+                // logical output の materialization を一回の read で完結させる。
+                var physicalEdge = _adjCursor.Edge;
+                int generation = _tx.Edges.CurrentGeneration(physicalEdge.Sequence);
+                if (generation < 0
+                    || (physicalEdge.Generation != 0
+                        && physicalEdge.Generation != generation))
+                    continue;
+
+                var rid = EdgeId.Create(physicalEdge.Sequence, generation);
+                using var edge = _tx.Edges.Read(rid);
+                if (!edge.InUse)
+                    continue;
+                bool sourceIsEndpoint = edge.Source.Sequence == _source.Sequence;
+                VertexId neighbor = sourceIsEndpoint ? edge.Target : edge.Source;
+                if (adj.IsTombstoned(rid) &&
+                    (edge.Type != _adjCursor.Type ||
+                      (edge.Source.Sequence != _source.Sequence && edge.Target.Sequence != _source.Sequence) ||
+                      neighbor.Sequence != _adjCursor.Neighbor.Sequence))
+                {
+                    continue;
+                }
+                _neighbor = neighbor;
+                _edgeId = edge.Id;
                 return true;
             }
             _adjActive = false; // fall through to phase 2
         }
 
-        // Phase 2: リレーションシップリンクリストの delta 走査。watermark との比較で
-        // base エントリ (既に出力済み) をスキップする。チェーンは ID 降順 (最新が先頭) なので、
-        // base 領域に入った時点で残りもすべて base — そこで打ち切る。
-        while (_nextRelId.IsValid)
+        while (_deltaCursor!.MoveNext())
         {
-            if (_baseRelHwm > 0 && _nextRelId.Sequence < _baseRelHwm) // hwm 比較は Sequence
-                return false;
-
-            var rel = _tx.Relationships.Read(_nextRelId);
-            var thisRel = _nextRelId;
-            _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
-
-            // MVCC visibility 判定で invisible になった record はスキップ。
-            if (!rel.InUse) continue;
-
-            bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
-            bool dirOk = _direction switch
-            {
-                Direction.Outgoing => rel.Source == _source,
-                Direction.Incoming => rel.Target == _source,
-                _ => true,
-            };
-            if (typeOk && dirOk)
-            {
-                _neighbor = rel.Source == _source ? rel.Target : rel.Source;
-                _relId = thisRel;
-                return true;
-            }
+            var edge = _tx.Edges.Read(_deltaCursor.Edge);
+            if (!edge.InUse)
+                continue;
+            _neighbor = edge.Source.Sequence == _source.Sequence ? edge.Target : edge.Source;
+            _edgeId = edge.Id;
+            return true;
         }
         return false;
     }
 
     private void Open()
     {
-        var adj = _tx.AdjacencyBlocks;
+        var materializer = new EntityIdentityMaterializer(_tx.Vertices);
+        if (!materializer.TryVertex(_source, out _source))
+            return;
+        _validSource = true;
+
+        var adj = _tx.AdjacencySegments;
         if (adj != null && adj.HasBlock(_source))
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
             _adjActive = true;
-            _baseRelHwm = adj.BaseRelHwm;
-            // delta 走査も準備する — base フェーズ終了後にリンクリスト先頭から再開し、
-            // id < BaseRelHwm のエントリをスキップする。
-            _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
+            _deltaCursor = _owner.EdgeDeltas.OpenCursor(
+                _tx, _source, _direction, _typeFilter, adj.BaseEdgeHwm);
             return;
         }
-        // このソースに対する隣接ブロックが無い — リレーションシップリンクリストを辿る。
+        // このソースに対する隣接ブロックが無い — Edgeリンクリストを辿る。
         // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
-        _baseRelHwm = adj?.BaseRelHwm ?? 0;
-        _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
+        _deltaCursor = _owner.EdgeDeltas.OpenRowCursor(
+            _tx, _source, _direction, _typeFilter);
     }
 
     public override void Dispose()
     {
         _adjCursor?.Dispose();
+        _deltaCursor?.Dispose();
     }
 }

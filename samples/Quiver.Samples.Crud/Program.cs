@@ -1,4 +1,4 @@
-// Quiver.Samples.Crud — 基本 CRUD: ノード作成、プロパティ設定、リレーション作成、削除。
+// Quiver.Samples.Crud — 基本 CRUD: Vertex作成、プロパティ設定、リレーション作成、削除。
 //
 // 実行: dotnet run --project samples/Quiver.Samples.Crud
 
@@ -8,13 +8,13 @@ using Quiver.Storage.Records;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_crud_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var tx = db.BeginWriteTransaction();
 
-    Console.WriteLine("── 1. ノード作成 + プロパティ ──");
-    var alice = tx.CreateNode("Person");
-    var bob   = tx.CreateNode("Person");
-    var carol = tx.CreateNode("Person");
+    Console.WriteLine("── 1. Vertex作成 + プロパティ ──");
+    var alice = tx.CreateVertex("Person");
+    var bob   = tx.CreateVertex("Person");
+    var carol = tx.CreateVertex("Person");
 
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
     tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
@@ -23,19 +23,19 @@ try
     tx.SetProperty(bob,   "age",  PropertyValue.FromInt32(25));
     tx.SetProperty(carol, "age",  PropertyValue.FromInt32(35));
 
-    Console.WriteLine($"  alice 存在チェック: {tx.NodeExists(alice)}");
+    Console.WriteLine($"  alice 存在チェック: {tx.VertexExists(alice)}");
     var aliceName = Str(tx.GetProperty(alice, "name"));
     Console.WriteLine($"  alice.name = {aliceName}");
     Console.WriteLine($"  alice.age  = {tx.GetProperty(alice, "age").Int32Value}");
 
     Console.WriteLine();
     Console.WriteLine("── 2. リレーション作成 ──");
-    tx.CreateRelationship(alice, bob,   "KNOWS");
-    tx.CreateRelationship(alice, carol, "KNOWS");
-    tx.CreateRelationship(bob,   carol, "FOLLOWS");
+    tx.CreateEdge(alice, bob,   "KNOWS");
+    tx.CreateEdge(alice, carol, "KNOWS");
+    tx.CreateEdge(bob,   carol, "FOLLOWS");
 
-    Console.WriteLine("  alice の隣接ノード一覧:");
-    var en = tx.EnumerateRelationships(alice);
+    Console.WriteLine("  alice の隣接Vertex一覧:");
+    var en = tx.EnumerateEdges(alice);
     while (en.MoveNext())
     {
         var r = en.Current;
@@ -52,9 +52,9 @@ try
     tx.RemoveProperty(alice, "age");
     Console.WriteLine($"  age 削除後 HasProperty(age) = {tx.HasProperty(alice, "age")}");
 
-    var relEn = tx.EnumerateRelationships(alice, Direction.Both, "KNOWS");
+    var relEn = tx.EnumerateEdges(alice, Direction.Both, "KNOWS");
     if (relEn.MoveNext())
-        tx.DeleteRelationship(relEn.Current.Id);
+        tx.DeleteEdge(relEn.Current.Id);
     Console.WriteLine("  KNOWS リレーションを 1 件削除しました。");
 
     tx.Commit();

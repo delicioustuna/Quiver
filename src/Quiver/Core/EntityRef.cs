@@ -3,7 +3,7 @@ namespace Quiver.Core;
 /// <summary>
 /// 物理 ID の統一パック表現。旧 <c>GenerationalRef</c> を吸収し、
 /// 索引値レーン・ベクトル binding キー・外部往復 ID と、論理 ID 構造体
-/// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/>) の
+/// (<see cref="VertexId"/> / <see cref="EdgeId"/> / <see cref="NexusId"/>) の
 /// 内部 <c>Value</c> を、ただ一つの packing 規約に集約する。
 /// <para>レイアウト (上位→下位):</para>
 /// <list type="bullet">
@@ -15,10 +15,31 @@ namespace Quiver.Core;
 /// </list>
 /// <para><see cref="Generation"/> / <see cref="Sequence"/> は下位 60bit だけを見るため、
 /// kind ビットの有無 (cross-kind packed / kind 消去ローカル形) を問わず同じ結果を返す。
-/// Generation は slot incarnation を表し、MVCC version (xmin/xmax/sstamp) とは別概念。</para>
+/// Generation は slot incarnation を表し、MVCC version (xmin/xmax) とは別概念。</para>
 /// </summary>
 public readonly partial record struct EntityRef
 {
+    private EntityRef(EntityKind kind, long value)
+    {
+        Kind = kind;
+        Value = value;
+    }
+
+    /// <summary>エンティティの種別。</summary>
+    public EntityKind Kind { get; }
+
+    /// <summary>種別を含まない Generation + Sequence の packed 値。</summary>
+    public long Value { get; }
+
+    /// <summary>有効な Vertex、Edge、または Nexus を表すか。</summary>
+    public bool IsValid => IsSupportedKind(Kind) && Value >= 0;
+
+    /// <summary>slot の局所 ID。</summary>
+    public long Sequence => IsValid ? UnpackSequence(Value) : -1;
+
+    /// <summary>slot の incarnation。</summary>
+    public int Generation => IsValid ? UnpackGeneration(Value) : 0;
+
     /// <summary>Kind フィールドの開始ビット位置。</summary>
     public const int KindShift = 60;
 
@@ -46,6 +67,7 @@ public readonly partial record struct EntityRef
     /// </summary>
     public static long Pack(EntityKind kind, long sequence, int generation)
     {
+        ValidateKind(kind);
         Validate(sequence, generation);
         return ((long)(byte)kind << KindShift)
              | ((long)generation << GenerationShift)
@@ -67,10 +89,34 @@ public readonly partial record struct EntityRef
     public static EntityKind UnpackKind(long packed) => (EntityKind)(byte)((ulong)packed >> KindShift & 0xF);
 
     /// <summary>パック済み値から Generation を取り出す (kind ビット有無を問わない)。</summary>
-    public static int Generation(long packed) => (int)((ulong)packed >> GenerationShift & GenerationMask);
+    public static int UnpackGeneration(long packed) => (int)((ulong)packed >> GenerationShift & GenerationMask);
 
     /// <summary>パック済み値から Sequence (局所 ID) を取り出す (kind ビット有無を問わない)。</summary>
-    public static long Sequence(long packed) => packed & SequenceMask;
+    public static long UnpackSequence(long packed) => packed & SequenceMask;
+
+    /// <summary><see cref="VertexId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(VertexId id) => From(EntityKind.Vertex, id.Value);
+
+    /// <summary><see cref="EdgeId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(EdgeId id) => From(EntityKind.Edge, id.Value);
+
+    /// <summary><see cref="NexusId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(NexusId id) => From(EntityKind.Nexus, id.Value);
+
+    /// <summary>種別、slot、世代を検証して種別付き参照を作成する。</summary>
+    public static EntityRef Create(EntityKind kind, long sequence, int generation)
+    {
+        ValidateKind(kind);
+        return new EntityRef(kind, PackLocal(sequence, generation));
+    }
+
+    private static EntityRef From(EntityKind kind, long value)
+    {
+        ValidateKind(kind);
+        if (value == -1) return default;
+        ValidateLocal(value);
+        return new EntityRef(kind, value);
+    }
 
     private static void Validate(long sequence, int generation)
     {
@@ -80,5 +126,22 @@ public readonly partial record struct EntityRef
         if (generation < 0 || generation > MaxGeneration)
             throw new ArgumentOutOfRangeException(nameof(generation),
                 $"Generation {generation} は {GenerationBits} ビット (0..{MaxGeneration}) に収まりません。");
+    }
+
+    private static void ValidateKind(EntityKind kind)
+    {
+        if (!IsSupportedKind(kind))
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "EntityRef は Vertex、Edge、Nexus だけを受け入れます。");
+    }
+
+    private static bool IsSupportedKind(EntityKind kind)
+        => kind is EntityKind.Vertex or EntityKind.Edge or EntityKind.Nexus;
+
+    private static void ValidateLocal(long value)
+    {
+        if (value < 0)
+            throw new ArgumentOutOfRangeException(nameof(value), "EntityRef の local value は非負でなければなりません。");
+        if ((ulong)value >> KindShift != 0)
+            throw new ArgumentOutOfRangeException(nameof(value), "EntityRef の local value に kind bit を含めることはできません。");
     }
 }

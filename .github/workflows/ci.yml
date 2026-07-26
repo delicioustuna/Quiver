@@ -40,5 +40,9 @@ jobs:
       - name: Build
         run: dotnet build Quiver.slnx --configuration Release --no-restore
 
+      - name: Verify zero-dependency core package
+        shell: pwsh
+        run: ./scripts/verify-zero-dependency.ps1 -Configuration Release
+
       - name: Test
         run: dotnet test Quiver.slnx --configuration Release --no-build --verbosity normal

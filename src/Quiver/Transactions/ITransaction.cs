@@ -1,5 +1,6 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
@@ -8,7 +9,6 @@ namespace Quiver.Transactions;
 internal interface ITransaction : IDisposable, ICommitHookRegistrar
 {
     TransactionId Id { get; }
-    IsolationLevel Level { get; }
     long SnapshotLsn { get; }
     TransactionState State { get; }
 
@@ -30,10 +30,15 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     void Abort();
 
     /// <summary>
+    /// 同一トランザクションハンドルの並行使用を検出するための使用スコープを開始する。
+    /// </summary>
+    TransactionUsageLease EnterUsage();
+
+    /// <summary>
     /// トランザクション内に savepoint を作成し、その識別子を返す。
     /// 以後の変更を <see cref="RollbackTo"/> で巻き戻したり、<see cref="ReleaseSavepoint"/> で
     /// 親スコープへマージしたりできる。Nested savepoint をサポート。
-    /// 非アクティブな tx では <see cref="TransactionException"/> をスロー。
+    /// 非アクティブなtxでは <see cref="Quiver.Core.TransactionException"/>をスロー。
     /// 部分ロールバックは durable ではない (クラッシュ復旧では tx 全体の abort/commit のみ反映される)。
     /// </summary>
     /// <param name="name">診断用の任意名。一意性は要求しない。</param>
@@ -42,7 +47,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// <summary>
     /// 指定 savepoint 以降の変更を巻き戻す。Savepoint 自体は消費されず、再度
     /// <see cref="RollbackTo"/> を呼ぶことができる (SQL 標準準拠)。
-    /// 解放済みの savepoint や別 tx の savepoint を渡すと <see cref="TransactionException"/>。
+    /// 解放済みのsavepointや別txのsavepointを渡すと <see cref="Quiver.Core.TransactionException"/>をスロー。
     /// </summary>
     void RollbackTo(SavepointId savepoint);
 
@@ -52,16 +57,25 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// </summary>
     void ReleaseSavepoint(SavepointId savepoint);
 
-    INodeStore Nodes { get; }
-    IRelationshipStore Relationships { get; }
+    IVertexStore Vertices { get; }
+    IEdgeStore Edges { get; }
+    INexusStore Nexuses { get; }
+    IIncidenceStore Incidences { get; }
+    IVertexIncidenceHeadStore VertexIncidenceHeads { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
 
+    /// <summary>同じread snapshotから全文manifestを選択するderived index。</summary>
+    FullTextSegmentIndex? FullTextSegments => null;
+
     // BulkLoader が構築する連続隣接インデックス。未構築またはミューテーション後は null。
     // ExpandOperator が高速な隣接スキャンに使い、null のときはリンクリストにフォールバック。
-    IAdjacencyBlockStore? AdjacencyBlocks { get; }
+    IAdjacencySegmentStore? AdjacencySegments { get; }
 
-    // バックエンド提供のアクセスメソッド。オペレータは Nodes/Relationships/AdjacencyBlocks を
+    // 明示設定されたロール対の co-membership 導出ビュー。未設定なら null。
+    ICoMembershipBlockStore? CoMembershipBlocks { get; }
+
+    // バックエンド提供のアクセスメソッド。オペレータは Vertices/Edges/AdjacencySegments を
     // 直接読まずこちら経由で呼ぶ。バックエンド固有実装が無い場合は InlineGraphAccessMethods.Instance。
     IGraphAccessMethods Access { get; }
 }

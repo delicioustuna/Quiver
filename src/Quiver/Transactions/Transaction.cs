@@ -1,410 +1,294 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Quiver.Core;
-using Quiver.Telemetry;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Storage.Wal;
+using Quiver.Telemetry;
 
 namespace Quiver.Transactions;
 
 internal sealed class Transaction : ITransaction
 {
     private readonly IWriteAheadLog _wal;
-    private readonly LockManager _nodeLocks;
-    private readonly LockManager _relLocks;
-    private readonly LockManager _indexLocks;
+    private readonly WalWriteSet? _walWriteSet;
     private readonly TransactionManager _manager;
-    private readonly TxNodeStore _nodes;
-    private readonly TxRelationshipStore _relationships;
+    private readonly TxVertexStore _vertices;
+    private readonly TxEdgeStore _edges;
+    private readonly TxNexusStore _nexuses;
+    private readonly IIncidenceStore _incidences;
+    private readonly IVertexIncidenceHeadStore _vertexIncidenceHeads;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
-    private readonly IAdjacencyBlockStore? _adjStore;
+    private readonly IAdjacencySegmentStore? _adjacencyStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
-    // null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
-    // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
-    // 索引 PagedFile も EnableWalLogging により before-image capture 対象なので、
-    // 本ハンドラだけで data + index 両方の in-process abort が完結する ( で IndexUndoLog 撤去)。
     private readonly AbortUndoHandler? _undoHandler;
+    private readonly bool _isReadOnly;
+    private WriterLease.WriterLeaseHandle? _writerLease;
+    private SnapshotRegistry.SnapshotRegistration? _snapshotRegistration;
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
-
-    // savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
-    // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
-    // ReleaseSavepoint または親 savepoint の Rollback/Release で初めて無効化される。
+    private int _resourcesReleased;
+    private readonly TransactionUsageGuard _usageGuard;
     private long _nextSavepointId;
     private List<(long Id, int Level)>? _savepoints;
 
-    // SSN (Serializable) のときのみ非 null。read/write hook が η/π を更新し、
-    // Commit の pre-commit 検証 + post-commit スタンプ書き戻しで使う。
-    private readonly SsnContext? _ssn;
-    private readonly IEntityVersionStore? _nodeVersions;
-    private readonly IEntityVersionStore? _relVersions;
-    // Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
-    // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
-    private readonly long _ssnSnapshotCstamp;
-
     public TransactionId Id { get; }
-    public IsolationLevel Level { get; }
     public long SnapshotLsn { get; }
     public TransactionState State => _state;
-
-    // 列スキャン集約が直接可視性を判定できるよう snapshot / committed を公開する。
-    private readonly SnapshotState _snapshot;
-    private readonly CommittedTxRegistry? _committed;
-    public SnapshotState Snapshot => _snapshot;
-    public CommittedTxRegistry? Committed => _committed;
-
-    public INodeStore Nodes => _nodes;
-    public IRelationshipStore Relationships => _relationships;
+    public SnapshotState Snapshot { get; }
+    public CommittedTxRegistry? Committed { get; }
+    public IVertexStore Vertices => _vertices;
+    public IEdgeStore Edges => _edges;
+    public INexusStore Nexuses => _nexuses;
+    public IIncidenceStore Incidences => _incidences;
+    public IVertexIncidenceHeadStore VertexIncidenceHeads => _vertexIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
-    public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
+    public FullTextSegmentIndex? FullTextSegments => _manager.FullTextSegments;
+    public IAdjacencySegmentStore? AdjacencySegments => _adjacencyStore;
+    public ICoMembershipBlockStore? CoMembershipBlocks
+        => _nexuses.HasPendingViewAdds ? null : _coMembershipStore;
     public IGraphAccessMethods Access => _access;
 
     internal Transaction(
-        TransactionId id, IsolationLevel level, long snapshotLsn,
+        TransactionId id,
+        long snapshotLsn,
         IWriteAheadLog wal,
-        LockManager nodeLocks, LockManager relLocks, LockManager indexLocks,
         TransactionManager manager,
-        INodeStore nodeStore, IRelationshipStore relStore,
-        IPropertyStore propStore, IIndexManager indexManager,
-        IAdjacencyBlockStore? adjStore = null,
-        IGraphAccessMethods? access = null,
-        AbortUndoHandler? undoHandler = null,
-        LockingMode lockingMode = LockingMode.ExclusiveOnly,
-        TimeSpan? lockTimeout = null,
-        SnapshotState snapshot = default,
-        CommittedTxRegistry? committed = null,
-        IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null)
+        IVertexStore vertexStore,
+        IEdgeStore edgeStore,
+        INexusStore nexusStore,
+        IIncidenceStore incidenceStore,
+        IVertexIncidenceHeadStore vertexIncidenceHeadStore,
+        IPropertyStore propertyStore,
+        IIndexManager indexManager,
+        IAdjacencySegmentStore? adjacencyStore,
+        IGraphAccessMethods? access,
+        AbortUndoHandler? undoHandler,
+        in SnapshotState snapshot,
+        CommittedTxRegistry committed,
+        ICoMembershipBlockStore? coMembershipStore,
+        PersistentEdgeDeltaStore? edgeDeltas,
+        bool isReadOnly,
+        WriterLease.WriterLeaseHandle? writerLease,
+        SnapshotRegistry.SnapshotRegistration? snapshotRegistration)
     {
-        Id = id; Level = level; SnapshotLsn = snapshotLsn;
+        Id = id;
+        SnapshotLsn = snapshotLsn;
+        Snapshot = snapshot;
+        Committed = committed;
         _wal = wal;
-        _nodeLocks = nodeLocks; _relLocks = relLocks; _indexLocks = indexLocks;
         _manager = manager;
-        _adjStore = adjStore;
+        _adjacencyStore = adjacencyStore;
+        _coMembershipStore = coMembershipStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
-        _undoHandler = undoHandler;
+        _undoHandler = isReadOnly ? null : undoHandler;
+        _isReadOnly = isReadOnly;
+        _writerLease = writerLease;
+        _snapshotRegistration = snapshotRegistration;
         _state = TransactionState.Active;
-        var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
-        // Serializable かつ MVCC コンテキストがあるときのみ SSN を起動する。
-        // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
-        _nodeVersions = nodeVersions;
-        _relVersions = relVersions;
-        _ssn = (level == IsolationLevel.Serializable && committed != null
-            && nodeVersions != null && relVersions != null)
-            ? new SsnContext() : null;
-        // Serializable のときだけ Begin 時点の commit-stamp クロックを捕捉する
-        // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
-        _ssnSnapshotCstamp = _ssn != null ? manager.CurrentCommitStampClock : 0;
-        // per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
-        // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
-        // 行う場合の thread-static の取り違えを防ぐ)。
-        var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
-        _snapshot = snap;
-        _committed = committed;
-        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
-        _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
-        _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
-        WalPageContext.Begin(wal, id);
-        // MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
-        // null なら旧テスト等の互換経路として MvccContext を起動しない (= Bootstrap fallback)。
-        if (committed != null)
-        {
-            MvccContext.Begin(id, snap, committed, _ssn);
-        }
+        _vertices = new TxVertexStore(vertexStore, id, snapshot, committed, isReadOnly);
+        _edges = new TxEdgeStore(edgeStore, id, _vertices, snapshot, committed, isReadOnly, edgeDeltas);
+        _nexuses = new TxNexusStore(
+            nexusStore,
+            incidenceStore,
+            vertexIncidenceHeadStore,
+            id,
+            snapshot,
+            committed,
+            isReadOnly,
+            coMembershipStore);
+        _incidences = incidenceStore;
+        _vertexIncidenceHeads = vertexIncidenceHeadStore;
+        _properties = new TxPropertyStore(propertyStore, id, snapshot, committed, isReadOnly);
+        _indexes = new TxIndexManager(indexManager, isReadOnly);
+        _walWriteSet = isReadOnly ? null : new WalWriteSet(wal, id);
+        if (_walWriteSet is not null)
+            _wal.ActiveWriteSet = _walWriteSet;
+        _usageGuard = new TransactionUsageGuard(id, OnUsageExited);
     }
+
+    public TransactionUsageLease EnterUsage() => _usageGuard.Enter();
 
     public void Commit()
     {
-        if (_state != TransactionState.Active)
-            throw new TransactionException("Cannot commit: transaction is not Active.");
+        using var usage = EnterUsage();
+        EnsureActive("commit");
+        if (_walWriteSet?.IsTooLarge == true)
+            throw new TransactionTooLargeException(
+                Id,
+                _walWriteSet.TooLargeBufferCapacity);
+        if (_isReadOnly)
+        {
+            _state = TransactionState.Committed;
+            _manager.Complete(Id, committed: true, isReadOnly: true);
+            ReleaseResources();
+            FireHooks(_onCommitted);
+            return;
+        }
+
         _state = TransactionState.Preparing;
-        // span + duration histogram。AlwaysOnSampler が無い環境 (StartActivity が null) では
-        // ActivitySource はコストゼロで Stopwatch のみ走る。
-        using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
-            "tx.commit", ActivityKind.Internal);
+        using Activity? activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
+            "tx.commit",
+            ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // tx 境界に構造化スコープを通す。Logger 未設定時は null になり no-op。
-        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Commit");
-        var sw = Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
+        bool durableCommitted = false;
+        bool managerCompleted = false;
         try
         {
-            // Serializable のときは PageImage を WAL へ流す前に SSN の
-            // exclusion-window 検証を行う。違反なら SerializabilityException を投げ、
-            // 下の catch が in-place rollback + Abort を行う。検証を通ったら同じ
-            // critical section で post-commit スタンプを sidecar に書き戻し、それも
-            // 本 tx の PageImage として WAL に乗せて durable にする。
-            if (_ssn != null) SsnValidateAndStamp();
-            // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
-            // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
-            // Commit を最後に書くことで、recovery はコミット済みトランザクションの
-            // ページイメージのみを replay する。
-            WalPageContext.FlushPending();
+            _properties.FlushMeta();
+            _walWriteSet!.FlushPending();
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
-            WalPageContext.End();
-            // MVCC ambient コンテキスト終了 (これ以降このスレッドは
-            // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
-            MvccContext.End();
-            ReleaseAllLocks();
+            durableCommitted = true;
+            _nexuses.PublishPendingViewAdds();
             _state = TransactionState.Committed;
-            _manager.OnCommit(Id);
-            QuiverTelemetry.TxCommitCount.Add(1);
-            QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverEventSource.Log.TxCommit();
-            QuiverLog.TxCommitted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
-            activity?.SetStatus(ActivityStatusCode.Ok);
+            _manager.Complete(Id, committed: true, isReadOnly: false);
+            managerCompleted = true;
+            ReleaseResources();
+            _manager.AfterWriteCommitted();
+            RecordCommitTelemetry(stopwatch, activity, failedAfterDurability: false);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            // WAL flush 失敗などで Commit が途中失敗した場合は rollback として公開し、
-            // 登録済み OnRolledBack フックから一貫した結果が見えるようにする。
-            // コンテキスト破棄前にページ変更をその場で戻し、WAL 上でも abort を記録する。
+            if (durableCommitted)
+            {
+                _state = TransactionState.Committed;
+                _manager.MarkFaulted();
+                if (!managerCompleted)
+                {
+                    try { _manager.Complete(Id, committed: true, isReadOnly: false); }
+                    catch { }
+                }
+                ReleaseResources();
+                try { _manager.AfterWriteCommitted(); } catch { }
+                RecordCommitTelemetry(stopwatch, activity, failedAfterDurability: true);
+                FireHooks(_onCommitted);
+                throw;
+            }
+
             try { RollBackInPlace(); } catch { }
-            // drain 前に自分の PageImage を coalesce バッファから除去 (最適化)。
-            try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
-            try { WalPageContext.End(); } catch { }
-            try { MvccContext.End(); } catch { }
-            try { ReleaseAllLocks(); } catch { }
             _state = TransactionState.Aborted;
-            _manager.OnAbort(Id);
-            QuiverTelemetry.TxAbortCount.Add(1);
-            QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverEventSource.Log.TxAbort();
-            QuiverLog.TxCommitFailed(QuiverLog.TransactionLogger, Id.Value, ex.Message, ex);
-            activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
+            try { _manager.Complete(Id, committed: false, isReadOnly: false); } catch { }
+            ReleaseResources();
+            RecordAbortTelemetry(stopwatch, activity, exception);
             FireHooks(_onRolledBack);
             throw;
         }
+
         FireHooks(_onCommitted);
     }
 
     public void Abort()
     {
+        using var usage = EnterUsage();
+        AbortCore();
+    }
+
+    private void AbortCore()
+    {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
-        // abort span + duration。Commit と同じ ActivitySource を共有。
-        using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
-            "tx.abort", ActivityKind.Internal);
+        var stopwatch = Stopwatch.StartNew();
+        using Activity? activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
+            "tx.abort",
+            ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // 明示 Abort も同じスコープキーを通す。
-        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Abort");
-        var sw = Stopwatch.StartNew();
-        // in-process undo では取得済み before-image をデータファイルへ戻し、
-        // ページベースストアのメタデータを再読込する。破棄したノード、エッジ、
-        // プロパティが後続トランザクションから見えないようにするため、
-        // WalPageContext.End() がトランザクション単位の before-image バッファを破棄する前に実行する。
-        RollBackInPlace();
-        // 共有 coalesce バッファに残った自分の PageImage を破棄してから Abort を書く。
-        // (Append(Abort) の drain で aborted tx の after-image が WAL に漏れるのを抑制する最適化。
-        // 漏れても recovery で abortedTxs により skip されるため correctness には影響しない。)
-        _wal.EvictCoalescedPageImagesFor(Id);
-        _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
-        WalPageContext.End();
-        MvccContext.End();
-        ReleaseAllLocks();
+
+        if (!_isReadOnly)
+        {
+            RollBackInPlace();
+            _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
+        }
+
         _state = TransactionState.Aborted;
-        _manager.OnAbort(Id);
-        QuiverTelemetry.TxAbortCount.Add(1);
-        QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-        QuiverLog.TxAborted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
+        _manager.Complete(Id, committed: false, isReadOnly: _isReadOnly);
+        ReleaseResources();
+        if (!_isReadOnly)
+        {
+            QuiverTelemetry.TxAbortCount.Add(1);
+            QuiverTelemetry.TxAbortDurationMs.Record(stopwatch.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.TxAborted(Id.Value, stopwatch.Elapsed.TotalMilliseconds);
+        }
         FireHooks(_onRolledBack);
     }
 
-    // このトランザクションで取得した before-image をその場で適用する。
-    // 読み取り専用トランザクションと undo handler のないバックエンドでは何もしない。
+    private void OnUsageExited()
+    {
+        if (_walWriteSet?.IsTooLarge != true || _state != TransactionState.Active)
+            return;
+
+        // 容量超過は page latch と buffer-pool lock が解放された後、この usage 境界で
+        // rollback する。検出箇所から直接 undo すると同じ PagedFile lock へ再入してしまう。
+        AbortCore();
+    }
+
     private void RollBackInPlace()
     {
-        if (_undoHandler == null) return;
-        // **順序が重要** (spec: 07_fulltext.md#logical-wal)。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
-        // (page before-image を持たない) からキーを除去する。その後 before-image undo が Full の header
-        // ページを pre-tx CLR へ戻し ReloadFromHeader で root/height/entryCount を権威的に再同期するので、
-        // 論理 undo が触った entryCount は最終的に header CLR の値 (= pre-tx) で上書きされ二重計上しない。
-        // (逆順だと header が先に 0 へ戻った後 DeleteRawEntry が更に減らし entryCount=-1 になる。)
-        // 論理 undo は post-tx 構造を辿るので Suppressed leaf のキーを正しく見つけられる。
-        _undoHandler.UndoFtLogical(WalPageContext.CurrentFtUndoLog);
-        var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
+        if (_undoHandler is null || _walWriteSet is null) return;
+        IReadOnlyCollection<byte[]> beforeImages = _walWriteSet.GetAllBeforeImagesOldestWins();
         if (beforeImages.Count > 0)
             _undoHandler.Undo(beforeImages);
     }
 
-    // ==================== SSN コミットプロトコル ====================
-
-    /// <summary>
-    /// SSN (Wang et al. DaMoN'15) Algorithm 1 の commit 時検証 + post-commit スタンプ書き戻し。
-    /// π/η は <see cref="TransactionManager"/> の大域 commit-stamp クロックで計算する
-    /// (begin-order の TxId ではなく commit-order)。read/write hook が収集した read/write set を
-    /// もとに、creator cstamp / reader pstamp / overwriter sstamp を畳み込んで exclusion window
-    /// (π(T) &gt; η(T)) を判定する。検証 + 書き戻しは <see cref="TransactionManager.SsnCommitGate"/>
-    /// 下で直列化し、並行 Serializable commit 間の version スタンプ read-modify-write を保護する。
-    /// <para>read 捕捉は <see cref="ISsnReadSink"/> をストアの物理読み取り点 (NodeStore /
-    /// RelationshipStore の Read・Scan) に挿しているため、直接 Read だけでなく traversal の隣接走査・
-    /// scan・index seek 後のレコード読みも一律 read-set に入る (= rw-antidependency の取りこぼしなし)。</para>
-    /// <para>仕様上の限界 (設計でスコープ外、index versioning / 別タスク前提): phantom protection は
-    /// 対象外 — 述語に新規一致する行や隣接の増加 (= 既存バージョンの読みではない) は検出しない。
-    /// lock は SSN と併存し撤去しない (将来別タスク)。</para>
-    /// <para>実装上の割り切り (いずれも安全側 = false-abort 方向で、missed-anomaly は起こさない):
-    /// (1) 競合粒度は Node / Relationship 単位で per-property ではない (同一ノードの別プロパティ同士も
-    /// 衝突扱い = over-abort)。(2) early-abort は入れず commit 時に一括判定 (perf 最適化の見送りで
-    /// correctness 不変)。(3) commit-stamp クロックはプロセスローカルで再起動時リセット
-    /// (永続化/復元せず)。再起動を跨ぐと旧/新 stamp 空間が混在し得るが η は下限・π は上限なので
-    /// false-abort のみ (safe-retry で回復可能)。</para>
-    /// </summary>
-    private void SsnValidateAndStamp()
-    {
-        var ssn = _ssn!;
-        lock (_manager.SsnCommitGate)
-        {
-            // 候補 commit stamp (単調)。最終 cstamp(T) は下で π(T) に確定する。
-            long candidate = _manager.NextCommitStamp();
-            // commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
-            // WalPageContext がまだ生きているので commit と同一 page-WAL 単位で永続化され、
-            // 再起動後の Open でこの値からクロックを再開できる (旧/新 stamp 空間の混在を防ぐ)。
-            // 候補は gate 下で単調増加するため最新書き込みが最高値。
-            _nodeVersions!.WriteCommitStampHighWater(candidate);
-            long eta = 0;                 // η(T)
-            long pi = long.MaxValue;      // π(T)
-
-            // 読んだバージョン: creator cstamp を η に、上書き済みなら overwriter sstamp を π に。
-            foreach (var r in ssn.Reads)
-            {
-                var meta = ReadMeta(r);
-                if (meta.Xmin != 0 && meta.Xmin != Id.Value)
-                {
-                    long c = _manager.CommitStampOf(meta.Xmin);
-                    if (c > eta) eta = c;
-                }
-                // overwriter cstamp を π に反映するのは「上書きが自分の snapshot より後」=
-                // 自分が読んだのが上書き前の版のときだけ (rw-antidependency)。既に commit 済みの
-                // 上書き後の版を読んだだけなら rw 依存は無いので π を下げない (safe-retry)。
-                if (meta.Sstamp < pi && meta.Sstamp > _ssnSnapshotCstamp) pi = meta.Sstamp;
-            }
-            // 上書きしたバージョン: その reader (v.pstamp) は self への r:w in-edge → η に。
-            foreach (var w in ssn.Writes)
-            {
-                long p = ReadMeta(w).Pstamp;
-                if (p > eta) eta = p;
-            }
-            // π = min(π, candidate)。
-            if (candidate < pi) pi = candidate;
-
-            // exclusion window 違反なら abort。
-            if (eta >= pi)
-                throw new SerializabilityException(Id,
-                    $"Transaction {Id.Value} would violate serializability (η={eta} ≥ π={pi}).");
-
-            // 最終 commit stamp = π(T)。これを後続 tx が CommitStampOf / version stamp
-            // 経由で観測することで η/π 伝播が推移的になり、3-cycle 以上の dangerous structure も
-            // 検出できる (fresh counter のままだと推移性が壊れる)。
-            long cstamp = pi;
-            _manager.SetCommitStamp(Id.Value, cstamp);
-
-            // post-commit: 読んだバージョンに reader cstamp (π(T)) を、上書きしたバージョンに
-            // overwriter cstamp (π(T)) を記録する。これらの書き込みは WalPageContext がまだ
-            // 生きているため本 tx の PageImage として WAL に乗り、commit と一体で durable になる。
-            foreach (var r in ssn.Reads)
-            {
-                var store = StoreFor(r.Kind);
-                if (store == null) continue;
-                if (cstamp > store.Read(r.LocalId).Pstamp)
-                    store.UpdatePstamp(r.LocalId, cstamp);
-            }
-            foreach (var w in ssn.Writes)
-            {
-                var store = StoreFor(w.Kind);
-                if (store == null) continue;
-                if (cstamp < store.Read(w.LocalId).Sstamp)
-                    store.UpdateSstamp(w.LocalId, cstamp);
-            }
-        }
-    }
-
-    private EntityVersionMeta ReadMeta(EntityId id)
-    {
-        var store = StoreFor(id.Kind);
-        return store == null ? EntityVersionMeta.Unset : store.Read(id.LocalId);
-    }
-
-    private IEntityVersionStore? StoreFor(EntityKind kind) => kind switch
-    {
-        EntityKind.Node => _nodeVersions,
-        EntityKind.Relationship => _relVersions,
-        _ => null,
-    };
-
-    // ==================== セーブポイント ====================
-
     public SavepointId Savepoint(string? name = null)
     {
-        if (_state != TransactionState.Active)
-            throw new TransactionException("Cannot create savepoint: transaction is not Active.");
-        int level = WalPageContext.PushSavepoint();
-        if (level < 0)
-        {
-            // 書き込みコンテキストが無い (例: 読み取り専用 tx) — savepoint は no-op で良いが、
-            // RollbackTo / Release の正当性チェックのため id だけは発行しておく。
-            level = 0;
-        }
+        using var usage = EnterUsage();
+        EnsureWritable("create a savepoint");
+        _properties.FlushMeta();
+        int level = _walWriteSet!.PushSavepoint();
         long id = ++_nextSavepointId;
-        (_savepoints ??= new List<(long, int)>()).Add((id, level));
+        (_savepoints ??= []).Add((id, level));
         return new SavepointId(id, name);
     }
 
     public void RollbackTo(SavepointId savepoint)
     {
-        if (_state != TransactionState.Active)
-            throw new TransactionException("Cannot rollback to savepoint: transaction is not Active.");
+        using var usage = EnterUsage();
+        EnsureWritable("rollback to a savepoint");
         int index = FindSavepointIndex(savepoint.Value);
         if (index < 0)
             throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
 
         int level = _savepoints![index].Level;
-        // 上位 savepoint も同時に無効化する (PostgreSQL / SQL 標準: ROLLBACK TO Sn は
-        // Sn より新しい全ての savepoint も解放する)。Sn 自身は消費しない。
         _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
-
-        // 監査 #2: FT 論理 undo を先に当てる (full abort の RollBackInPlace と同順)。Suppressed leaf は
-        // page before-image を持たないため、savepoint 以降の FT mutation はこの論理 undo + WAL 補償でのみ
-        // 巻き戻る。両スタック (FT / before-image) を揃って [level..] 巻き戻すため両方を呼ぶ。
-        var ftUndo = WalPageContext.RollbackFtToSavepoint(level);
-        var beforeImages = WalPageContext.RollbackToSavepoint(level);
-        if (_undoHandler != null)
-        {
-            if (ftUndo.Count > 0) _undoHandler.UndoFtLogicalPartial(ftUndo);
-            if (beforeImages.Count > 0) _undoHandler.UndoPartial(beforeImages);
-        }
+        IReadOnlyCollection<byte[]> beforeImages = _walWriteSet!.RollbackToSavepoint(level);
+        if (_undoHandler is not null && beforeImages.Count > 0)
+            _undoHandler.UndoPartial(beforeImages, _walWriteSet);
+        _nexuses.RefreshPendingViewAdds();
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)
     {
-        if (_state != TransactionState.Active)
-            throw new TransactionException("Cannot release savepoint: transaction is not Active.");
+        using var usage = EnterUsage();
+        EnsureWritable("release a savepoint");
         int index = FindSavepointIndex(savepoint.Value);
         if (index < 0)
             throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
 
         int level = _savepoints![index].Level;
-        // Release した savepoint より新しい savepoint も同時に無効化する (SQL 標準準拠)。
         _savepoints.RemoveRange(index, _savepoints.Count - index);
-        WalPageContext.ReleaseSavepoint(level);
+        _walWriteSet!.ReleaseSavepoint(level);
     }
 
     private int FindSavepointIndex(long id)
     {
-        if (_savepoints == null) return -1;
-        for (int i = 0; i < _savepoints.Count; i++)
+        if (_savepoints is null) return -1;
+        for (int index = 0; index < _savepoints.Count; index++)
         {
-            if (_savepoints[i].Id == id) return i;
+            if (_savepoints[index].Id == id) return index;
         }
         return -1;
     }
 
     public void Dispose()
     {
-        if (_state == TransactionState.Active) Abort();
+        if (_state == TransactionState.Active)
+            Abort();
     }
 
     public void OnCommitted(Action callback)
@@ -414,12 +298,12 @@ internal sealed class Transaction : ITransaction
         {
             case TransactionState.Committed:
                 SafeInvoke(callback);
-                return;
+                break;
             case TransactionState.Aborted:
-                return;
+                break;
             default:
-                (_onCommitted ??= new List<Action>()).Add(callback);
-                return;
+                (_onCommitted ??= []).Add(callback);
+                break;
         }
     }
 
@@ -430,31 +314,79 @@ internal sealed class Transaction : ITransaction
         {
             case TransactionState.Aborted:
                 SafeInvoke(callback);
-                return;
+                break;
             case TransactionState.Committed:
-                return;
+                break;
             default:
-                (_onRolledBack ??= new List<Action>()).Add(callback);
-                return;
+                (_onRolledBack ??= []).Add(callback);
+                break;
         }
+    }
+
+    private void ReleaseResources()
+    {
+        if (Interlocked.Exchange(ref _resourcesReleased, 1) != 0) return;
+        if (_walWriteSet is not null && ReferenceEquals(_wal.ActiveWriteSet, _walWriteSet))
+            _wal.ActiveWriteSet = null;
+        Interlocked.Exchange(ref _snapshotRegistration, null)?.Dispose();
+        Interlocked.Exchange(ref _writerLease, null)?.Dispose();
+    }
+
+    private void EnsureActive(string operation)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException(
+                $"Cannot {operation}: transaction is not Active.");
+    }
+
+    private void EnsureWritable(string operation)
+    {
+        EnsureActive(operation);
+        if (_isReadOnly)
+            throw new TransactionException(
+                $"Cannot {operation} in a read-only transaction.");
+    }
+
+    private void RecordCommitTelemetry(
+        Stopwatch stopwatch,
+        Activity? activity,
+        bool failedAfterDurability)
+    {
+        QuiverTelemetry.TxCommitCount.Add(1);
+        QuiverTelemetry.TxCommitDurationMs.Record(stopwatch.Elapsed.TotalMilliseconds);
+        QuiverEventSource.Log.TxCommit();
+        QuiverEventSource.Log.TxCommitted(Id.Value, stopwatch.Elapsed.TotalMilliseconds);
+        activity?.SetStatus(
+            failedAfterDurability ? ActivityStatusCode.Error : ActivityStatusCode.Ok,
+            failedAfterDurability ? "post-commit processing failed" : null);
+    }
+
+    private void RecordAbortTelemetry(
+        Stopwatch stopwatch,
+        Activity? activity,
+        Exception exception)
+    {
+        QuiverTelemetry.TxAbortCount.Add(1);
+        QuiverTelemetry.TxAbortDurationMs.Record(stopwatch.Elapsed.TotalMilliseconds);
+        QuiverEventSource.Log.TxAbort();
+        QuiverEventSource.Log.TxCommitFailed(
+            Id.Value,
+            exception.Message,
+            exception.GetType().FullName ?? exception.GetType().Name);
+        activity?.SetStatus(ActivityStatusCode.Error, "commit failed and rolled back");
     }
 
     private static void FireHooks(List<Action>? hooks)
     {
-        if (hooks == null) return;
-        for (int i = 0; i < hooks.Count; i++) SafeInvoke(hooks[i]);
+        if (hooks is null) return;
+        foreach (Action hook in hooks)
+            SafeInvoke(hook);
     }
 
     private static void SafeInvoke(Action callback)
     {
-        // オブザーバーの例外でトランザクション結果を変えてはならない。
-        try { callback(); } catch { }
+        try { callback(); }
+        catch { }
     }
 
-    private void ReleaseAllLocks()
-    {
-        _nodeLocks.ReleaseAll(Id);
-        _relLocks.ReleaseAll(Id);
-        _indexLocks.ReleaseAll(Id);
-    }
 }

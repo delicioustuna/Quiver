@@ -2,7 +2,6 @@
   <Folder Name="/src/">
     <Project Path="src/Quiver/Quiver.csproj" />
     <Project Path="src/Quiver.SourceGen/Quiver.SourceGen.csproj" />
-    <Project Path="src/Quiver.Embedding/Quiver.Embedding.csproj" />
     <Project Path="src/Quiver.Hosting/Quiver.Hosting.csproj" />
     <Project Path="src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj" />
     <Project Path="src/Quiver.Rag/Quiver.Rag.csproj" />
@@ -10,9 +9,9 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj" />
     <Project Path="benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj" />
+    <Project Path="benchmarks/Quiver.Benchmarks.RecallCheck/Quiver.Benchmarks.RecallCheck.csproj" />
   </Folder>
   <Folder Name="/tools/">
-    <Project Path="tools/Quiver.Studio/Quiver.Studio.csproj" />
     <Project Path="tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj" />
     <Project Path="tools/Quiver.Mcp/Quiver.Mcp.csproj" />
   </Folder>
@@ -28,6 +27,7 @@
     <Project Path="samples/Quiver.Samples.Rag/Quiver.Samples.Rag.csproj" />
     <Project Path="samples/Quiver.Samples.QueryPatterns/Quiver.Samples.QueryPatterns.csproj" />
     <Project Path="samples/Quiver.Samples.Signal/Quiver.Samples.Signal.csproj" />
+    <Project Path="samples/Quiver.Samples.Nexuses/Quiver.Samples.Nexuses.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quiver.Storage.Tests/Quiver.Storage.Tests.csproj" />

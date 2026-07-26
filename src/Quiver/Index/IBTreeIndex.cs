@@ -1,4 +1,5 @@
-﻿using Quiver.Index.FullText;
+using Quiver.Index.FullText;
+using Quiver.Migrations;
 using Quiver.Text;
 
 namespace Quiver.Index;
@@ -11,13 +12,6 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
     BTreeRangeEnumerator Range(in TKey from, bool fromInclusive, in TKey to, bool toInclusive);
     BTreeRangeEnumerator FullScan();
 
-    /// <summary>
-    /// 生バイト範囲 <c>[fromKey, toKeyInclusive]</c> に対する forward-only seekable cursor。
-    /// <see cref="Range"/> (leaf リンクの <c>ref struct</c>) と異なりヒープオブジェクトなので
-    /// WAND がタームごとの cursor 配列を保持でき、<see cref="BTreeRawCursor.SeekTo"/> は
-    /// tree root 経由の O(log N) ジャンプ (WAND pivoting の skip-pointer 代替) を行う。
-    /// </summary>
-    BTreeRawCursor OpenScanCursor(byte[] fromKey, byte[] toKeyInclusive);
     int Height { get; }
     long EntryCount { get; }
     IEnumerable<long> SeekValues(TKey key);
@@ -39,7 +33,7 @@ internal interface IBTreeIndexFlushable
 
     /// <summary>
     /// 索引内の全 (生キー, 値) ペアを leaf 順に列挙する。
-    /// 値は <see cref="Quiver.Core.NodeId.Value"/> など long を想定。
+    /// scalar 索引値はプロパティ版参照を long で保持する。
     /// orphan 検出は呼び出し側 (IndexManager.ValidateAll) で行う。
     /// </summary>
     IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries();
@@ -81,6 +75,10 @@ internal readonly ref struct KeyValueEntry
     }
 }
 
+internal readonly record struct ScalarIndexMetadata(
+    ScalarIndexDefinition Definition,
+    IndexLifecycleState State);
+
 internal interface IIndexManager
 {
     IBTreeIndex<int> CreateInt32Index(string name);
@@ -90,6 +88,14 @@ internal interface IIndexManager
     IBTreeIndex<byte[]> CreateBytesIndex(string name);
     bool DropIndex(string name);
     IEnumerable<string> ListIndexes();
+
+    /// <summary>primary catalog に記録された適用済みマイグレーションを適用順で返す。</summary>
+    IReadOnlyList<MigrationHistoryEntry> ListMigrationHistory()
+        => Array.Empty<MigrationHistoryEntry>();
+
+    /// <summary>現在の書き込みトランザクションで履歴を primary catalog に追加する。</summary>
+    void AppendMigrationHistory(MigrationHistoryEntry entry)
+        => throw new NotSupportedException("Migration history is not supported by this index manager.");
 
     /// <summary>
     /// 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
@@ -101,12 +107,21 @@ internal interface IIndexManager
     bool RenameIndex(string oldName, string newName)
         => throw new NotSupportedException("RenameIndex is not supported by this index manager.");
 
+    void RenamePropertyTarget(string oldName, string newName) { }
+
+    void RenameTargetScope(
+        PropertyOwnerKind ownerKind,
+        string oldName,
+        string newName) { }
+
     /// <summary>
     /// スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
-    /// 登録する。これにより MergeNode が業務キー検索で自動的にインデックスを利用できる。
+    /// 登録する。これにより MergeVertex が業務キー検索で自動的にインデックスを利用できる。
     /// 既定実装は no-op (バインディングを保持しないバックエンドはフルスキャン経路に落ちる)。
     /// </summary>
-    void RegisterIndexBinding(string indexName, string label, string propertyKey) { }
+    void RegisterIndexDefinition(
+        ScalarIndexDefinition definition,
+        IndexLifecycleState state = IndexLifecycleState.Ready) { }
 
     /// <summary>
     /// (label, propertyKey) に登録されたインデックス名を返す。
@@ -123,8 +138,17 @@ internal interface IIndexManager
     /// (<see cref="ListIndexes"/> の補助。SchemaApi.ListIndexes のメタデータ復元に使う)。
     /// 既定実装は空シーケンス。
     /// </summary>
-    IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
-        => Array.Empty<(string, string, string)>();
+    IEnumerable<ScalarIndexMetadata> ListIndexDefinitions()
+        => Array.Empty<ScalarIndexMetadata>();
+
+    /// <summary>永続 definition の lifecycle state だけを更新する。</summary>
+    void SetIndexState(string name, IndexLifecycleState state) { }
+
+    /// <summary>
+    /// definition と tenant identity を維持したまま derived B+Tree artifact を空に戻す。
+    /// </summary>
+    void ResetIndexArtifact(string name)
+        => throw new NotSupportedException("Index artifact reset is not supported.");
 
     /// <summary>
     /// 管理下の全索引ファイルのバッファプールダーティページを fsync する。
@@ -136,12 +160,13 @@ internal interface IIndexManager
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
-    /// 値 (NodeId.Value 互換) を持つエントリを orphan として収集する。
+    /// scalar lane ではプロパティ版参照、全文 lane では entity 参照を持つエントリを orphan として収集する。
     /// 戻り値の <c>EntryCount</c> は走査総数、<c>IndexCount</c> は走査対象の索引数。
     /// 既定実装は何もせず (0, 0) を返す。
     /// </summary>
     (int IndexCount, long EntryCount) CollectOrphans(
-        Func<long, bool> isLive,
+        Func<long, bool> isLiveScalarReference,
+        Func<long, bool> isLiveEntity,
         ICollection<(string IndexName, byte[] RawKey, long Value)> output)
         => (0, 0);
 
@@ -152,41 +177,45 @@ internal interface IIndexManager
     /// </summary>
     int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans) => 0;
 
-    // ---- 全文索引 (postings + norms テナント) ----
+    // ---- 全文derived index definition ----
 
-    /// <summary>
-    /// 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
-    /// 既定実装は <see cref="NotSupportedException"/> (binary backend のみ対応)。
-    /// </summary>
-    FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
+    /// <summary>全文derived indexのdefinition参照を作成する。</summary>
+    FullTextCatalogEntry CreateFullTextDefinition(
+        string name,
+        string target,
+        string propertyKey,
+        string tokenizerId)
         => throw new NotSupportedException("Full-text indexes are not supported by this index manager.");
 
-    /// <summary>名前で全文索引を引く。既定実装は false。</summary>
-    bool TryGetFullTextIndex(string name, out FullTextIndex index)
+    /// <summary>名前で全文definition参照を引く。</summary>
+    bool TryGetFullTextDefinition(string name, out FullTextCatalogEntry definition)
     {
-        index = null!;
+        definition = null!;
         return false;
     }
 
-    /// <summary>
-    /// (label, propertyKey) に bound された全文索引を引く (透過維持フックの探索用)。
-    /// 既定実装は false。
-    /// </summary>
-    bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
-    {
-        index = null!;
-        return false;
-    }
-
-    /// <summary>登録済み全文索引のメタを列挙する。既定実装は空。</summary>
-    IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
+    /// <summary>登録済み全文definition参照を列挙する。</summary>
+    IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
         => Array.Empty<(string, string, string, string)>();
 
-    /// <summary>全文索引を削除する。既定実装は false。</summary>
-    bool DropFullTextIndex(string name) => false;
+    /// <summary>lifecycleとmanifestを含む全文catalog entryを列挙する。</summary>
+    IEnumerable<FullTextCatalogEntry> ListFullTextCatalogEntries()
+        => Array.Empty<FullTextCatalogEntry>();
+
+    /// <summary>全文definition参照を削除する。</summary>
+    bool DropFullTextDefinition(string name) => false;
 
     /// <summary>
-    /// abort の before-image undo 後に、全 B+Tree 索引 (secondary + 全文) の in-memory
+    /// immutable全文segment bodyを参照するmanifestを、現在のpage-WAL transactionで更新する。
+    /// </summary>
+    void UpdateFullTextManifest(
+        string name,
+        string manifest,
+        IndexLifecycleState state)
+        => throw new NotSupportedException("Full-text manifests are not supported by this index manager.");
+
+    /// <summary>
+    /// abort の before-image undo 後に、全 B+Tree 索引とdefinitionの in-memory
     /// ヘッダキャッシュを読み直す。<c>ReloadStoreMeta</c> から呼ばれる。既定は no-op。
     /// </summary>
     void ReloadAll() { }
@@ -198,28 +227,6 @@ internal interface IIndexManager
     /// <summary>カスタムトークナイザ (フィルタ付きパイプライン等) を registry に登録する。</summary>
     void RegisterTokenizer(ITokenizer tokenizer) { }
 
-    /// <summary>
-    /// 全文索引が 1 つでも存在するか。透過維持フックの fast-path
-    /// (FT 索引がゼロなら SetProperty はノード読取を省略して素通り)。既定は false。
-    /// </summary>
-    bool HasAnyFullTextIndex => false;
-
-    /// <summary>
-    /// 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
-    /// <paramref name="newText"/> を tokenize して挿入する。いずれも null ならその側はスキップ。
-    /// 同一 Tx 内で呼ばれ、B+Tree 操作は WAL/ARIES で保護される。既定は no-op。
-    /// </summary>
-    void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
-
-    /// <summary>
-    /// recovery 論理相の redo。indexTenantId の postings/norms へ
-    /// state-setting leaf ミューテーションを再適用する (isUpsert ? UpsertRaw : DeleteRawEntry)。
-    /// abort の論理 undo (逆操作) でも同経路を使う。既定 no-op。
-    /// </summary>
-    void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
-
-    /// <summary>論理 undo — leaf ミューテーションの逆操作を適用する。既定 no-op。</summary>
-    void ApplyFtLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
 }
 
 internal interface IBulkLoadable<TKey>

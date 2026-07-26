@@ -29,28 +29,29 @@ public sealed class RagStoreInitializationTests : IDisposable
     [Fact]
     public void Constructor_creates_expected_indexes()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = new RagStore(db, Options());
 
         // sourceId 一意キー索引。
         db.Schema.IndexExists(RagSchema.DocSourceIndex).Should().BeTrue();
 
         // ベクトル索引 (次元・尺度が options どおり)。
-        db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out var spec).Should().BeTrue();
-        spec.Dimensions.Should().Be(8);
-        spec.Metric.Should().Be(DistanceMetric.Cosine);
-        spec.EntityKind.Should().Be(EntityKind.Node);
+        db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out var info).Should().BeTrue();
+        var definition = info.Definition.Should().BeOfType<VectorIndexDefinition>().Subject;
+        definition.Dimensions.Should().Be(8);
+        definition.Metric.Should().Be(DistanceMetric.Cosine);
+        definition.Target.OwnerKind.Should().Be(PropertyOwnerKind.Vertex);
 
         // 全文索引 (binary backend は対応)。
         store.FullTextEnabled.Should().BeTrue();
-        db.Schema.ListFullTextIndexes()
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray()
             .Select(i => i.Name).Should().Contain(RagSchema.ChunkTextIndex);
     }
 
     [Fact]
     public void Constructing_twice_on_same_db_is_safe()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
 
         var first = new RagStore(db, Options());
         var second = new RagStore(db, Options());   // 2 回目でも throw しない
@@ -59,45 +60,45 @@ public sealed class RagStoreInitializationTests : IDisposable
 
         // 索引は重複作成されず 1 件ずつ。
         db.Schema.ListIndexes().Count(i => i.Name == RagSchema.DocSourceIndex).Should().Be(1);
-        db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
     }
 
     [Fact]
     public void Reopening_persisted_db_is_idempotent()
     {
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             _ = new RagStore(db, Options());
         }
 
         // 別セッションで開き直しても既存索引を踏んで no-op になる。
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var store = new RagStore(db, Options());
             store.FullTextEnabled.Should().BeTrue();
             db.Schema.IndexExists(RagSchema.DocSourceIndex).Should().BeTrue();
-            db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
-            db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+            db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
+            db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
         }
     }
 
     [Fact]
     public void FullText_can_be_disabled_via_options()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = new RagStore(db, Options() with { EnableFullTextIndex = false });
 
         store.FullTextEnabled.Should().BeFalse();
-        db.Schema.ListFullTextIndexes().Select(i => i.Name)
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Select(i => i.Name)
             .Should().NotContain(RagSchema.ChunkTextIndex);
         // ベクトル索引は引き続き作られる。
-        db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
+        db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
     }
 
     [Fact]
     public void Custom_vector_index_name_and_dimensions_are_honored()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = new RagStore(db, new RagStoreOptions
         {
             EmbeddingDimensions = 16,
@@ -106,18 +107,19 @@ public sealed class RagStoreInitializationTests : IDisposable
         });
 
         store.VectorIndexName.Should().Be("my_embeddings");
-        db.Vectors.TryGetIndex("my_embeddings", out var spec).Should().BeTrue();
-        spec.Dimensions.Should().Be(16);
-        spec.Metric.Should().Be(DistanceMetric.Dot);
+        db.Schema.TryGetIndex("my_embeddings", out var info).Should().BeTrue();
+        var definition = info.Definition.Should().BeOfType<VectorIndexDefinition>().Subject;
+        definition.Dimensions.Should().Be(16);
+        definition.Metric.Should().Be(DistanceMetric.Dot);
     }
 
     [Fact]
     public void Reopen_with_mismatched_dimensions_throws()
     {
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
             _ = new RagStore(db, Options(dim: 8));
 
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var act = () => new RagStore(db, Options(dim: 16));
             act.Should().Throw<InvalidOperationException>().WithMessage("*次元*");
@@ -127,10 +129,10 @@ public sealed class RagStoreInitializationTests : IDisposable
     [Fact]
     public void Reopen_with_mismatched_metric_throws()
     {
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
             _ = new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 8, VectorMetric = DistanceMetric.Cosine });
 
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var act = () => new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 8, VectorMetric = DistanceMetric.Dot });
             act.Should().Throw<InvalidOperationException>().WithMessage("*距離尺度*");
@@ -141,25 +143,25 @@ public sealed class RagStoreInitializationTests : IDisposable
     public void Existing_fulltext_index_stays_enabled_even_when_option_disabled()
     {
         // セッション 1: 全文索引を作る。
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var store = new RagStore(db, Options());
             store.FullTextEnabled.Should().BeTrue();
         }
 
         // セッション 2: EnableFullTextIndex=false で開いても、既存索引があるので利用可能。
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var store = new RagStore(db, Options() with { EnableFullTextIndex = false });
             store.FullTextEnabled.Should().BeTrue();
-            db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+            db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
         }
     }
 
     [Fact]
     public void Invalid_dimensions_throw()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var act = () => new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 0 });
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -167,7 +169,7 @@ public sealed class RagStoreInitializationTests : IDisposable
     [Fact]
     public void Null_arguments_throw()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         ((Action)(() => new RagStore(null!, Options()))).Should().Throw<ArgumentNullException>();
         ((Action)(() => new RagStore(db, null!))).Should().Throw<ArgumentNullException>();
     }

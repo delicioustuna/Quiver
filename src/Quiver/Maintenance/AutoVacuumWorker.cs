@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// <see cref="GraphDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
+/// <see cref="QuiverDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
 /// <see cref="IVacuum.Run"/> を起動する低頻度バックグラウンドワーカー。
 /// </summary>
 /// <remarks>
@@ -11,13 +11,12 @@ namespace Quiver.Maintenance;
 /// <list type="bullet">
 ///  <item><see cref="System.Threading.Timer"/> 駆動。初回も 1 周期後に発火する
 ///  (DB open 直後に重い vacuum が走って起動レイテンシを悪化させないため)。</item>
-///  <item>各 tick は <see cref="IVacuum.Run"/> を呼ぶだけ。アクティブ tx があれば
-///  vacuum 自身が <see cref="VacuumReport.Skipped"/> = true で安全に no-op するので、
-///  ワーカー側で tx 数を判定する必要はない。</item>
+///  <item>各 tick は <see cref="IVacuum.Run"/> を呼ぶだけ。
+///  binary backend は writer lease で mutation を直列化し、active reader の horizon より前だけを回収する。</item>
 ///  <item>tick は逐次実行 (re-entrancy ガード)。前回 tick がまだ走っている間に
 ///  次の周期が来ても二重起動しない。長時間 vacuum が周期を食い潰しても貯まらない。</item>
 ///  <item>vacuum 中の例外はワーカー内で握り潰す。バックグラウンドの失敗で本体 DB を
-///  巻き込まない (<see cref="DeadlockDetector"/> と同じ方針)。</item>
+///  巻き込まない。</item>
 ///  <item><see cref="Dispose"/> は idempotent。進行中 tick の完了を最大
 ///  <see cref="StopJoinTimeout"/> まで待ってから戻る。</item>
 /// </list>
@@ -38,14 +37,14 @@ internal sealed class AutoVacuumWorker : IDisposable
     /// <summary>実際に vacuum を起動した tick 累計回数 (Skipped 含む)。テスト / 診断用。</summary>
     public long RunCount => Interlocked.Read(ref _runCount);
 
-    /// <summary>アクティブ tx 等で Skipped 扱いになった tick 累計回数。テスト / 診断用。</summary>
+    /// <summary>バックエンドが Skipped 扱いにした tick 累計回数。テスト / 診断用。</summary>
     public long SkippedCount => Interlocked.Read(ref _skippedCount);
 
     /// <summary>テスト用フック: 1 tick が終わるたびに発火 (周期駆動・手動 <see cref="RunOnce"/> 両方)。</summary>
     internal Action<VacuumReport>? OnTickCompleted;
 
     /// <param name="runVacuum">
-    /// 1 tick で起動する vacuum 関数。通常は <c>() =&gt; graphDatabase.Vacuum()</c>。
+    /// 1 tick で起動する vacuum 関数。通常は <c>() =&gt; database.Vacuum()</c>。
     /// </param>
     /// <param name="interval">起動周期。<see cref="TimeSpan.Zero"/> 以下は不可。</param>
     public AutoVacuumWorker(Func<VacuumReport> runVacuum, TimeSpan interval)

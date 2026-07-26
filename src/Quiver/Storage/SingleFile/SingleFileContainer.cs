@@ -7,7 +7,7 @@ namespace Quiver.Storage;
 /// <summary>
 /// 単一物理ファイル <c>*.quiver</c> 上に複数の「テナント」(= 各ストアの論理ページ空間) を
 /// 同居させるコンテナ。物理層は既存 <see cref="PagedFile"/> をそのまま 1 個だけ再利用し
-/// (Clock buffer pool / MMF / WAL logging / ARIES recovery / truncate)、その上に
+/// (Clock buffer pool / MMF / page-WAL / commit-winner recovery / truncate)、その上に
 /// <b>カタログ (テナント記述子)</b> と各テナントの <b>論理→物理 page table</b> を載せる。
 ///
 /// レイアウト:
@@ -28,10 +28,11 @@ internal sealed class SingleFileContainer : IDisposable
     // カタログ root body レイアウト
     private const int CatalogNextOffset = 0;          // int64: 次カタログページ物理 ID (-1 = なし)
     private const int CatalogCountOffset = 8;          // int64: 記述子件数
-    // クリーン終了で WAL を削除しても MVCC visibility / TxId 採番を継続できるよう、
-    // 「これ未満の TxId は committed と presume してよい」高水位 (= 終了時の次 TxId) を root に保持する。
-    private const int CommittedHighWaterOffset = 16;   // int64: committed TxId 高水位 (= 次採番 TxId)
-    private const int CatalogDescriptorsOffset = 24;   // 以降 DescriptorSize バイトずつ
+    // 完了 checkpoint より前の WAL を落としても visibility と採番を再開できるよう、
+    // checkpoint 済み committed high-water と次 TxId を別フィールドで保持する。
+    private const int CommittedHighWaterOffset = 16;   // int64: checkpoint 済み committed TxId
+    private const int NextTransactionIdOffset = 24;    // int64: checkpoint 時点の次 TxId
+    private const int CatalogDescriptorsOffset = 32;   // 以降 DescriptorSize バイトずつ
 
     // 記述子: tenantId(1) flags(1) pageTableHead(8) logicalPageCount(8) logicalFreeHead(8) = 26B
     private const int DescriptorSize = 26;
@@ -39,23 +40,24 @@ internal sealed class SingleFileContainer : IDisposable
     // page-table ページ body レイアウト
     internal const int PtNextOffset = 0;        // int64: 次 page-table ページ物理 ID (-1 = なし)
     internal const int PtEntriesOffset = 8;     // 以降 int64 物理 ID エントリの配列
-    internal static int EntriesPerPageTablePage => (PagedFile.BodySize - PtEntriesOffset) / 8; // 1019
+    internal static int EntriesPerPageTablePage =>
+        (PagedFile.PageSizeConst - PageHeader.Size - PtEntriesOffset) / 8; // 1019
 
-    private readonly PagedFile _physical;
+    private readonly IPagedFile _physical;
     private readonly Dictionary<byte, CatalogEntry> _catalog = new();
     private readonly Dictionary<byte, TenantPagedFile> _tenants = new();
     private readonly object _gate = new();
     private bool _disposed;
-    // committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
+    // 完了 checkpoint へ含まれた committed TxId 高水位。0 = 未設定。
     private long _committedHighWaterTxId;
+    private long _nextTransactionId;
+    private IWriteAheadLog? _wal;
 
     public string Path => _physical.Path;
-    internal PagedFile Physical => _physical;
+    internal IPagedFile Physical => _physical;
 
     /// <summary>
-    /// 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
-    /// reopen 時に「これ未満の TxId は committed」と presume して MVCC visibility を維持し、
-    /// 次 TxId 採番をここから継続するために factory が参照する。0 = 未設定 (WAL から復元)。
+    /// 完了 checkpoint に含まれる committed TxId 高水位。
     /// </summary>
     public long CommittedHighWaterTxId
     {
@@ -63,27 +65,63 @@ internal sealed class SingleFileContainer : IDisposable
     }
 
     /// <summary>
-    /// クリーン終了時に backend が呼び、終了時点の次採番 TxId をカタログ root へ
-    /// 書き込む。実際の durable 化は呼び出し側の <c>FlushAll</c> に委ねる (本メソッドは buffer pool 更新)。
+    /// 完了 checkpoint に含まれる次 TxId。
     /// </summary>
-    public void SetCommittedHighWaterTxId(long value)
+    public long NextTransactionId
+    {
+        get { lock (_gate) return _nextTransactionId; }
+    }
+
+    /// <summary>
+    /// checkpoint/recovery が visibility と採番の再開位置をカタログ root へ書き込む。
+    /// durable 化は呼び出し側の sharp checkpoint に委ねる。
+    /// </summary>
+    public void SetRecoveryState(long committedHighWater, long nextTransactionId)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            _committedHighWaterTxId = value;
+            if (committedHighWater < TransactionId.Bootstrap.Value)
+                throw new ArgumentOutOfRangeException(nameof(committedHighWater));
+            if (nextTransactionId <= committedHighWater)
+                nextTransactionId = committedHighWater + 1;
+
+            _committedHighWaterTxId = committedHighWater;
+            _nextTransactionId = Math.Max(_nextTransactionId, nextTransactionId);
             var wh = _physical.PinForWrite(CatalogRootPageId);
             try
             {
-                BinaryPrimitives.WriteInt64LittleEndian(wh.Data[CommittedHighWaterOffset..], value);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    wh.Data[CommittedHighWaterOffset..],
+                    _committedHighWaterTxId);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    wh.Data[NextTransactionIdOffset..],
+                    _nextTransactionId);
             }
             finally { wh.Dispose(); }
         }
     }
 
-    public SingleFileContainer(string path, int poolCapacityPages = 256)
+    public SingleFileContainer(
+        string path,
+        int poolCapacityPages = 256,
+        long initialFileAllocationBytes = PagedFile.DefaultInitialFileAllocationBytes,
+        long maximumFileGrowthStepBytes = PagedFile.DefaultMaximumFileGrowthStepBytes)
+        : this(new PagedFile(
+            path,
+            poolCapacityPages,
+            initialFileAllocationBytes,
+            maximumFileGrowthStepBytes))
     {
-        _physical = new PagedFile(path, poolCapacityPages);
+    }
+
+    /// <summary>
+    /// 指定した物理ページ実装上に単一ファイルコンテナを構築する。
+    /// インメモリ物理層など、ファイルを持たない実装の組み立てに使用する。
+    /// </summary>
+    internal SingleFileContainer(IPagedFile physical)
+    {
+        _physical = physical;
         if (_physical.PageCount <= 1)
         {
             // 新規ファイル: カタログ root を物理 page 1 に確保して初期化する。
@@ -163,13 +201,18 @@ internal sealed class SingleFileContainer : IDisposable
     /// option B: 全テナント (= 物理ページ全体) を単一の <paramref name="dataFileKind"/> で WAL
     /// ロギング対象にする。物理ページ ID は全テナント横断で一意なので、WAL / recovery は純物理
     /// ページ単位で動く。recovery 時は fileRegistry に <c>{ dataFileKind: container.Physical }</c>
-    /// を渡せば PageImage / CLR が物理ページへ透過適用される。
+    /// を渡せば PageImage redo が物理ページへ適用される。
     /// </summary>
     internal void EnableWalLogging(byte dataFileKind, IWriteAheadLog wal)
-        => _physical.EnableWalLogging(dataFileKind, wal);
+    {
+        _wal = wal;
+        _physical.EnableWalLogging(dataFileKind, wal);
+    }
+
+    internal bool HasActiveWriteSet => _wal?.ActiveWriteSet is not null;
 
     /// <summary>
-    /// recovery / abort (CLR undo) が物理 page1 (カタログ root) と page-table ページを書き戻した
+    /// recovery / abort の before-image 復元が物理 page1 (カタログ root) と page-table ページを書き戻した
     /// 後に、in-memory のテナント記述子 (CatalogEntry) と各 open テナントの page table を
     /// ディスクから再同期する。記述子は <b>in-place 更新</b>するため、open 済みテナントが保持する
     /// CatalogEntry 参照はそのまま有効。
@@ -186,7 +229,7 @@ internal sealed class SingleFileContainer : IDisposable
             }
             else
             {
-                // abort (CLR undo) 後: open 済みテナントの CatalogEntry 参照を保つため in-place 更新。
+                // abort の before-image 復元後は open 済みテナントの CatalogEntry 参照を保つため in-place 更新。
                 LoadCatalog(inPlace: true);
                 foreach (var tenant in _tenants.Values)
                     tenant.ReloadPageTable();
@@ -234,7 +277,10 @@ internal sealed class SingleFileContainer : IDisposable
                 long count = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogCountOffset..]);
                 // committed TxId 高水位は root ページ (page 1) にのみ持つ。
                 if (catalogPage == CatalogRootPageId.Value)
+                {
                     _committedHighWaterTxId = BinaryPrimitives.ReadInt64LittleEndian(body[CommittedHighWaterOffset..]);
+                    _nextTransactionId = BinaryPrimitives.ReadInt64LittleEndian(body[NextTransactionIdOffset..]);
+                }
                 int offset = CatalogDescriptorsOffset;
                 for (long i = 0; i < count && offset + DescriptorSize <= body.Length; i++, offset += DescriptorSize)
                 {
@@ -260,7 +306,8 @@ internal sealed class SingleFileContainer : IDisposable
     // 現状は単一カタログページ前提 (記述子 ~313 件まで)。連鎖は将来拡張。
     private void PersistCatalogLocked()
     {
-        if (_catalog.Count * DescriptorSize + CatalogDescriptorsOffset > PagedFile.BodySize)
+        if (_catalog.Count * DescriptorSize + CatalogDescriptorsOffset >
+            PagedFile.PageSizeConst - PageHeader.Size)
             throw new StorageException(
                 $"Catalog descriptor table overflow ({_catalog.Count} tenants). Chained catalog pages not yet implemented.");
 

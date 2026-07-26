@@ -24,7 +24,7 @@ namespace Quiver.Storage;
 ///         <c>-(nextFreeSeq + 2)</c> で符号化 (terminal = -1)。</item>
 /// </list>
 /// vacuum が回収した seq は free list へ積まれ、<see cref="PopFreeSeq"/> が再利用する。これにより
-/// 旧 NodeStore の slot 再利用 + 世代カウンタと同じ ABA 検出を維持する。
+/// 旧 VertexStore の slot 再利用 + 世代カウンタと同じ ABA 検出を維持する。
 /// </summary>
 internal sealed class ItemPointerMap
 {
@@ -106,6 +106,10 @@ internal sealed class ItemPointerMap
         SaveMeta();
     }
 
+    /// <summary>指定 sequence が既に free list entry へ変換済みかを返す。</summary>
+    public bool IsFree(long seq)
+        => seq >= 0 && seq < _hwm && GetRaw(seq) < 0;
+
     /// <summary>recovery 用: ヘッダから hwm / freeHead を読み直す。</summary>
     public void ReloadMeta() => LoadMeta();
 
@@ -150,8 +154,8 @@ internal sealed class ItemPointerMap
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("itempointermap", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("itempointermap", v, StorageFormatVersion.Current);
     }
 
     private void SaveMeta(bool initialise = false)
@@ -160,6 +164,6 @@ internal sealed class ItemPointerMap
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
     }
 }

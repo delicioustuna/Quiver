@@ -68,18 +68,18 @@ public sealed class EdgeWeightProviderTests
     public void GetWeight_returns_property_value_as_weight()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ewp_prop");
-        var keyId = fx.Db.Schema.GetOrCreatePropertyKey("cost");
+        var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("cost"));
         var provider = new PropertyChainWeightProvider(keyId);
 
-        using var tx = fx.Db.BeginTransaction();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "ROAD");
-        tx.SetProperty(rel, "cost", PropertyValue.FromDouble(2.5));
+        using var tx = fx.Db.BeginWriteTransaction();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "ROAD");
+        tx.SetProperty(edge, "cost", PropertyValue.FromDouble(2.5));
         tx.Commit();
 
-        using var rtx = fx.Db.BeginTransaction();
-        var weight = provider.GetWeight(((GraphTransaction)rtx).Inner, rel, 0);
+        using var rtx = fx.Db.BeginWriteTransaction();
+        var weight = provider.GetWeight(rtx.AsInternal().Inner, edge, 0);
         weight.Should().BeApproximately(2.5, 1e-10);
         rtx.Rollback();
     }
@@ -88,17 +88,17 @@ public sealed class EdgeWeightProviderTests
     public void GetWeight_returns_default_when_property_missing()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ewp_default");
-        var keyId = fx.Db.Schema.GetOrCreatePropertyKey("cost");
+        var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("cost"));
         var provider = new PropertyChainWeightProvider(keyId, defaultWeight: 1.0);
 
-        using var tx = fx.Db.BeginTransaction();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "ROAD");
+        using var tx = fx.Db.BeginWriteTransaction();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "ROAD");
         tx.Commit();
 
-        using var rtx = fx.Db.BeginTransaction();
-        var weight = provider.GetWeight(((GraphTransaction)rtx).Inner, rel, 0);
+        using var rtx = fx.Db.BeginWriteTransaction();
+        var weight = provider.GetWeight(rtx.AsInternal().Inner, edge, 0);
         weight.Should().Be(1.0);
         rtx.Rollback();
     }
@@ -107,17 +107,17 @@ public sealed class EdgeWeightProviderTests
     public void GetWeight_respects_custom_default_weight()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ewp_custom_default");
-        var keyId = fx.Db.Schema.GetOrCreatePropertyKey("dist");
+        var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("dist"));
         var provider = new PropertyChainWeightProvider(keyId, defaultWeight: 99.0);
 
-        using var tx = fx.Db.BeginTransaction();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "PATH");
+        using var tx = fx.Db.BeginWriteTransaction();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "PATH");
         tx.Commit();
 
-        using var rtx = fx.Db.BeginTransaction();
-        var weight = provider.GetWeight(((GraphTransaction)rtx).Inner, rel, 0);
+        using var rtx = fx.Db.BeginWriteTransaction();
+        var weight = provider.GetWeight(rtx.AsInternal().Inner, edge, 0);
         weight.Should().Be(99.0);
         rtx.Rollback();
     }
@@ -126,18 +126,18 @@ public sealed class EdgeWeightProviderTests
     public void GetWeight_reads_int64_property_as_weight()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ewp_int64");
-        var keyId = fx.Db.Schema.GetOrCreatePropertyKey("hops");
+        var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("hops"));
         var provider = new PropertyChainWeightProvider(keyId);
 
-        using var tx = fx.Db.BeginTransaction();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "LINK");
-        tx.SetProperty(rel, "hops", PropertyValue.FromInt64(5));
+        using var tx = fx.Db.BeginWriteTransaction();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "LINK");
+        tx.SetProperty(edge, "hops", PropertyValue.FromInt64(5));
         tx.Commit();
 
-        using var rtx = fx.Db.BeginTransaction();
-        var weight = provider.GetWeight(((GraphTransaction)rtx).Inner, rel, 0);
+        using var rtx = fx.Db.BeginWriteTransaction();
+        var weight = provider.GetWeight(rtx.AsInternal().Inner, edge, 0);
         weight.Should().Be(5.0);
         rtx.Rollback();
     }
@@ -146,20 +146,20 @@ public sealed class EdgeWeightProviderTests
     public void GetWeight_picks_correct_key_among_multiple_properties()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ewp_multi_prop");
-        var costKey = fx.Db.Schema.GetOrCreatePropertyKey("cost");
-        var nameKey = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var costKey = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("cost"));
+        var nameKey = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var provider = new PropertyChainWeightProvider(costKey);
 
-        using var tx = fx.Db.BeginTransaction();
-        var a = tx.CreateNode("A");
-        var b = tx.CreateNode("B");
-        var rel = tx.CreateRelationship(a, b, "ROAD");
-        tx.SetProperty(rel, "name", PropertyValue.FromString("I-95"));
-        tx.SetProperty(rel, "cost", PropertyValue.FromDouble(7.77));
+        using var tx = fx.Db.BeginWriteTransaction();
+        var a = tx.CreateVertex("A");
+        var b = tx.CreateVertex("B");
+        var edge = tx.CreateEdge(a, b, "ROAD");
+        tx.SetProperty(edge, "name", PropertyValue.FromString("I-95"));
+        tx.SetProperty(edge, "cost", PropertyValue.FromDouble(7.77));
         tx.Commit();
 
-        using var rtx = fx.Db.BeginTransaction();
-        var weight = provider.GetWeight(((GraphTransaction)rtx).Inner, rel, 0);
+        using var rtx = fx.Db.BeginWriteTransaction();
+        var weight = provider.GetWeight(rtx.AsInternal().Inner, edge, 0);
         weight.Should().BeApproximately(7.77, 1e-10);
         rtx.Rollback();
     }
@@ -192,11 +192,11 @@ public sealed class EdgeWeightProviderTests
     }
 
     [Fact]
-    public void PayloadLane_ignores_transaction_and_relationship_id()
+    public void PayloadLane_ignores_transaction_and_edge_id()
     {
         var expected = 1.23;
         var raw = BitConverter.DoubleToInt64Bits(expected);
-        var weight = PayloadLaneWeightProvider.Instance.GetWeight(null!, new RelationshipId(999), raw);
+        var weight = PayloadLaneWeightProvider.Instance.GetWeight(null!, new EdgeId(999), raw);
         weight.Should().BeApproximately(expected, 1e-10);
     }
 

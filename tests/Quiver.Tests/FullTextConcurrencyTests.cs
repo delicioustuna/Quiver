@@ -11,7 +11,7 @@ namespace Quiver.Tests;
 /// <summary>
 /// 全文インデックスの並行性契約を、単一ライターと複数の並行リーダーという
 /// エンジンの実際のモデルに沿って検証する。
-/// 同じ Postings B+Tree を複数の書き込みトランザクションが同時に変更する操作は契約外なので、
+/// 同じ全文manifestを複数の書き込みトランザクションが同時にpublishしないため、
 /// 複数スレッドからの取り込みはアプリケーション側の書き込みゲートで直列化する。
 /// リーダーはロックなしで並行実行する。
 ///
@@ -26,20 +26,20 @@ public sealed class FullTextConcurrencyTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
     private readonly object _writeGate = new();
 
     public FullTextConcurrencyTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts6_conc_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new QuiverDatabaseOptions
         {
             // CI の全面並列実行では内部コミットロックの待機が既定の 5 秒を超えることがある。
             // スターベーションを正しさの障害と誤認しないよう待機時間を広げる。
             // 実際のタイムアウトは分類器が一時的な競合として扱う。
-            LockTimeout = TimeSpan.FromSeconds(30),
+            WriterWaitTimeout = TimeSpan.FromSeconds(30),
         });
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -52,7 +52,6 @@ public sealed class FullTextConcurrencyTests : IDisposable
 
     private static Bucket Classify(Exception ex) => ex switch
     {
-        SerializabilityException => Bucket.Transient,
         TransactionException te when te.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
             || te.Message.Contains("lock", StringComparison.OrdinalIgnoreCase) => Bucket.Transient,
         _ => Bucket.Unexpected,
@@ -65,7 +64,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
         const int DocsPerWriter = 50;
         const int Readers = 3;
 
-        var committed = new ConcurrentDictionary<string, NodeId>();   // marker -> node
+        var committed = new ConcurrentDictionary<string, VertexId>();   // marker -> vertex
         var faults = new ConcurrentBag<Exception>();
         using var done = new CountdownEvent(Writers);
 
@@ -81,8 +80,8 @@ public sealed class FullTextConcurrencyTests : IDisposable
                     // 一度に 1 つの Postings インデックスだけを書き換える。
                     lock (_writeGate)
                     {
-                        using var tx = _db.BeginTransaction();
-                        var n = tx.CreateNode("Doc");
+                        using var tx = _db.BeginWriteTransaction();
+                        var n = tx.CreateVertex("Doc");
                         tx.SetProperty(n, "body",
                             PropertyValue.FromString($"shared token {marker} payload body"));
                         tx.Commit();
@@ -106,11 +105,11 @@ public sealed class FullTextConcurrencyTests : IDisposable
             {
                 while (!done.IsSet)
                 {
-                    using var rtx = _db.BeginReadOnlyTransaction();
+                    using var rtx = _db.BeginReadTransaction();
                     // Searching the shared term may legitimately return any prefix of
                     // the committed set (empty included) while a writer is in flight —
                     // the only contract here is "no fault, well-formed ids".
-                    var hits = rtx.G(_db.Schema).Search(Index, "shared", k: 100).ToList();
+                    var hits = rtx.Query.Search(Index, "shared", k: 100).ToList();
                     foreach (var id in hits) id.Value.Should().BeGreaterThan(0);
                     Thread.Yield();
                 }
@@ -136,18 +135,18 @@ public sealed class FullTextConcurrencyTests : IDisposable
         // Writes are gated, so every document commits.
         committed.Should().HaveCount(Writers * DocsPerWriter);
 
-        // Final consistency: each committed marker resolves to exactly its node, and
+        // Final consistency: each committed marker resolves to exactly its vertex, and
         // the shared term returns the whole committed set (postings stayed coherent
         // under concurrent search).
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            var g = rtx.G(_db.Schema);
-            foreach (var (marker, node) in committed)
-                g.Search(Index, marker, k: 5).ToList().Should().ContainSingle().Which.Should().Be(node);
+            var g = rtx.Query;
+            foreach (var (marker, vertex) in committed)
+                g.Search(Index, marker, k: 5).ToList().Should().ContainSingle().Which.Should().Be(vertex);
         }
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            rtx.G(_db.Schema).Search(Index, "shared", k: Writers * DocsPerWriter + 1)
+            rtx.Query.Search(Index, "shared", k: Writers * DocsPerWriter + 1)
                 .ToList().Should().HaveCount(Writers * DocsPerWriter);
         }
     }

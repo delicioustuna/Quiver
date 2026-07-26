@@ -104,7 +104,7 @@ internal sealed class SortOperator : IPhysicalOperator
         {
             TupleSlotType.Double => sa.DoubleValue.CompareTo(sb.DoubleValue),
             TupleSlotType.Utf8String or TupleSlotType.Bytes => CompareBytes(a.Bytes?[col], b.Bytes?[col]),
-            // NodeId / RelationshipId / Int64 / Bool はすべて LongValue を使う。
+            // VertexId / EdgeId / Int64 / Bool はすべて LongValue を使う。
             _ => sa.LongValue.CompareTo(sb.LongValue),
         };
     }
