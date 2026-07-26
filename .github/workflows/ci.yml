@@ -4,7 +4,7 @@ name: CI
 # 安定後に matrix へ ubuntu-latest を追加する (tasks/ops.md CI-1 の方針)。
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
 

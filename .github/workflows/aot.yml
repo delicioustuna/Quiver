@@ -5,7 +5,7 @@ name: AOT publish smoke
 # PW-19 (AOT publish smoke) と連動。段階導入のため windows-latest 単独で開始する。
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
 
