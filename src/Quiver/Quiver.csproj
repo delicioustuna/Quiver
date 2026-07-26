@@ -18,7 +18,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Quiver</PackageId>
-    <Description>依存パッケージゼロの Pure C# 組み込み (in-process) グラフ + ベクトル + 全文検索データベースエンジン。Vertex/Edgeをプロパティ付きで単一ファイルに永続化し、型安全な CRUD・Fluent トラバーサル・WAL クラッシュリカバリ・B+Tree インデックス・KNN ベクトル検索を提供する。属性ベースの Source Generator を同梱。NativeAOT 対応、アンマネージド依存なし。ローカル RAG バックエンドに最適。</Description>
+    <Description>依存パッケージゼロのPure C#組み込みグラフ、ベクトル、全文検索データベース。</Description>
     <PackageTags>$(PackageTags);vector-search;knn;full-text-search;rag;nativeaot;source-generator;traversal;wal;embedded-database</PackageTags>
     <!-- 同梱する analyzer を明示パックする (下の target)。 -->
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_QuiverAddBundledAnalyzer</TargetsForTfmSpecificContentInPackage>
