@@ -2,6 +2,7 @@ using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Running;
 using Quiver.Benchmarks;
+using Quiver.Benchmarks.Experimental.MathUseCases;
 using Quiver.Benchmarks.Standalone;
 
 // ── ベンチ一時 DB の残骸を起動時に掃除する ──────────────────────────────
@@ -161,6 +162,21 @@ if (args.Length >= 1 && args[0] == "--nexus-write")
 if (args.Length >= 1 && args[0] == "--nexus-match")
 {
     return NexusMatchBenchmarks.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--math-usecases-spike")
+{
+    return MathUseCasesSpikeRunner.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--vector-neighbor-graph-spike")
+{
+    return VectorNeighborGraphSpikeRunner.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--knn-batch-spike")
+{
+    return KnnSearchBatchSpikeRunner.Run();
 }
 
 // JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。

@@ -1284,9 +1284,42 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         VectorSearchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(queries);
+        if (queries.Count == 0)
+            return [];
+        options = VectorSearchOptionsValidator.Normalize(options);
+        if (k <= 0)
+            throw new ArgumentOutOfRangeException(nameof(k));
+        if (!_schema.TryGetIndex(indexName, out IndexInfo index)
+            || index.Definition is not VectorIndexDefinition definition)
+        {
+            throw new VectorException($"Vector index '{indexName}' does not exist.");
+        }
+        for (int i = 0; i < queries.Count; i++)
+        {
+            if (queries[i].Length != definition.Dimensions)
+            {
+                throw new VectorException(
+                    $"Vector index '{indexName}' expects {definition.Dimensions} dimensions, " +
+                    $"got {queries[i].Length} at query {i}.");
+            }
+        }
+
+        var heaps = new VectorKnnHeap[queries.Count];
+        for (int i = 0; i < heaps.Length; i++)
+            heaps[i] = new VectorKnnHeap(k);
+        using (EnterUsage())
+        {
+            if (_propKeyTokens.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId))
+                ScanPrimaryVectorsBatch(definition, keyId, queries, heaps);
+        }
+
         var cursors = new VectorSearchCursor[queries.Count];
         for (int i = 0; i < queries.Count; i++)
-            cursors[i] = KnnSearch(indexName, queries[i].Span, k, options);
+        {
+            VectorSearchCursor inner = new MaterializedVectorSearchCursor(
+                heaps[i].ToSortedArray());
+            cursors[i] = new TransactionVectorSearchCursor(inner, EnterUsage());
+        }
         return cursors;
     }
 
@@ -1375,6 +1408,93 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                         heap);
                 }
                 break;
+        }
+    }
+
+    private void ScanPrimaryVectorsBatch(
+        VectorIndexDefinition definition,
+        PropertyKeyId keyId,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        VectorKnnHeap[] heaps)
+    {
+        switch (definition.Target.OwnerKind)
+        {
+            case PropertyOwnerKind.Vertex:
+                foreach (VertexId id in _inner.Vertices.Scan())
+                {
+                    var vertex = _inner.Vertices.Read(id);
+                    if (!vertex.InUse
+                        || definition.Target.Scope is { } label
+                            && _labelTokens.GetName(vertex.Label) != label)
+                        continue;
+                    OfferVectorBatch(
+                        EntityRef.From(id),
+                        _inner.Vertices.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        queries,
+                        heaps);
+                }
+                break;
+            case PropertyOwnerKind.Edge:
+                foreach (EdgeId id in _inner.Edges.Scan())
+                {
+                    var edge = _inner.Edges.Read(id);
+                    if (!edge.InUse
+                        || definition.Target.Scope is { } type
+                            && _edgeTypeTokens.GetName(edge.Type) != type)
+                        continue;
+                    OfferVectorBatch(
+                        EntityRef.From(id),
+                        _inner.Edges.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        queries,
+                        heaps);
+                }
+                break;
+            case PropertyOwnerKind.Nexus:
+                foreach (NexusId id in _inner.Nexuses.Scan())
+                {
+                    using var nexus = _inner.Nexuses.Read(id);
+                    if (!nexus.InUse
+                        || definition.Target.Scope is { } type
+                            && _nexusTypeTokens.GetName(nexus.Type) != type)
+                        continue;
+                    OfferVectorBatch(
+                        EntityRef.From(id),
+                        _inner.Nexuses.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        queries,
+                        heaps);
+                }
+                break;
+        }
+    }
+
+    private static void OfferVectorBatch(
+        EntityRef owner,
+        PropertyCursor properties,
+        PropertyKeyId keyId,
+        DistanceMetric metric,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        VectorKnnHeap[] heaps)
+    {
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != keyId
+                || property.Value.Type != PropertyValueType.FloatArray)
+                continue;
+            ReadOnlySpan<float> vector = property.Value.FloatArrayValue;
+            for (int query = 0; query < queries.Count; query++)
+            {
+                heaps[query].Offer(new VectorSearchResult(
+                    owner,
+                    VectorMetrics.Score(metric, queries[query].Span, vector)));
+            }
+            return;
         }
     }
 

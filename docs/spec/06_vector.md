@@ -86,6 +86,7 @@ transaction、query、traversal、検索結果は `EntityRef`、`VertexId`、`Ed
 ## Transaction-scoped KNN
 
 `IReadTransaction.KnnSearch` と `KnnSearchBatch` は、transaction snapshot から definition、manifest、primary property を解決する。
+`KnnSearchBatch` は同じsnapshotのprimary vectorを一度だけ走査し、全queryのexact top-kを同時に更新する。
 cursor は transaction の利用期間を超えて使えない。
 
 ```csharp

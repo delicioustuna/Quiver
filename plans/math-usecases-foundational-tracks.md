@@ -432,3 +432,15 @@ Leapfrog Triejoin（LFTJ）の単変数 leapfrog（ソート順 iterator + seek�
 > 実装エージェントは spike と本実装の決定をここへ追記する（HYP の決定記録に倣う。計測環境・多点数値・
 > 階層分類・続行/是正/撤回の別を残す）。着手までは空。
 > 親計画 §9 の見解は未検証の予備評価であり、このタスク定義の採否、優先度、順序を変更しない。
+
+## 2026-07-24 横断 spike
+
+PV、PB、HG、FCA、WC と研究候補の独立検証は [数理ユースケース横断 spike](math-usecases-spike.md) に記録した。
+
+アルゴリズム kernel の正当性だけでなく、HG の入力契約、FCA の有限列挙契約、PB の batch adapter、WC の製品 planner gate が未解決である。
+
+この結果だけでは各トラックの本流着手を承認しない。
+
+2026-07-26、PB adapterの律速を除くため`KnnSearchBatch`の単一primary scanを実装した。
+
+250件、384次元、32 query、k=10で個別検索比26.20倍、割り当て97.52%減、結果完全一致を確認し、本流採用とした。

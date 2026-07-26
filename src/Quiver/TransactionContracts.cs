@@ -92,7 +92,7 @@ public interface IReadTransaction : IDisposable
         int k,
         VectorSearchOptions? options = null);
 
-    /// <summary>複数のquery vectorを同じsnapshotで検索する。</summary>
+    /// <summary>複数のquery vectorを同じsnapshotの単一primary scanで検索する。</summary>
     IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,

@@ -1,6 +1,6 @@
 # ベンチマーク結果
 
-本ページは、Quiver v0.2.0の性能特性を把握するための参考値を掲載する。
+本ページは、Quiver v0.3.0の性能特性を把握するための参考値を掲載する。
 計測値は異なる環境での性能を保証するものではない。
 
 計測環境はAMD Ryzen 7 5700X、Windows 11、SSD、.NET 10、Releaseビルドである。
@@ -36,6 +36,22 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
 
 より軽い構築を優先する場合は、`VectorIndexDefinition`のHNSWパラメーターを明示的に調整する。
 小さい`efConstruction`や`efSearch`は構築時間と検索時間を短縮できるが、recallを下げる可能性がある。
+
+## KNN batch search
+
+250件、384次元、32 query、k=10の同一snapshot検索を比較した。
+
+| 経路 | 中央値 | thread allocation |
+|---|---:|---:|
+| `KnnSearch`を32回実行 | 175.403 ms | 35,217,736 B |
+| `KnnSearchBatch` | 6.694 ms | 875,152 B |
+
+`KnnSearchBatch`はprimary vectorを一度だけ走査し、全queryのtop-kを同時に更新する。
+結果は個別検索と完全一致し、この条件では26.20倍、割り当て97.52%減だった。
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --knn-batch-spike
+```
 
 ## 索引付き書き込みのWAL増幅
 

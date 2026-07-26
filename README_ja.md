@@ -64,7 +64,7 @@ var known = tx.Query.Vertices<Person>()
 `Quiver`パッケージには、モデル属性とSource Generatorが含まれます。
 `ImplicitUsings`が有効なプロジェクトには、`Quiver`と`Quiver.Api`の名前空間が自動的に追加されます。
 
-公開バージョンは現在`0.2.0`であり、1.0未満です。
+公開バージョンは現在`0.3.0`であり、1.0未満です。
 
 ## ローカルRAG
 
