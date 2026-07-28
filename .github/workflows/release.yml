@@ -1,7 +1,7 @@
 name: Release (NuGet)
 
 # PKG-1: バージョンタグ (v1.2.3 / v1.2.3-rc.1) push で NuGet パッケージを pack し nuget.org へ公開する。
-# 正当性 (build + test) は ci.yml が main/develop の各 push/PR で担保済み。タグは検証済みコミットを指す前提で、
+# 正当性 (build + test) は ci.yml が main の push/PR で担保済み。タグは検証済みコミットを指す前提で、
 # このワークフローは pack + push に専念する。手動実行 (workflow_dispatch) ではタグ無しで artifact 生成だけ行う。
 on:
   push:
