@@ -6,7 +6,7 @@
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
 
 Quiverは、グラフデータベース、ベクトル検索、全文検索を統合した.NET向けの組み込みデータベースエンジンです。
-プロパティグラフを単一ファイルへ保存し、Source Generatorによる型安全なCRUD、Fluent APIによるグラフ走査、トランザクション永続化、KNN検索、BM25検索を提供します。
+プロパティグラフとロール付きn項関係のNexusを単一ファイルへ保存し、Source Generatorによる型安全なCRUD、Fluent APIによるグラフ走査、トランザクション永続化、KNN検索、BM25検索を提供します。
 
 コアエンジンはPure C#で実装され、サードパーティ製パッケージとアンマネージドライブラリに依存せず、NativeAOTに対応します。
 
@@ -15,6 +15,7 @@ Quiverは、グラフデータベース、ベクトル検索、全文検索を�
 - サーバープロセスを必要としないin-process構成
 - プロパティグラフの単一ファイル永続化
 - `[Vertex]`、`[Edge]`、`[Property]`から生成する型安全なAPI
+- ロール付きn項関係を表すNexusと、そのCRUD・走査APIの生成
 - Fluentなグラフ走査と宣言的パターンマッチ
 - Single Writerと並行Snapshot Readers
 - redo-only WALリカバリとdurable commit
@@ -64,7 +65,7 @@ var known = tx.Query.Vertices<Person>()
 `Quiver`パッケージには、モデル属性とSource Generatorが含まれます。
 `ImplicitUsings`が有効なプロジェクトには、`Quiver`と`Quiver.Api`の名前空間が自動的に追加されます。
 
-公開バージョンは現在`0.3.0`であり、1.0未満です。
+公開バージョンは現在`0.4.0`であり、1.0未満です。
 
 ## ローカルRAG
 
@@ -116,7 +117,7 @@ AMD Ryzen 7 5700Xと.NET 10を使用し、in-processで計測した参考値で�
 
 ## サンプル
 
-[`samples/`](samples/)には、CRUD、型付きモデル、traversal、pattern matching、ベクトル検索、RAG、hosting、observability、migrationのサンプルがあります。
+[`samples/`](samples/)には、CRUD、型付きモデル、Nexus、traversal、pattern matching、ベクトル検索、RAG、hosting、observability、migrationのサンプルがあります。
 
 ## ライセンス
 

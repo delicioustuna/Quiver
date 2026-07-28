@@ -89,6 +89,26 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 
 複数の書き込みトランザクションを同時に進行させる機能はサポートしない。
 
+## 高密度三角形結合の範囲と上限 {#cyclic-triangle-join-limits}
+
+transient column経路が扱うのは、三本の有向二項relationが
+`R(a,b) ∧ S(b,c) ∧ T(c,a)`を構成する固定形だけである。
+任意個のrelation、4-clique、Nexus relation、一般のFree Join、hypertree分解、
+join幅証明書は扱わない。公開Match grammarも複数relationの合成構文を持たない。
+
+pair重複があるとprojection後のbag multiplicityをintersectionだけでは保存できないため、
+その場合はmaterializing fallbackを使う。
+既定では入力三relationの合計を1,000,000行、fallbackの中間結果を4,000,000行に制限する。
+結果数、join work、経過時間も独立に制限できる。
+join workはintersection comparisonとmaterialized intermediate rowを数え、route分析、列構築、sortは数えない。
+後者は入力行上限、経過時間、cancellationで制限する。
+
+時間とcancellationはrelation走査、列構築、join loopで協調的に観測する。
+配列と列ごとのsortは途中で割り込まないため、停止遅延は一つのsort phaseまたは次の協調点まで伸びうる。
+cancellationは`OperationCanceledException`を送出する。
+作業量または時間上限では決定的prefixを返すが、fallbackが中間結果の構築中に停止した場合は
+まだ出力順を確定できないため空のpartial resultを返す。
+
 ## Nexusの契約と限界 {#nexus-limits}
 
 第一級Nexusは次の契約で動作する。いずれも v1 の設計判断であり、緩和は実需が出てから検討する。
@@ -134,6 +154,48 @@ RAG の Chunk や頻出エンティティのような高次数Vertexを大量に
 
 `CheckConsistency` は複数ストアをロックなしで走査するため、同時更新中は一時的な不整合を
 観測しうる。診断は書き込みを止めた状態で実行すること。
+
+### 有向Nexusの最短導出が扱う範囲 {#directed-nexus-derivation-limits}
+
+`FindShortestDerivation` が厳密に扱うのは、全tailを必要とする導出木と、0以上の有限Nexusコストを
+加法または最大値で単調に集約する場合である。一般の始点終点間最短hyperpathや、共有Nexusを
+一度だけ数える最小部分グラフは扱わない。後者の意味が必要な場合、返却された木の同じNexusを
+重複除去しても最適性は保証されない。
+有限の入力コストでも加法集約が `double` の有限範囲を超えた場合は `OverflowException` を送出する。
+
+導出木は共有された依存を出現ごとに展開するため、基礎となるNexus網より大きくなり得る。
+`ShortestDerivationOptions.MaxTreeNodes` を入力規模に応じて設定すること。上限到達時はコストが
+確定していても木を返さず、`MaxTreeNodesReached` を報告する。到達列挙も `MaxResults` と
+`MaxNexuses`、最短導出探索も `MaxNexuses` で明示的に制限できる。
+
+### 最小ヒッティング集合の計算量 {#minimum-hitting-set-limits}
+
+最小ヒッティング集合はNP困難であり、厳密解の証明時間は入力規模だけでは予測できない。
+`MinimumHittingSetOptions` の `MaxNodes`、`TimeLimit`、`CancellationToken` を使って作業量を制限する。
+既定値は100万nodeと1秒であり、上限終了時は実行可能解と証明済み上下界のgapを確認できる。
+入力サイズによるgreedy解への自動切り替えは行わない。
+
+これらの上限は協調的である。実行可能解が全入力を被覆することを保証するため、入力全体の正規化と
+fallback解構築を最初に完了し、その後と縮約・探索中に上限を観測する。`FindMinimumHittingSet` は
+snapshot入力をsolver開始前にmaterializeするため、このadapter走査もsolverのtime budgetには含めない。
+
+`FindMinimumHittingSet` は対象型の可視Nexusと指定ロールのmemberを一時集合へmaterializeする。
+作業領域は集合のmember総数、候補数、探索状態に比例する。対象型のNexusに指定ロールのmemberが
+一つもなければ、そのNexusに対応する集合は空となり、全体を実行不可能と判定する。
+
+## 0 次パーシステンスの計算量と近似 {#persistence-h0-limits}
+
+完全グラフ濾過は点数を N、次元数を d とすると距離評価が O(N²d)、辺の整列が O(N² log N)、作業領域が O(N²) である。
+疎 k-NN 濾過も現行の exact primary batch scan では距離評価が O(N²d) だが、整列する辺と Union-Find の入力は最大 O(Nk) になる。
+`MaxPoints`、`MaxEdges`、`MaxDistanceEvaluations` を入力規模と利用可能メモリに合わせて必ず設定すること。
+
+時間とキャンセルは streaming query の候補 64 件ごと、vector 読み出し、辺構築、Union-Find の協調点で観測する。
+個々の query cursor 移動、`KnnSearchBatch` の単一 primary scan、配列 sort の途中は割り込まないため、停止遅延は一つの有界 phase または協調点間の実行時間まで伸びうる。
+制限終了時に部分 barcode を exact として返すことはない。
+
+疎 k-NN barcode の正確性はデータ形状と k に依存し、一般の誤差保証を持たない。
+全点対経路を完走した場合だけ、要求された scale までの完全 Vietoris-Rips H0 barcode として厳密である。
+`EstimateClusters` の最大 gap 規則も別の heuristic であり、barcode や既知クラスタ数との一致を保証しない。
 
 ## BM25 コーパス統計はスナップショットベース {#bm25-stats}
 
@@ -181,6 +243,43 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 **設計根拠**: efSearch=200 まで広げても旧構築グラフは 0.825 止まりで、検索時パラメタだけでは
 0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。
 `Quiver.Benchmarks.RecallCheck`は、既定構成のtrue recall@10が0.95以上であることを検証する。
+
+## 組み込みグラフ注釈の有限実行範囲 {#graph-annotation-limits}
+
+組み込みグラフ注釈はtransaction snapshotの全Vertexと対象Edgeを呼び出しごとにmaterializeする。
+入力走査、policy検証、評価、結果materializationは時間とキャンセルのbudget内に含まれる。
+Vertex全体とVertexごとのEdge一覧のsort自体は中断不能であり、停止観測は各sortの直後になる。
+それ以外の入力走査、index構築、DAG検証、relaxation、結果計数では要素ごとに停止を観測する。
+したがって停止遅延は一回のsort時間まで伸びうる。
+
+Boolean BFS、非負tropical label-setting、DAG tropical、DAG Viterbiは入力と結果の上限内で厳密である。
+負辺を含むtropicalの`BoundedWorklist`は有限graphだけを対象とし、queueが空になった場合だけ厳密である。
+負閉路では有限解が存在せず、`MaxRelaxations`で停止して空結果を返す。
+経路多重度はDAGなら有限path数へ収束するが、cycle上のwalk数は増え続けうるため、
+`MaxAnnotationUpdates`または数値表現範囲で停止して空結果を返す。
+
+任意ユーザーsemiring、capability宣言によるpolicy自動選択、provenance多項式、別solverへの自動接続は提供しない。
+既存traversal、BFS、weighted shortest-pathのhot pathには注釈hookを置いていないため、
+注釈を使わない呼び出しはこのmaterializationとpolicy dispatchを実行しない。
+組み込み評価は別経路でsnapshot全体を読むため、単一終点だけを求める既存最短路より作業量が多い場合がある。
+
+## 形式概念数と継続範囲 {#formal-concept-limits}
+
+形式概念数は最悪で属性数に対して指数的に増える。
+`MinExtent`や`MinIntent`だけでは停止性を保証しないため、結果数、closure評価回数、入力規模、時間、
+キャンセルの各上限を設定し、終了理由を確認する必要がある。
+時間とキャンセルはNexus/member走査、bitmap構築、closure、結果materializationで協調的に観測する。
+対象・属性のsort、index dictionary構築、SHA-256 fingerprintの個々の処理は中断不能である。
+それ以外の走査とbitmap変換は定期的に観測し、最悪の観測遅延は一つの中断不能phaseまたは一closure評価まで生じうる。
+
+continuationはプロセス内の同じtransaction objectと同じsnapshot/contextだけに有効である。
+文字列tokenとして永続化する形式ではなく、database reopen、別read transaction、別write transactionへ移せない。
+write transactionでページ間に対象Nexusやmemberを変更すると、再開前のcontext照合で拒否する。
+入力contextのmaterialization完了前にtime/cancellationで停止した初回呼び出しは、安全に束縛できるcontextが無いためcontinuationを返さない。
+既存continuationからの再開が入力走査中に停止した場合は、元のpositionをそのまま返し、次回の再開時にcontextを再検証する。
+Close-by-Oneは明示stackで実行するがstateless continuationを返さない。
+作業量上限、または未列挙の一致概念が残る状態で結果数上限に達した列挙はterminalであり、continuationを返さない。
+結果数が全一致概念数とちょうど等しい場合は`Completed`であり、truncationとは報告しない。
 
 ## 自動マイグレーションなし {#no-migration}
 

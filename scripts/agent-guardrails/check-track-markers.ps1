@@ -47,8 +47,8 @@ $AnsatzRegex = [regex]('案[A-Za-zＡ-Ｚ]')  # 案A / 案B / 案Ａ
 #   plans, docs/design         … 代替案定義の正当な置き場
 #   scripts/agent-guardrails   … 本スクリプト自身 (接頭辞を data として保持)
 #   .claude, .agents, .codex-* … エージェント内部ツール (skill 定義等でタスク番号は正当)
-#   bin, obj, artifacts, .git  … ビルド出力・生成物 (走査コスト削減も兼ねる)
-$ExcludedRegex = [regex]('(^|/)(plans|docs/design|scripts/agent-guardrails|\.claude|\.agents|\.codex-build-check|\.codex-temp|bin|obj|artifacts|\.git|\.vs)/')
+#   bin, obj, artifacts, BenchmarkDotNet.Artifacts, .git  … ビルド出力・生成物 (走査コスト削減も兼ねる)
+$ExcludedRegex = [regex]('(^|/)(plans|docs/design|scripts/agent-guardrails|\.claude|\.agents|\.codex-build-check|\.codex-temp|bin|obj|artifacts|BenchmarkDotNet\.Artifacts|\.git|\.vs)/')
 $ScanExtensions = @('.cs', '.md')
 
 # -Scan の対象ルート: 規約が対象とする「src / tests / benchmarks のコード + 公開 docs」に限定。
@@ -126,7 +126,8 @@ if ($SelfTest) {
     $clean = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1,2 +1 @@', '-// HYP-76', ' // HYP-77', '+var value = 1;')
     $bad = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1 +1 @@', '+// HYP-77')
     $excluded = @('diff --git a/docs/design/a.md b/docs/design/a.md', '+++ b/docs/design/a.md', '@@ -1 +1 @@', '+HYP-77')
-    if (@(Get-DiffFindings $clean).Count -ne 0 -or @(Get-DiffFindings $bad).Count -ne 1 -or @(Get-DiffFindings $excluded).Count -ne 0) { throw 'self-test failed' }
+    $benchmarkArtifact = @('diff --git a/benchmarks/Quiver.Benchmarks/BenchmarkDotNet.Artifacts/results/report.md b/benchmarks/Quiver.Benchmarks/BenchmarkDotNet.Artifacts/results/report.md', '+++ b/benchmarks/Quiver.Benchmarks/BenchmarkDotNet.Artifacts/results/report.md', '@@ -1 +1 @@', '+HYP-77')
+    if (@(Get-DiffFindings $clean).Count -ne 0 -or @(Get-DiffFindings $bad).Count -ne 1 -or @(Get-DiffFindings $excluded).Count -ne 0 -or @(Get-DiffFindings $benchmarkArtifact).Count -ne 0) { throw 'self-test failed' }
     Write-Host 'OK: DiffAgainst self-test passed.'
     exit 0
 }

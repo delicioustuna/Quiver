@@ -104,7 +104,41 @@ while (cursor.MoveNext())
 ```
 
 すべての metric は「スコアが大きいほど近い」という規約にそろえる。
-`Dot` は内積、`Cosine` は cosine similarity、`Euclidean` は二乗距離の符号反転を返す。
+`Dot` は内積、`Cosine` は cosine similarity、`Euclidean` は距離の符号反転を返す。
+
+## 0 次パーシステンス barcode
+
+`PersistenceH0Algorithms.Compute` は、指定した vector index が対象にする transaction snapshot 可視な全 vector を一つの入力母集団として H0 barcode を返す。
+caller が選んだ部分集合だけを入力にする API ではなく、index 全体を検索してから結果を部分集合へ絞る処理も行わない。
+
+```csharp
+using IReadTransaction read = database.BeginReadTransaction();
+PersistenceH0Result barcode = PersistenceH0Algorithms.Compute(
+    read,
+    "positions",
+    new PersistenceH0Options
+    {
+        Filtration = PersistenceH0Filtration.Complete,
+        MaxPoints = 1_000,
+        MaxEdges = 1_000_000,
+        MaxDistanceEvaluations = 1_000_000,
+        MaxResults = 1_000,
+    });
+```
+
+`Complete` は全点対距離から Vietoris-Rips 濾過を作り、完走時だけ要求された scale まで `IsExact=true` を返す。
+`SparseKnn` は `KnnSearchBatch` の exact primary scan で各点の近傍を求めるが、疎 k-NN 濾過そのものには完全グラフの barcode に対する一般の近似保証がないため `SparseApproximation` と報告する。
+現在は有限値からなる `Euclidean` index だけを受け付け、`Cosine` と `Dot` の score を暗黙に距離へ変換しない。
+有限座標同士でも距離計算が `float` の有限範囲を超えた場合は `VectorException` を送出し、無限値を有限 death として返さない。
+
+各 H0 区間の birth は 0 であり、有限区間は death 昇順で返る。
+`MaxScale` を指定した場合、scale 上限で生存する区間は `IsRightCensored=true` となり、数学的な無限区間と区別できる。
+`MaxPoints`、`MaxEdges`、`MaxDistanceEvaluations`、`TimeLimit`、`CancellationToken` で作業を制限できる。
+これらで中断した結果は区間を返さず `Incomplete` と終了理由を返し、入力走査または濾過が未完了なら点数または成分数は `null` になる。
+`MaxResults` に達した場合は決定的な先頭区間と上限適用前の `TotalIntervalCount` を返すが、同様に `Incomplete` であり exact とは報告しない。
+
+`EstimateClusters` は非連結なら成分数、連結なら有限 death の最大 gap を使う heuristic である。
+返り値は `PersistenceClusterEstimate` であり barcode とは別結果なので、barcode の exactness をクラスタ数の保証と解釈しない。
 
 ## 埋め込み生成と RAG
 

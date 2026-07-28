@@ -10,7 +10,7 @@
 `Quiver`パッケージには、コアエンジン、モデル属性、Source Generatorが含まれます。
 
 ```bash
-dotnet add package Quiver --version 0.3.0
+dotnet add package Quiver --version 0.4.0
 ```
 
 ## はじめてのグラフ

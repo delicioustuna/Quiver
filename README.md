@@ -6,7 +6,7 @@
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
 
 Quiver is an embedded graph database engine for .NET with integrated vector and full-text search.
-It stores property graphs in a single file and provides type-safe CRUD through a source generator, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
+It stores property graphs and role-aware n-ary Nexus relationships in a single file and provides type-safe CRUD through a source generator, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
 
 The core engine is implemented in pure C#, has no third-party package or unmanaged dependency, and supports NativeAOT.
 
@@ -15,6 +15,7 @@ The core engine is implemented in pure C#, has no third-party package or unmanag
 - Embedded, in-process operation with no server process
 - Single-file property graph storage
 - Type-safe APIs generated from `[Vertex]`, `[Edge]`, and `[Property]` models
+- Role-aware n-ary Nexus relationships with generated CRUD and traversal APIs
 - Fluent graph traversal and declarative pattern matching
 - Single Writer with concurrent Snapshot Readers
 - Redo-only WAL recovery and durable commits
@@ -64,7 +65,7 @@ var known = tx.Query.Vertices<Person>()
 The `Quiver` package includes the model attributes and source generator.
 Projects with `ImplicitUsings` enabled receive the `Quiver` and `Quiver.Api` namespaces automatically.
 
-The public version is currently `0.3.0` and remains pre-1.0.
+The public version is currently `0.4.0` and remains pre-1.0.
 
 ## Local RAG
 
@@ -116,7 +117,7 @@ See the [known limits](docs/spec/08_known_limits.md) for the complete contract.
 
 ## Samples
 
-Samples are available under [`samples/`](samples/), including CRUD, typed models, traversal, pattern matching, vector search, RAG, hosting, observability, and migrations.
+Samples are available under [`samples/`](samples/), including CRUD, typed models, Nexus relationships, traversal, pattern matching, vector search, RAG, hosting, observability, and migrations.
 
 ## License
 

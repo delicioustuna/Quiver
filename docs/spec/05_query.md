@@ -159,6 +159,151 @@ read.Query.Vertex(alice)
 read.Query.Vertex(alice).Nexuses("Purchase", "buyer").OtherMembers("item");
 ```
 
+### 有向NexusのAND到達と最短導出 {#directed-nexus-algorithms}
+
+`DirectedNexusAlgorithms` は、Nexus型とtail/headロールを指定して、読み取りトランザクションの
+同一snapshot上で有向Nexus網を探索する。`FindReachableVertices` は、あるNexusの全tailが
+到達済みになったときだけ全headを到達済みにする。通常の二項Edge到達へ展開したときの
+「tailのどれか1つで進める」という意味にはならない。
+
+```csharp
+var reachable = read.FindReachableVertices(
+    seeds, "Reaction", "reactant", "product",
+    new DirectedNexusReachabilityOptions { MaxResults = 100_000 });
+
+var shortest = read.FindShortestDerivation(
+    seeds, target, "Reaction", "reactant", "product",
+    static (tx, nexus) => tx.GetProperty(nexus, "cost").DoubleValue,
+    DerivationCostMode.Additive,
+    new ShortestDerivationOptions { MaxTreeNodes = 100_000 });
+```
+
+最短導出は0以上の有限Nexusコストだけを受け付ける。`Additive` はNexusコストと全tailの
+導出コストを加算し、`Bottleneck` はそれらの最大値を取る。返却する `Tree` はpreorderの
+平坦な木で、各要素の `ParentIndex` が親を指す。共有された導出も木に現れるたびに別の出現として
+保持し、加法コストでも出現ごとに数える。同コスト候補はVertex確定前なら小さいNexus IDを優先し、
+確定済みVertexの導出は変更しない。対象Vertexをpriority queueから正しい最小コストで確定した時点で
+導出木を復元し、対象Vertexから先の無関係なNexusは走査しない。
+
+到達結果と最短導出結果は `TerminationReason` と `IsComplete` を持つ。`MaxResults`、
+`MaxNexuses`、`MaxTreeNodes` で作業量を制限でき、キャンセル時は `OperationCanceledException` を送出する。
+探索時間は触れたNexusのmember総数と優先度queue操作、作業領域は到達Vertex・触れたNexus・
+返却する木の大きさに比例する。メンバー走査は `GetNexuses` / `GetMembers` を使うため、
+未commitまたは読み取り開始後にcommitされたNexusは観測しない。
+
+### 最小ヒッティング集合 {#minimum-hitting-set}
+
+`MinimumHittingSetAlgorithms` は、集合族の各集合を少なくとも一つのVertexで被覆する
+最小ヒッティング集合を専用の厳密solverで求める。`Solve` は明示的なVertex集合族を受け取り、
+`FindMinimumHittingSet` は指定型の各Nexusを一つの集合、指定ロールのmemberを候補Vertexとして
+同じ計算を行う。
+
+```csharp
+var result = read.FindMinimumHittingSet(
+    "Requirement",
+    "provider",
+    new MinimumHittingSetOptions
+    {
+        MaxNodes = 100_000,
+        TimeLimit = TimeSpan.FromSeconds(1),
+    });
+```
+
+solverは候補と集合の包含関係を縮約し、greedyで実行可能解を作り、互いに素な集合packingと
+最大被覆数から下界を求める。下界から上界までの基数について分枝限定のdecisionを実行し、
+入力サイズだけで近似解へ切り替えない。
+
+最初の実行可能証明書には全制約の確認が必要なため、solverは入力全体の正規化とfallback解の
+構築を一度完了してから、`MaxNodes`、`TimeLimit`、`CancellationToken` を協調的に観測する。
+これらの上限はこの初回passを途中でpreemptしない。Nexus adapterはsnapshot入力を全てmaterializeしてから
+solverを呼ぶため、adapter走査はsolverのtime budgetに含まれず、cancellationでも途中終了しない。
+
+実行可能な場合、結果の `Solution` は常に全集合を被覆し、その要素数が `UpperBound` になる。
+`LowerBound` は証明済み下界であり、`IsOptimal` が真なら上下界は一致する。
+node、time、cancellationの上限に達した場合も、この証明契約を保ったまま終了理由を返す。
+空の集合族には空の最適解を返す。空集合を一つでも含む場合は `HasSolution=false`、
+`Infeasible` とし、上下界は返さない。
+
+Nexus adapterは全Nexus走査と `GetMembers` を読み取りトランザクション内で実行する。
+未commitのNexusと読み取り開始後にcommitされたNexusは候補集合へ入らない。
+
+## 組み込みグラフ注釈 {#graph-annotations}
+
+`GraphAnnotationAlgorithms` は `IReadTransaction` のsnapshot可視な二項Edgeを入力にし、
+既存queryとは独立した明示opt-in経路で次の固定注釈を評価する。
+
+- `EvaluateReachability`: Boolean注釈を`BreadthFirst`で評価する。
+- `EvaluateTropical`: 加算経路コストの最小値を、非負辺の`LabelSetting`、
+  DAGの`AcyclicDynamicProgramming`、または`BoundedWorklist`で評価する。
+- `EvaluateViterbi`: 0以上1以下のEdge確率の最大積を、DAGの`AcyclicDynamicProgramming`で評価する。
+- `EvaluatePathMultiplicity`: 非負整数のwalk多重度を`BoundedWorklist`で評価する。
+
+policyは呼び出しごとに明示し、値の性質から自動選択しない。
+label-settingは負辺を、DAG専用policyはcycleを、ViterbiはNaN、Infinity、0未満、1超過を、
+いずれもrelaxation前に拒否する。
+Edge値selectorの例外は変換せず呼び出し元へ伝播する。
+
+adapterは全Vertexをfull packed-ID順へ並べ、各Vertexのoutgoing EdgeをEdge ID順へ並べる。
+結果もVertex ID順で決定的に返す。
+`EdgeType`を指定した場合はその型だけを入力にする。
+snapshot走査の開始から`MaxVertices`、`MaxEdges`、`MaxRelaxations`、`MaxAnnotationUpdates`、
+`TimeLimit`、`CancellationToken`を観測する。
+入力materializationの時間・空間はO(V+E)、BFSと各DAG DPの評価時間はO(V+E)、
+label-settingはO((V+E) log V)である。
+bounded worklistの評価時間は実際の緩和回数に比例し、公開budgetが上限になる。
+
+`Completed`だけがsnapshot全体について`IsComplete=true`かつ`IsExact=true`である。
+`MaxResults`は評価済み注釈の決定的prefixと`TotalAnnotationCount`を返すが、
+返していない注釈があるため`MaxResultsReached`、`IsExact=false`になる。
+入力走査、検証、評価を完了できなかった場合は、途中の値を正解と誤認させないため注釈を返さない。
+
+```csharp
+var costs = read.EvaluateTropical(
+    source,
+    GraphAnnotationPolicy.LabelSetting,
+    (transaction, edge) => transaction.GetProperty(edge, "cost").DoubleValue,
+    new GraphAnnotationOptions
+    {
+        EdgeType = "Route",
+        MaxVertices = 10_000,
+        MaxEdges = 100_000,
+        MaxRelaxations = 200_000,
+        TimeLimit = TimeSpan.FromSeconds(1),
+    });
+```
+
+## 形式概念列挙 {#formal-concepts}
+
+`EnumerateFormalConcepts` は指定型のNexusを属性、指定ロールのmember Vertexを対象、membershipを
+incidenceとするformal contextから、Galois閉包の形式概念を列挙する。
+対象universeは、指定ロールのincidenceに実際に現れるVertexだけであり、同じラベルの孤立Vertexや
+別ロールだけに現れるVertexを暗黙に補わない。
+extentとintentはkind、Generation、Sequenceを含むfull packed-ID順で返す。
+
+ページ列挙はNextClosure、一括列挙はClose-by-Oneを利用できる。
+`Auto` は継続が必要な形ではNextClosure、一括形ではClose-by-Oneを選び、両アルゴリズムの役割を分ける。
+`MinExtent`と`MinIntent`は結果filterであり、指数的な候補空間そのものを有限にしない。
+`MaxResults`、`MaxClosureEvaluations`、`MaxObjects`、`MaxAttributes`、`MaxIncidences`、
+`TimeLimit`、`CancellationToken`を必ず有限実行契約として扱う。
+
+```csharp
+var options = new FormalConceptOptions
+{
+    Strategy = FormalConceptEnumerationStrategy.NextClosure,
+    PageSize = 100,
+    MaxResults = 10_000,
+    MaxClosureEvaluations = 1_000_000,
+};
+var page = read.EnumerateFormalConcepts("Capability", "object", options);
+```
+
+continuationはcontext、対象順、属性順、filter、option、version、作成元transaction objectとIDを束縛する。
+再開時はNexus incidenceを再materializeしてclosure評価前に照合するため、同じwrite transaction内の変更も拒否する。
+公開stable snapshot IDは存在しないため、reopenや別transactionを跨ぐ継続はサポートしない。
+`TimeLimit`は値を束縛した呼び出しごとの時間枠、`CancellationToken`はfingerprintに含めない呼び出しごとの停止要求である。
+キャンセル後は同じpositionを新しいcancellation tokenで再開でき、closure作業量はcontinuationを通じて累積する。
+終了理由と`IsComplete`、`IsTruncated`を確認し、打ち切りprefixを全概念と解釈してはならない。
+
 ### merge ルックアップ {#merge-lookup}
 
 `MergeEdge` は source、target、Edge 型の組を専用ルックアップで検索する。
@@ -219,3 +364,21 @@ var rows = g.Match(
 - 同じロールに複数メンバーが属す場合、束縛の組み合わせごとに 1 行を返す
 - 結果行からは `ctx.Nexus(alias)` / `ctx.NexusGet<T>(alias, key)` で
   Nexus ID とそのプロパティを取り出せる
+
+### 高密度三角形結合の内部経路 {#cyclic-triangle-join}
+
+クエリエンジン内部には、三本の有向二項relation
+`R(a,b) ∧ S(b,c) ∧ T(c,a)`だけを対象とする三角形結合経路がある。
+各relationは既存の1-edge `Match`から抽出し、query-localなソート済み列を構築して
+`S(b,*)`と`T(*,a)`をintersectionする。
+永続索引、cache、ストレージ形式は追加しない。
+
+optimizerは、三relationのpairが重複せず、`R⋈S`の推定中間行が32,768以上かつ
+入力三relationの合計行数の4倍以上になる場合だけtransient column経路を選ぶ。
+小規模、低増幅、pair重複を含む入力はmaterializing経路へ戻す。
+重複時のfallbackはbag semanticsを維持し、同じtupleをrelationごとの重複度の積だけ返す。
+空relationは作業領域を構築せず空結果になる。
+
+結果はGenerationを含む`VertexId`の辞書順で決定的に返す。
+この経路は公開Match grammarを拡張せず、既存の1-edge Match、Nexus star、acyclic pathの
+plannerと物理operatorを置換しない。

@@ -583,11 +583,115 @@ namespace Quiver
         public long TotalDegree { get; }
         public long TotalVertices { get; }
     }
+    public enum DerivationCostMode
+    {
+        Additive = 0,
+        Bottleneck = 1,
+    }
+    public readonly struct DerivationTreeNode : System.IEquatable<Quiver.DerivationTreeNode>
+    {
+        public DerivationTreeNode(Quiver.Core.VertexId VertexId, Quiver.Core.NexusId NexusId, int ParentIndex) { }
+        public Quiver.Core.NexusId NexusId { get; init; }
+        public int ParentIndex { get; init; }
+        public Quiver.Core.VertexId VertexId { get; init; }
+    }
+    public static class DirectedNexusAlgorithms
+    {
+        public static Quiver.DirectedNexusReachabilityResult FindReachableVertices(this Quiver.IReadTransaction transaction, System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> seeds, string nexusType, string tailRole, string headRole, Quiver.DirectedNexusReachabilityOptions? options = null) { }
+        public static Quiver.ShortestDerivationResult FindShortestDerivation(this Quiver.IReadTransaction transaction, System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> seeds, Quiver.Core.VertexId target, string nexusType, string tailRole, string headRole, Quiver.NexusCostSelector costSelector, Quiver.DerivationCostMode costMode, Quiver.ShortestDerivationOptions? options = null) { }
+    }
+    public sealed class DirectedNexusReachabilityOptions
+    {
+        public DirectedNexusReachabilityOptions() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public int MaxNexuses { get; init; }
+        public int MaxResults { get; init; }
+    }
+    public sealed class DirectedNexusReachabilityResult
+    {
+        public bool IsComplete { get; }
+        public Quiver.DirectedNexusTerminationReason TerminationReason { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Vertices { get; }
+        public int VisitedNexusCount { get; }
+    }
+    public enum DirectedNexusTerminationReason
+    {
+        Completed = 0,
+        MaxResultsReached = 1,
+        MaxNexusesReached = 2,
+        MaxTreeNodesReached = 3,
+    }
     public ref struct EntityRefEnumerator
     {
         public Quiver.Core.EntityRef Current { get; }
         public void Dispose() { }
         public bool MoveNext() { }
+    }
+    public sealed class FormalConcept : System.IEquatable<Quiver.FormalConcept>
+    {
+        public FormalConcept(System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Extent, System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Intent) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Extent { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Intent { get; init; }
+    }
+    public static class FormalConceptAlgorithms
+    {
+        public static Quiver.FormalConceptResult EnumerateFormalConcepts(this Quiver.IReadTransaction transaction, string nexusType, string? memberRole = null, Quiver.FormalConceptOptions? options = null, Quiver.FormalConceptContinuation? continuation = null) { }
+    }
+    public sealed class FormalConceptContinuation
+    {
+        public string AttributeOrderFingerprint { get; }
+        public string ContextFingerprint { get; }
+        public string ObjectOrderFingerprint { get; }
+        public string OptionsFingerprint { get; }
+        public Quiver.Core.TransactionId TransactionId { get; }
+        public int Version { get; }
+    }
+    public enum FormalConceptEnumerationStrategy
+    {
+        Auto = 0,
+        CloseByOne = 1,
+        NextClosure = 2,
+    }
+    public sealed class FormalConceptOptions : System.IEquatable<Quiver.FormalConceptOptions>
+    {
+        public FormalConceptOptions() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public int MaxAttributes { get; init; }
+        public long MaxClosureEvaluations { get; init; }
+        public long MaxIncidences { get; init; }
+        public int MaxObjects { get; init; }
+        public int MaxResults { get; init; }
+        public int MinExtent { get; init; }
+        public int MinIntent { get; init; }
+        public int PageSize { get; init; }
+        public Quiver.FormalConceptEnumerationStrategy Strategy { get; init; }
+        public System.TimeSpan TimeLimit { get; init; }
+    }
+    public sealed class FormalConceptResult
+    {
+        public int AttributeCount { get; }
+        public long ClosureEvaluations { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.FormalConcept> Concepts { get; }
+        public string? ContextFingerprint { get; }
+        public Quiver.FormalConceptContinuation? Continuation { get; }
+        public long IncidenceCount { get; }
+        public bool IsComplete { get; }
+        public bool IsTruncated { get; }
+        public int ObjectCount { get; }
+        public Quiver.FormalConceptTerminationReason TerminationReason { get; }
+        public Quiver.Core.TransactionId TransactionId { get; }
+    }
+    public enum FormalConceptTerminationReason
+    {
+        Completed = 0,
+        PageFull = 1,
+        MaxResultsReached = 2,
+        WorkBudget = 3,
+        TimeBudget = 4,
+        Cancelled = 5,
+        MaxObjectsReached = 6,
+        MaxAttributesReached = 7,
+        MaxIncidencesReached = 8,
     }
     public sealed class FullTextIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.FullTextIndexDefinition>
     {
@@ -605,6 +709,70 @@ namespace Quiver
         public int MaximumSegments { get; init; }
         public double MaximumTombstoneRatio { get; init; }
     }
+    public static class GraphAnnotationAlgorithms
+    {
+        public static Quiver.GraphAnnotationResult<long> EvaluatePathMultiplicity(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphAnnotationOptions? options = null) { }
+        public static Quiver.GraphAnnotationResult<bool> EvaluateReachability(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphAnnotationOptions? options = null) { }
+        public static Quiver.GraphAnnotationResult<double> EvaluateTropical(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphEdgeValueSelector valueSelector, Quiver.GraphAnnotationOptions? options = null) { }
+        public static Quiver.GraphAnnotationResult<double> EvaluateViterbi(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphEdgeValueSelector valueSelector, Quiver.GraphAnnotationOptions? options = null) { }
+    }
+    public sealed class GraphAnnotationOptions
+    {
+        public GraphAnnotationOptions() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public string? EdgeType { get; init; }
+        public long MaxAnnotationUpdates { get; init; }
+        public int MaxEdges { get; init; }
+        public long MaxRelaxations { get; init; }
+        public int MaxResults { get; init; }
+        public int MaxVertices { get; init; }
+        public System.TimeSpan TimeLimit { get; init; }
+    }
+    public enum GraphAnnotationPolicy
+    {
+        BreadthFirst = 0,
+        LabelSetting = 1,
+        AcyclicDynamicProgramming = 2,
+        BoundedWorklist = 3,
+    }
+    public sealed class GraphAnnotationResult<T>
+    {
+        public long AnnotationUpdateCount { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphAnnotation<T>> Annotations { get; }
+        public int EdgeCount { get; }
+        public bool IsComplete { get; }
+        public bool IsExact { get; }
+        public Quiver.GraphAnnotationPolicy Policy { get; }
+        public int QueuePeak { get; }
+        public long RelaxationCount { get; }
+        public Quiver.GraphAnnotationTerminationReason TerminationReason { get; }
+        public int? TotalAnnotationCount { get; }
+        public int VertexCount { get; }
+    }
+    public enum GraphAnnotationTerminationReason
+    {
+        Completed = 0,
+        SourceNotFound = 1,
+        MaxVerticesReached = 2,
+        MaxEdgesReached = 3,
+        MaxResultsReached = 4,
+        RelaxationBudgetExceeded = 5,
+        AnnotationBudgetExceeded = 6,
+        TimeLimitReached = 7,
+        Cancelled = 8,
+        CycleRejected = 9,
+        NegativeEdgeRejected = 10,
+        UnsupportedPolicyRejected = 11,
+        InvalidEdgeValueRejected = 12,
+        NumericOverflow = 13,
+    }
+    public readonly struct GraphAnnotation<T> : System.IEquatable<Quiver.GraphAnnotation<T>>
+    {
+        public GraphAnnotation(Quiver.Core.VertexId VertexId, T Value) { }
+        public T Value { get; init; }
+        public Quiver.Core.VertexId VertexId { get; init; }
+    }
+    public delegate double GraphEdgeValueSelector(Quiver.IReadTransaction transaction, Quiver.Core.EdgeId edgeId);
     public sealed class GraphStats
     {
         public const int PowerVertexDegreeThreshold = 256;
@@ -821,6 +989,41 @@ namespace Quiver
         public System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans { get; init; }
         public int RemovedCount { get; init; }
     }
+    public static class MinimumHittingSetAlgorithms
+    {
+        public static Quiver.MinimumHittingSetResult FindMinimumHittingSet(this Quiver.IReadTransaction transaction, string nexusType, string coverRole, Quiver.MinimumHittingSetOptions? options = null) { }
+        public static Quiver.MinimumHittingSetResult Solve(System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId>> facts, Quiver.MinimumHittingSetOptions? options = null) { }
+    }
+    public sealed class MinimumHittingSetOptions
+    {
+        public MinimumHittingSetOptions() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public long MaxNodes { get; init; }
+        public System.TimeSpan TimeLimit { get; init; }
+    }
+    public sealed class MinimumHittingSetResult
+    {
+        public int CandidateCount { get; }
+        public int FactCount { get; }
+        public bool HasSolution { get; }
+        public bool IsOptimal { get; }
+        public int? LowerBound { get; }
+        public int RemovedCandidateCount { get; }
+        public int RemovedFactCount { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Solution { get; }
+        public Quiver.MinimumHittingSetTerminationReason TerminationReason { get; }
+        public int? UpperBound { get; }
+        public long VisitedNodes { get; }
+    }
+    public enum MinimumHittingSetTerminationReason
+    {
+        Optimal = 0,
+        Infeasible = 1,
+        NodeBudget = 2,
+        TimeBudget = 3,
+        Cancelled = 4,
+    }
+    public delegate double NexusCostSelector(Quiver.IReadTransaction transaction, Quiver.Core.NexusId nexusId);
     public ref struct NexusIdEnumerator
     {
         public Quiver.Core.NexusId Current { get; }
@@ -845,6 +1048,74 @@ namespace Quiver
         public long EntityId { get; init; }
         public string IndexName { get; init; }
         public byte[] RawKey { get; init; }
+    }
+    public sealed class PersistenceClusterEstimate : System.IEquatable<Quiver.PersistenceClusterEstimate>
+    {
+        public PersistenceClusterEstimate(int ClusterCount, float? SeparationScale, bool UsedDisconnectedComponents) { }
+        public int ClusterCount { get; init; }
+        public float? SeparationScale { get; init; }
+        public bool UsedDisconnectedComponents { get; init; }
+    }
+    public static class PersistenceH0Algorithms
+    {
+        public static Quiver.PersistenceH0Result Compute(Quiver.IReadTransaction transaction, string indexName, Quiver.PersistenceH0Options? options = null) { }
+        public static Quiver.PersistenceClusterEstimate EstimateClusters(Quiver.PersistenceH0Result barcode) { }
+    }
+    public enum PersistenceH0Filtration
+    {
+        Complete = 0,
+        SparseKnn = 1,
+    }
+    public readonly struct PersistenceH0Interval : System.IEquatable<Quiver.PersistenceH0Interval>
+    {
+        public PersistenceH0Interval(float Birth, float? Death, bool IsRightCensored) { }
+        public float Birth { get; init; }
+        public float? Death { get; init; }
+        public bool IsRightCensored { get; init; }
+    }
+    public sealed class PersistenceH0Options : System.IEquatable<Quiver.PersistenceH0Options>
+    {
+        public PersistenceH0Options() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public Quiver.PersistenceH0Filtration Filtration { get; init; }
+        public long MaxDistanceEvaluations { get; init; }
+        public int MaxEdges { get; init; }
+        public int MaxPoints { get; init; }
+        public int MaxResults { get; init; }
+        public float? MaxScale { get; init; }
+        public int NeighborCount { get; init; }
+        public System.TimeSpan TimeLimit { get; init; }
+    }
+    public sealed class PersistenceH0Result
+    {
+        public int? ComponentCount { get; }
+        public long DistanceEvaluations { get; }
+        public int EdgeCount { get; }
+        public Quiver.PersistenceH0Filtration Filtration { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.PersistenceH0Interval> Intervals { get; }
+        public bool IsComplete { get; }
+        public bool IsExact { get; }
+        public Quiver.PersistenceH0ResultKind Kind { get; }
+        public int? PointCount { get; }
+        public float? ScaleLimit { get; }
+        public Quiver.PersistenceH0TerminationReason TerminationReason { get; }
+        public int? TotalIntervalCount { get; }
+    }
+    public enum PersistenceH0ResultKind
+    {
+        Exact = 0,
+        SparseApproximation = 1,
+        Incomplete = 2,
+    }
+    public enum PersistenceH0TerminationReason
+    {
+        Completed = 0,
+        MaxPointsReached = 1,
+        MaxEdgesReached = 2,
+        MaxDistanceEvaluationsReached = 3,
+        MaxResultsReached = 4,
+        TimeBudget = 5,
+        Cancelled = 6,
     }
     public sealed class PropertyKeyStats
     {
@@ -963,6 +1234,22 @@ namespace Quiver
             where T : Quiver.IGraphVertexSchema<T> { }
         public static void EnsureIndexes<T>(this Quiver.ISchemaEditor schema)
             where T : Quiver.IGraphVertexSchema<T> { }
+    }
+    public sealed class ShortestDerivationOptions
+    {
+        public ShortestDerivationOptions() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public int MaxNexuses { get; init; }
+        public int MaxTreeNodes { get; init; }
+    }
+    public sealed class ShortestDerivationResult
+    {
+        public double? Cost { get; }
+        public bool IsComplete { get; }
+        public bool IsReachable { get; }
+        public Quiver.DirectedNexusTerminationReason TerminationReason { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.DerivationTreeNode> Tree { get; }
+        public int VisitedNexusCount { get; }
     }
     public sealed class SnapshotOptions
     {

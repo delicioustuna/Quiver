@@ -2,7 +2,6 @@ using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Running;
 using Quiver.Benchmarks;
-using Quiver.Benchmarks.Experimental.MathUseCases;
 using Quiver.Benchmarks.Standalone;
 
 // ── ベンチ一時 DB の残骸を起動時に掃除する ──────────────────────────────
@@ -164,19 +163,34 @@ if (args.Length >= 1 && args[0] == "--nexus-match")
     return NexusMatchBenchmarks.Run();
 }
 
-if (args.Length >= 1 && args[0] == "--math-usecases-spike")
+if (args.Length >= 1 && args[0] == "--directed-nexus")
 {
-    return MathUseCasesSpikeRunner.Run();
+    return DirectedNexusAlgorithmBenchmarks.Run();
 }
 
-if (args.Length >= 1 && args[0] == "--vector-neighbor-graph-spike")
+if (args.Length >= 1 && args[0] == "--minimum-hitting-set")
 {
-    return VectorNeighborGraphSpikeRunner.Run();
+    return MinimumHittingSetBenchmarks.Run();
 }
 
-if (args.Length >= 1 && args[0] == "--knn-batch-spike")
+if (args.Length >= 1 && args[0] == "--persistence-h0")
 {
-    return KnnSearchBatchSpikeRunner.Run();
+    return PersistenceH0Benchmarks.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--graph-annotations")
+{
+    return GraphAnnotationBenchmarks.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--formal-concepts")
+{
+    return FormalConceptBenchmarks.Run();
+}
+
+if (args.Length >= 1 && args[0] == "--cyclic-triangle-join")
+{
+    return CyclicTriangleJoinBenchmarks.Run();
 }
 
 // JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。

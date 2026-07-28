@@ -28,6 +28,11 @@
     <Project Path="samples/Quiver.Samples.QueryPatterns/Quiver.Samples.QueryPatterns.csproj" />
     <Project Path="samples/Quiver.Samples.Signal/Quiver.Samples.Signal.csproj" />
     <Project Path="samples/Quiver.Samples.Nexuses/Quiver.Samples.Nexuses.csproj" />
+    <Project Path="samples/Quiver.Samples.DirectedNexuses/Quiver.Samples.DirectedNexuses.csproj" />
+    <Project Path="samples/Quiver.Samples.MinimumHittingSet/Quiver.Samples.MinimumHittingSet.csproj" />
+    <Project Path="samples/Quiver.Samples.PersistenceH0/Quiver.Samples.PersistenceH0.csproj" />
+    <Project Path="samples/Quiver.Samples.FormalConcepts/Quiver.Samples.FormalConcepts.csproj" />
+    <Project Path="samples/Quiver.Samples.GraphAnnotations/Quiver.Samples.GraphAnnotations.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quiver.Storage.Tests/Quiver.Storage.Tests.csproj" />
