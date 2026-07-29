@@ -1,214 +1,131 @@
 # 02. バックアップとリストア
 
-> **いつ読むか** — バックアップ戦略を決めるとき、または別マシン/別環境へ DB を複製したいとき。
-> Quiver は単一ディレクトリに状態を持つので、バックアップの本質は「整合した状態のディレクトリを
-> どう手に入れるか」に尽きる。方法は 3 つ: **(A) ライブスナップショット (推奨)**、**(B) コールドコピー**、
-> **(C) 論理エクスポート**。
+> **いつ読むか** — 同じ Quiver ストレージ形式へ復旧するためのバックアップを設計するとき。
+> 別 DB への移行やサブグラフの受け渡しには Graph JSON、Quiver の物理形式を更新するときは
+> 明示的な storage upgrade、アプリケーションモデルを変更するときは `IMigration` を使う。
 
----
+## DB を構成するファイル
 
-## 前提: DB ディレクトリの中身
+バイナリバックエンドの正本は、`QuiverDatabase.Open` に渡す単一の primary file である。
+たとえば `C:\data\graph.quiver` を開いた場合、同じ DB に属する物理ファイルは次の名前になる。
 
-1 つの DB はディレクトリ 1 つ。中には概ね以下が入る:
+| パス | 役割 | 存在する時期 |
+|---|---|---|
+| `graph.quiver` | コアレコード、schema、token、隣接情報、scalar/vector index、migration historyを格納するprimary file | 常時 |
+| `graph.quiver-wal` | active WAL sidecar | DBを開いている間、または異常終了後。clean closeでは通常削除される |
+| `graph.quiver-ftseg\*.qfts` | manifest参照用のimmutable全文segment body。vacuum前の未参照artifactを含みうる | 全文indexを利用している場合 |
 
-- データファイル (vertices / edges / properties / tokens の固定長レコードストア)
-- 索引ファイル (`.idx` / `.idxmeta` / `.fileKinds`) — B+Tree 索引
-- 隣接ブロックストア
-- WAL セグメント (`*.wal`)
+旧レイアウトのようなVertex、Edge、property、B+Treeごとのdata/index fileは存在しない。
+`SnapshotOptions.IncludeIndexes`は別backendとの互換オプションであり、現行binary backendでは
+scalar/vector indexがprimary fileに同居するため実質的にno-opである。
 
-**重要**: これらは相互参照しているので、**個別ファイルだけをコピーしても整合しない**。
-ディレクトリ全体を「ある一貫した時点」で取る必要がある。下の方法 A / B はそれを保証する。
+`*.quiver-upgrade` marker、一時target、`*.pre-upgrade-vN.bak`はstorage upgradeの作業物であり、
+通常のopen中に使うDB構成ではない。upgrade中のファイルを個別に移動せず、完了または再開によって
+markerを解決してからバックアップする。
 
----
+## A. ライブスナップショット（推奨）
 
-## A. ライブスナップショット (推奨) — `CreateSnapshot`
-
-書き込みを止めずに、整合したコピーを別ディレクトリに作る。本番で最も使うべき方法。
-
-```csharp
-using var db = QuiverDatabase.Open(@"C:\data\graph");
-
-// ライブ中に整合スナップショットを作成。並行 writer はごく短時間しか待たない。
-db.CreateSnapshot(@"C:\backup\graph-2026-05-30");
-```
-
-内部の流れ (理解しておくと安心):
-
-1. ベストエフォートでシャープチェックポイントを起動
-2. データ / 索引ファイルを page-by-page で複製
-3. WAL を末尾までフラッシュしてセグメントを複製
-
-並行する writer は **フレームレベルロックの粒度** でしか待たないので、長時間ブロックしない。
-target ディレクトリを後で `QuiverDatabase.Open` で開くと recovery が走り、スナップショット時点までの
-commit 群が redo され、in-flight だった tx は補償レコードで undo される。**結果として target は
-「スナップショットを取った瞬間に正常終了した DB」と等価**になる。
-
-### 索引を含めるかどうか
+`CreateSnapshot`にはディレクトリではなく、コピー先primary fileのパスを渡す。
 
 ```csharp
-db.CreateSnapshot(@"C:\backup\graph", new SnapshotOptions
-{
-    IncludeIndexes = false   // 既定 true。false なら復元側で CreateIndex で再構築する想定
-});
+using var db = QuiverDatabase.Open(@"C:\data\graph.quiver");
+db.CreateSnapshot(@"D:\backup\graph-20260729.quiver");
 ```
 
-- `IncludeIndexes = true` (既定): 索引ファイルもコピー。開いてすぐ使える。
-- `IncludeIndexes = false`: バックアップサイズを削るが、復元後に書き込みトランザクションの `EditSchema` で
-  索引を張り直す必要がある。索引が巨大で再構築が許容できるときだけ。
+binary backendは同じベース名で次の一式を作る。
 
-### 注意
+- `D:\backup\graph-20260729.quiver`
+- snapshot時点でWALがあれば`D:\backup\graph-20260729.quiver-wal`
+- 全文segmentがあれば`D:\backup\graph-20260729.quiver-ftseg\*.qfts`
 
-- target ディレクトリは空であること (または存在しないこと) を推奨。
+内部ではsharp checkpoint後にprimary fileをpage単位でコピーし、WALをflushしてコピーし、
+最後にimmutable全文artifact directoryをコピーする。manifestが参照しない余分なartifactは可視にならない。
+コピー先を開くとWAL recoveryが実行され、
+明示Commitを持つtransactionだけが公開された整合状態へ収束する。
 
----
+snapshotはDBを閉じずに実行でき、readerは継続できる。現行binary backendではsnapshot全体が
+single-writer mutation leaseに参加するため、既存writerの終了を待ち、処理中の新しいwriterは待機する。
+大きなDBでは所要時間を測定し、writer待ち時間を許容できる時間帯に実行する。
 
-## B. コールドコピー — プロセス停止中のディレクトリ複製
+コピー先には、既存DBや別snapshotの同名sidecarを混在させない。新しいファイル名を世代ごとに割り当て、
+完成したsnapshot一式を同じベース名の単位で保持する。
 
-DB を **Dispose で正常に閉じた後** なら、ディレクトリを OS のファイルコピーで丸ごと複製してよい。
-バッチ運用やメンテナンスウィンドウがある環境ではこれで十分。
+## B. コールドコピー
 
-```pwsh
-# 1) アプリを止める (db.Dispose() が完了している状態にする)
-# 2) ディレクトリ全体をコピー
-Copy-Item -Recurse "C:\data\graph" "C:\backup\graph-cold-2026-05-30"
-```
+DBを`Dispose`で閉じ、同じファイルを開く全プロセスが停止した後なら、primary fileとそのsidecar一式を
+OSのファイルコピーで複製できる。clean close後は通常、primary fileと全文segment directoryだけが残る。
+異常終了後などWALが残っている場合は、`*-wal`も同じ時点の一式としてコピーする。
 
-- **DB を開いたままコピーしてはいけない**。書き込み途中のページと WAL が不整合になりうる。
-  開いたまま取りたいなら必ず方法 A (`CreateSnapshot`)。
-- 正常に閉じた DB ならコピー後の WAL は空に近く、復元側の recovery も軽い。
+```powershell
+$source = "C:\data\graph.quiver"
+$target = "D:\backup\graph-20260729.quiver"
 
----
+Copy-Item -LiteralPath $source -Destination $target
 
-## C. 論理エクスポート (移行・スキーマ変更を伴う場合)
+$sourceWal = "$source-wal"
+if (Test-Path -LiteralPath $sourceWal) {
+    Copy-Item -LiteralPath $sourceWal -Destination "$target-wal"
+}
 
-ファイル形式に依存しない移植が必要なとき (例: メジャーバージョン跨ぎの format 変更、
-別ストアへの移行) は、読み取りトランザクションで全Vertex/エッジを走査して自前のフォーマット
-(JSON Lines など) に書き出す。復元は `BeginStreamingBulkLoad` で再投入する。
-
-- 利点: format 非依存、人間が読める、部分抽出ができる。
-- 欠点: 完全性は自前の走査コードの正しさ次第。物理バックアップ (A/B) より遅く大きい。
-
-通常運用のバックアップは **A を第一選択**にし、C は移行イベント用と割り切るのがよい。
-
----
-
-## リストア (復元)
-
-物理バックアップ (A または B) からの復元は **「バックアップディレクトリを開く」だけ**。
-
-```csharp
-// バックアップを本番パスへ配置してから開く
-using var db = QuiverDatabase.Open(@"C:\data\graph");   // recovery が自動で走る
-```
-
-別マシンへの復元手順:
-
-1. アプリ (復元先) を停止
-2. 既存 DB ディレクトリを退避 (`graph` → `graph.broken` などにリネーム。**いきなり消さない**)
-3. バックアップディレクトリを復元先パスへコピー
-4. アプリを起動 → 初回 `Open` で recovery が走り、整合状態で立ち上がる
-5. `db.Diagnostics.GetStatistics()` で件数を確認、必要なら索引整合チェック
-   ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md) の `CheckIndexConsistency`)
-
-> バックアップの世代管理・スケジューリングは Quiver の責務外。`CreateSnapshot` を
-> 定期ジョブ (Windows タスクスケジューラ / cron / ホスト側の `BackgroundService`) から呼び、
-> 出力ディレクトリを日付付きで保持し、古い世代を削除する運用を組む。
-
-### 定期スナップショットを `BackgroundService` で回す
-
-Generic Host / ASP.NET Core に組み込む場合、`BackgroundService` から `CreateSnapshot` を周期実行し、
-世代を日付付きで保持・剪定するのが簡潔。
-
-```csharp
-public sealed class SnapshotBackupService(
-    QuiverDatabase db, ILogger<SnapshotBackupService> log) : BackgroundService
-{
-    private const int RetainGenerations = 7;
-    private static readonly string BackupRoot = @"D:\backup\graph";
-
-    protected override async Task ExecuteAsync(CancellationToken ct)
-    {
-        // 起動直後ではなく次の「区切り」まで待ってから毎日 1 回など、運用ポリシーに合わせる
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(24));
-        while (await timer.WaitForNextTickAsync(ct))
-        {
-            try
-            {
-                var target = Path.Combine(BackupRoot, $"graph-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
-                db.CreateSnapshot(target);             // 書き込みを止めずに整合コピー
-                log.LogInformation("snapshot 完了: {Target}", target);
-                PruneOldGenerations();
-            }
-            catch (Exception ex)
-            {
-                log.LogError(ex, "snapshot 失敗 — 次周期で再試行");
-            }
-        }
-    }
-
-    // 新しい順に RetainGenerations 件だけ残し、古い世代ディレクトリを削除する
-    private static void PruneOldGenerations()
-    {
-        if (!Directory.Exists(BackupRoot)) return;
-        var dirs = Directory.GetDirectories(BackupRoot, "graph-*")
-                            .OrderByDescending(d => d)   // 名前が日時順なので文字列降順で新しい順
-                            .Skip(RetainGenerations);
-        foreach (var d in dirs)
-            Directory.Delete(d, recursive: true);
-    }
+$sourceFullText = "$source-ftseg"
+if (Test-Path -LiteralPath $sourceFullText) {
+    Copy-Item -LiteralPath $sourceFullText -Destination "$target-ftseg" -Recurse
 }
 ```
 
+DBを開いたままOSコピーしてはいけない。primary、WAL、全文artifactの時点がずれるためである。
+停止できない運用ではAの`CreateSnapshot`を使う。
+
+## リストア
+
+物理snapshotまたはcold copyは、コピー先primary fileを`Open`するだけで復元できる。
+
 ```csharp
-builder.Services.AddHostedService<SnapshotBackupService>();
+using var restored = QuiverDatabase.Open(@"D:\restore\graph.quiver");
+var report = restored.Diagnostics.CheckConsistency();
+if (!report.IsConsistent)
+    throw new InvalidOperationException(string.Join(Environment.NewLine, report.Issues));
 ```
 
-ポイント:
+本番パスへ戻すときは次の順序にする。
 
-- スナップショット失敗は **次周期でリトライ** する設計にし、1 回の失敗でジョブが止まらないようにする。
-- 世代剪定は「新しい順に N 件残す」。世代数は RPO (どこまでのデータ損失を許容するか) と
-  ストレージ容量から決める。
-- バックアップ先は **DB と別物理ストレージ / 別マシン** に置く。同じディスクに置くと
-  ディスク障害でバックアップごと失う。
+1. 復元先アプリケーションを停止し、DBが閉じたことを確認する。
+2. 現在のprimary、WAL、全文segment directoryを同じベース名の一式として退避する。
+3. snapshot一式を復元先へコピーし、primaryとsidecarのベース名を一致させる。
+4. primary fileを`Open`し、WAL recoveryを完了させる。
+5. `GetStatistics()`と`CheckConsistency()`を確認する。
 
-### PowerShell から外部ジョブとして取る
+退避した一式は検証が終わるまで削除しない。バックアップ自体も別物理ストレージへ複製し、
+定期的に隔離パスでopenするリストアリハーサルを行う。
 
-アプリ内ジョブにしたくない場合、コールドコピー (方法 B) を Windows タスクスケジューラから回す:
+## Graph JSONとstorage upgradeはバックアップではない
 
-```pwsh
-# backup.ps1 — メンテナンスウィンドウ中にアプリを止めてからコピー
-$src = "C:\data\graph"
-$dst = "D:\backup\graph-{0:yyyyMMdd-HHmmss}" -f (Get-Date)
-Stop-Service MyAppService          # db.Dispose() が完了する停止手順
-Copy-Item -Recurse $src $dst
-Start-Service MyAppService
-# 7 世代より古いものを削除
-Get-ChildItem "D:\backup" -Directory -Filter "graph-*" |
-    Sort-Object Name -Descending | Select-Object -Skip 7 |
-    Remove-Item -Recurse -Force
-```
+`GraphJsonExporter`のUTF-8 JSONは、別DBへの移行、人間による確認、サブグラフ共有のための
+論理exchange formatである。importではtarget側のVertex、Edge、Nexus IDを新規採番し、
+WAL、MVCC history、derived index artifactは復元しない。障害復旧の代わりには使わない。
 
-ライブ運用 (停止不可) では方法 A の `CreateSnapshot` を使い、停止できる環境では上記コールドコピーで良い。
+`QuiverDatabase.UpgradeStorage(path)`は、閉じたDBの物理形式を現行familyへ明示的に移すoffline operationである。
+通常のversion移行をJSON経由で行うAPIではなく、`Open`も暗黙upgradeをしない。
+v0.5.0のcurrent familyはv0.4.0と同じversion 2なので、現行ファイルには
+`StorageUpgradeStatus.AlreadyCurrent`を返し、ファイルを書き換えない。このbuildに登録された実変換stepのない
+旧familyは`StorageUpgradeNotSupportedException`で拒否される。
 
----
+アプリケーションのlabel/property/typed modelを変える場合は`IMigration`と構造置換APIを使う。
+用途ごとの最小手順は[グラフ移行cookbook](../api/migration-cookbook.md)を参照する。
 
-## バックアップ方式の選び方
+## 方式の選び方
 
-| 状況 | 推奨 |
+| 目的 | 使う機能 |
 |---|---|
-| 24/7 稼働、停止できない | **A: `CreateSnapshot`** |
-| 夜間メンテナンスウィンドウがある | A または B (B はシンプル) |
-| format を跨ぐ移行 / 別ストアへ移植 | C: 論理エクスポート |
+| 同じQuiver形式へ障害復旧する | `CreateSnapshot`、または停止後のcold copy |
+| Quiverの物理familyを更新する | DBを閉じて`UpgradeStorage` |
+| 別DBへ移行・subgraph共有・内容確認 | `GraphJsonExporter` / `GraphJsonImporter` |
+| 同じDB内でapplication schema/dataを変更する | `IMigration` + `Update` / `Replace*` |
 
----
+## 運用チェックリスト
 
-## 復元の検証 (リハーサル)
-
-バックアップは **復元できて初めて意味がある**。定期的に:
-
-1. 最新スナップショットを隔離ディレクトリへ復元
-2. `QuiverDatabase.Open` で起動できることを確認
-3. `GetStatistics()` の件数が想定どおりか
-4. `db.Diagnostics.CheckIndexConsistency()` で orphan が出ないか
-
-を回す「リストアリハーサル」を運用に組み込むこと。
+- snapshotを毎回新しいベース名へ作成し、primaryとsidecarを一式で世代管理する。
+- snapshot失敗時は不完全なtarget一式を採用せず、別名で再実行する。
+- RPOに合わせて取得間隔を決め、復元確認後にのみ古い世代を剪定する。
+- バックアップをDBとは別の物理ストレージへ複製する。
+- 定期的にsnapshotを隔離パスで開き、統計と整合性を確認する。

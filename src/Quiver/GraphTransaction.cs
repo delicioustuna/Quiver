@@ -126,6 +126,202 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        DeleteVertexCore(vertexId);
+    }
+
+    public VertexGraphRewriteResult ReplaceVertex(VertexId vertexId, string label)
+    {
+        EnsureWritable();
+        using var usage = EnterUsage();
+        return ReplaceVerticesCore([new VertexRewriteRequest(vertexId, label)]);
+    }
+
+    public VertexGraphRewriteResult ReplaceVertices(IReadOnlyList<VertexRewriteRequest> rewrites)
+    {
+        EnsureWritable();
+        ArgumentNullException.ThrowIfNull(rewrites);
+        using var usage = EnterUsage();
+        return ReplaceVerticesCore(rewrites);
+    }
+
+    private VertexGraphRewriteResult ReplaceVerticesCore(
+        IReadOnlyList<VertexRewriteRequest> rewrites)
+    {
+        if (rewrites.Count == 0)
+            throw new ArgumentException("At least one vertex rewrite is required.", nameof(rewrites));
+
+        var requested = new HashSet<VertexId>();
+        var vertices = new List<MaterializedVertexRewrite>(rewrites.Count);
+        foreach (VertexRewriteRequest rewrite in rewrites)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(rewrite.NewLabel);
+            if (!requested.Add(rewrite.OldId))
+                throw new ArgumentException(
+                    $"Vertex {rewrite.OldId} occurs more than once in the rewrite batch.",
+                    nameof(rewrites));
+
+            VertexReadHandle vertex = _inner.Vertices.Read(rewrite.OldId);
+            if (!vertex.InUse || vertex.Id != rewrite.OldId)
+                throw new KeyNotFoundException(
+                    $"Vertex {rewrite.OldId} does not exist in this transaction.");
+
+            vertices.Add(new MaterializedVertexRewrite(
+                rewrite,
+                CaptureProperties(PropertyOwner(rewrite.OldId), vertex.FirstPropertyRef)));
+        }
+
+        Dictionary<EdgeId, MaterializedEdgeRewrite> edges = MaterializeRewriteEdges(vertices);
+        Dictionary<NexusId, MaterializedNexusRewrite> nexuses = MaterializeRewriteNexuses(vertices);
+
+        var vertexMap = new Dictionary<VertexId, VertexId>(vertices.Count);
+        var vertexMappings = new VertexReplacement[vertices.Count];
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            MaterializedVertexRewrite vertex = vertices[i];
+            LabelId labelId = _labelTokens.GetOrCreate(vertex.Request.NewLabel);
+            VertexId newId = _inner.Vertices.Allocate(labelId);
+            if (_logicalSink != null)
+                RecordLogical(LogicalMutation.CreateVertex(newId, vertex.Request.NewLabel));
+            CopyProperties(vertex.Properties, PropertyOwner(newId));
+            vertexMap.Add(vertex.Request.OldId, newId);
+            vertexMappings[i] = new VertexReplacement(vertex.Request.OldId, newId);
+        }
+
+        var rewrittenEdges = new List<MaterializedEdgeRewrite>(edges.Count);
+        foreach (MaterializedEdgeRewrite edge in edges.Values)
+        {
+            rewrittenEdges.Add(edge with
+            {
+                Source = vertexMap.GetValueOrDefault(edge.Source, edge.Source),
+                Target = vertexMap.GetValueOrDefault(edge.Target, edge.Target),
+            });
+        }
+
+        var rewrittenNexuses = new List<MaterializedNexusRewrite>(nexuses.Count);
+        foreach (MaterializedNexusRewrite nexus in nexuses.Values)
+        {
+            var members = new NexusMember[nexus.Members.Length];
+            var seen = new HashSet<(string Role, VertexId VertexId)>();
+            for (int i = 0; i < members.Length; i++)
+            {
+                NexusMember member = nexus.Members[i];
+                VertexId mapped = vertexMap.GetValueOrDefault(member.VertexId, member.VertexId);
+                members[i] = new NexusMember(member.Role, mapped);
+                if (!seen.Add((member.Role, mapped)))
+                    throw new ArgumentException(
+                        $"Vertex rewrite would create duplicate Nexus member ({member.Role}, {mapped}) in {nexus.Id}.",
+                        nameof(rewrites));
+            }
+            rewrittenNexuses.Add(nexus with { Members = members });
+        }
+
+        var edgeMappings = new EdgeReplacement[rewrittenEdges.Count];
+        for (int i = 0; i < rewrittenEdges.Count; i++)
+        {
+            MaterializedEdgeRewrite edge = rewrittenEdges[i];
+            edgeMappings[i] = ReplaceEdgeCore(edge.Id, edge.Source, edge.Target, edge.Type);
+        }
+
+        var nexusMappings = new NexusReplacement[rewrittenNexuses.Count];
+        for (int i = 0; i < rewrittenNexuses.Count; i++)
+        {
+            MaterializedNexusRewrite nexus = rewrittenNexuses[i];
+            nexusMappings[i] = ReplaceNexusCore(nexus.Id, nexus.Type, nexus.Members);
+        }
+
+        foreach (MaterializedVertexRewrite vertex in vertices)
+            DeleteVertexCore(vertex.Request.OldId);
+
+        return new VertexGraphRewriteResult(
+            vertexMappings,
+            edgeMappings,
+            nexusMappings);
+    }
+
+    private Dictionary<EdgeId, MaterializedEdgeRewrite> MaterializeRewriteEdges(
+        IReadOnlyList<MaterializedVertexRewrite> vertices)
+    {
+        var edges = new Dictionary<EdgeId, MaterializedEdgeRewrite>();
+        foreach (MaterializedVertexRewrite vertex in vertices)
+        {
+            var materializer = new EntityIdentityMaterializer(_inner.Vertices);
+            EdgeEnumerator enumerator = _inner.Edges.EnumerateNeighbors(
+                vertex.Request.OldId,
+                _inner.Vertices);
+            while (enumerator.MoveNext())
+            {
+                EdgeReadHandle edge = enumerator.Current;
+                if (edges.ContainsKey(edge.Id))
+                    continue;
+                if (!materializer.TryVertexReferenceFromVisibleOwner(
+                        edge.Source,
+                        out VertexId source)
+                    || !materializer.TryVertexReferenceFromVisibleOwner(
+                        edge.Target,
+                        out VertexId target))
+                {
+                    throw new InvalidOperationException(
+                        $"Edge {edge.Id} references a missing endpoint.");
+                }
+                edges.Add(edge.Id, new MaterializedEdgeRewrite(
+                    edge.Id,
+                    source,
+                    target,
+                    _edgeTypeTokens.GetName(edge.Type)));
+            }
+            enumerator.Dispose();
+        }
+        return edges;
+    }
+
+    private Dictionary<NexusId, MaterializedNexusRewrite> MaterializeRewriteNexuses(
+        IReadOnlyList<MaterializedVertexRewrite> vertices)
+    {
+        var nexuses = new Dictionary<NexusId, MaterializedNexusRewrite>();
+        var materializer = new EntityIdentityMaterializer(_inner.Vertices);
+        foreach (MaterializedVertexRewrite vertex in vertices)
+        {
+            VertexIncidenceEnumerator incidence = _inner.Incidences.EnumerateByVertex(
+                vertex.Request.OldId,
+                _inner.VertexIncidenceHeads,
+                _inner.Nexuses);
+            while (incidence.MoveNext())
+            {
+                using NexusReadHandle nexus = _inner.Nexuses.Read(incidence.Current.NexusId);
+                if (!nexus.InUse || nexuses.ContainsKey(nexus.Id))
+                    continue;
+
+                var members = new List<NexusMember>();
+                NexusIncidenceEnumerator member = _inner.Incidences.EnumerateByNexus(
+                    nexus.Id,
+                    _inner.Nexuses);
+                while (member.MoveNext())
+                {
+                    IncidenceReadHandle current = member.Current;
+                    if (!materializer.TryVertexReferenceFromVisibleOwner(
+                            current.VertexId,
+                            out VertexId memberVertex))
+                    {
+                        throw new InvalidOperationException(
+                            $"Nexus {nexus.Id} references a missing Vertex {current.VertexId}.");
+                    }
+                    members.Add(new NexusMember(
+                        _roleTokens.GetName(current.RoleId),
+                        memberVertex));
+                }
+                member.Dispose();
+                nexuses.Add(nexus.Id, new MaterializedNexusRewrite(
+                    nexus.Id,
+                    _nexusTypeTokens.GetName(nexus.Type),
+                    members.ToArray()));
+            }
+            incidence.Dispose();
+        }
+        return nexuses;
+    }
+
+    private void DeleteVertexCore(VertexId vertexId)
+    {
         var firstEdgeId = _inner.Vertices.Read(vertexId).FirstEdgeId;
         var edgesToDelete = new List<EdgeId>();
         var edgeId = firstEdgeId;
@@ -178,6 +374,28 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         return edge.InUse && edge.Type.IsValid
             ? _edgeTypeTokens.GetName(edge.Type)
             : null;
+    }
+
+    public bool TryGetEdge(EdgeId edgeId, out EdgeInfo edgeInfo)
+    {
+        using var usage = EnterUsage();
+        edgeInfo = default;
+        if (!IsLogicalEdgeIdentity(edgeId)) return false;
+
+        EdgeReadHandle edge = _inner.Edges.Read(edgeId);
+        if (!edge.InUse || !edge.Type.IsValid) return false;
+
+        var materializer = new EntityIdentityMaterializer(_inner.Vertices);
+        if (!materializer.TryVertexReferenceFromVisibleOwner(edge.Source, out VertexId source)
+            || !materializer.TryVertexReferenceFromVisibleOwner(edge.Target, out VertexId target))
+            return false;
+
+        edgeInfo = new EdgeInfo(
+            edge.Id,
+            source,
+            target,
+            _edgeTypeTokens.GetName(edge.Type));
+        return true;
     }
 
     // ========== MERGE ==========
@@ -501,6 +719,41 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         using var usage = EnterUsage();
         if (!IsLogicalEdgeIdentity(edgeId)) return;
         DeleteEdgeCore(edgeId);
+    }
+
+    public EdgeReplacement ReplaceEdge(
+        EdgeId edgeId,
+        VertexId source,
+        VertexId target,
+        string type)
+    {
+        EnsureWritable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
+        using var usage = EnterUsage();
+        return ReplaceEdgeCore(edgeId, source, target, type);
+    }
+
+    private EdgeReplacement ReplaceEdgeCore(
+        EdgeId edgeId,
+        VertexId source,
+        VertexId target,
+        string type)
+    {
+        if (!IsLogicalEdgeIdentity(edgeId))
+            throw new KeyNotFoundException($"Edge {edgeId} does not exist in this transaction.");
+
+        EdgeReadHandle oldEdge = _inner.Edges.Read(edgeId);
+        if (!oldEdge.InUse)
+            throw new KeyNotFoundException($"Edge {edgeId} does not exist in this transaction.");
+
+        var properties = CaptureProperties(
+            PropertyOwner(edgeId),
+            oldEdge.FirstPropertyRef);
+        EdgeTypeId typeId = _edgeTypeTokens.GetOrCreate(type);
+        EdgeId newId = CreateEdgeCore(source, target, typeId, type);
+        CopyProperties(properties, PropertyOwner(newId));
+        DeleteEdgeCore(edgeId);
+        return new EdgeReplacement(edgeId, newId);
     }
 
     private void DeleteEdgeCore(EdgeId edgeId)
@@ -1411,6 +1664,144 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
     }
 
+    public PropertyCursor EnumerateProperties(EdgeId edgeId)
+    {
+        var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId))
+        {
+            usage.Dispose();
+            return new PropertyCursor(null!, default, PropertyVersionRef.Invalid);
+        }
+        try
+        {
+            var cursor = _inner.Edges.EnumerateProperties(edgeId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return cursor;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
+    }
+
+    private readonly record struct MaterializedVertexRewrite(
+        VertexRewriteRequest Request,
+        IReadOnlyList<(PropertyKeyId KeyId, PropertyCardinality Cardinality, LogicalPropertyValue Value)> Properties);
+
+    private readonly record struct MaterializedEdgeRewrite(
+        EdgeId Id,
+        VertexId Source,
+        VertexId Target,
+        string Type);
+
+    private readonly record struct MaterializedNexusRewrite(
+        NexusId Id,
+        string Type,
+        NexusMember[] Members);
+
+    private List<(PropertyKeyId KeyId, PropertyCardinality Cardinality, LogicalPropertyValue Value)>
+        CaptureProperties(EntityRef owner, PropertyVersionRef firstProperty)
+    {
+        var properties = new List<(PropertyKeyId, PropertyCardinality, LogicalPropertyValue)>();
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
+        {
+            PropertyEntry property = cursor.Current;
+            properties.Add((
+                property.KeyId,
+                property.Cardinality,
+                LogicalPropertyValue.Capture(property.Value)));
+        }
+        return properties;
+    }
+
+    private void CopyProperties(
+        IReadOnlyList<(PropertyKeyId KeyId, PropertyCardinality Cardinality, LogicalPropertyValue Value)> properties,
+        EntityRef target)
+    {
+        PropertyVersionRef head = PropertyVersionRef.Invalid;
+        foreach (var property in properties)
+        {
+            string key = _propKeyTokens.GetName(property.KeyId);
+            PropertyValue value = property.Value.ToPropertyValue();
+            head = _inner.Properties.Create(
+                new PropertyAddress(target, property.KeyId),
+                property.Cardinality,
+                in value,
+                head);
+            MaintainScalarIndexes(target, key, in value, head);
+            if (property.Cardinality == PropertyCardinality.Single)
+                StageFullTextPropertyMutation(target, key, head, in value);
+            if (property.Cardinality == PropertyCardinality.Single
+                && value.Type == PropertyValueType.FloatArray)
+                StageCopiedVectorProperty(target, key, value.FloatArrayValue);
+            RecordCopiedProperty(target, key, property.Cardinality, property.Value);
+        }
+
+        switch (target.Kind)
+        {
+            case EntityKind.Vertex:
+                var vertex = _inner.Vertices.Write(new VertexId(target.Value));
+                vertex.FirstPropertyRef = head;
+                vertex.Dispose();
+                break;
+            case EntityKind.Edge:
+                var edge = _inner.Edges.Write(new EdgeId(target.Value));
+                edge.FirstPropertyRef = head;
+                edge.Dispose();
+                break;
+            case EntityKind.Nexus:
+                var nexus = _inner.Nexuses.Write(new NexusId(target.Value));
+                nexus.FirstPropertyRef = head;
+                nexus.Dispose();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(target));
+        }
+    }
+
+    private void StageCopiedVectorProperty(
+        EntityRef owner,
+        string propertyKey,
+        ReadOnlySpan<float> vector)
+    {
+        foreach (IndexInfo index in _schema.ListIndexes())
+        {
+            if (index.Definition is VectorIndexDefinition vectorIndex
+                && vectorIndex.Target.PropertyKey == propertyKey
+                && MatchesOwner(owner, vectorIndex.Target))
+                StageVectorMutation(VectorSegmentMutation.Upsert(vectorIndex, owner, vector));
+        }
+    }
+
+    private void RecordCopiedProperty(
+        EntityRef owner,
+        string key,
+        PropertyCardinality cardinality,
+        LogicalPropertyValue value)
+    {
+        if (_logicalSink is null) return;
+
+        LogicalMutation mutation = (owner.Kind, cardinality) switch
+        {
+            (EntityKind.Vertex, PropertyCardinality.Single) =>
+                LogicalMutation.SetVertexProperty(new VertexId(owner.Value), key, in value),
+            (EntityKind.Vertex, PropertyCardinality.Set) =>
+                LogicalMutation.AddVertexPropertyValue(new VertexId(owner.Value), key, in value),
+            (EntityKind.Edge, PropertyCardinality.Single) =>
+                LogicalMutation.SetEdgeProperty(new EdgeId(owner.Value), key, in value),
+            (EntityKind.Edge, PropertyCardinality.Set) =>
+                LogicalMutation.AddEdgePropertyValue(new EdgeId(owner.Value), key, in value),
+            (EntityKind.Nexus, PropertyCardinality.Single) =>
+                LogicalMutation.SetNexusProperty(new NexusId(owner.Value), key, in value),
+            (EntityKind.Nexus, PropertyCardinality.Set) =>
+                LogicalMutation.AddNexusPropertyValue(new NexusId(owner.Value), key, in value),
+            _ => throw new ArgumentOutOfRangeException(nameof(owner)),
+        };
+        RecordLogical(mutation);
+    }
+
     private void ScanPrimaryVectorsBatch(
         VectorIndexDefinition definition,
         PropertyKeyId keyId,
@@ -1772,6 +2163,37 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         EnsureWritable();
         using var usage = EnterUsage();
         DeleteNexusCore(nexusId);
+    }
+
+    public NexusReplacement ReplaceNexus(
+        NexusId nexusId,
+        string type,
+        ReadOnlySpan<NexusMember> members)
+    {
+        EnsureWritable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
+        using var usage = EnterUsage();
+        return ReplaceNexusCore(nexusId, type, members);
+    }
+
+    private NexusReplacement ReplaceNexusCore(
+        NexusId nexusId,
+        string type,
+        ReadOnlySpan<NexusMember> members)
+    {
+
+        using NexusReadHandle oldNexus = _inner.Nexuses.Read(nexusId);
+        if (!oldNexus.InUse)
+            throw new KeyNotFoundException($"Nexus {nexusId} does not exist in this transaction.");
+
+        var properties = CaptureProperties(
+            PropertyOwner(nexusId),
+            oldNexus.FirstPropertyRef);
+        NexusTypeId typeId = _nexusTypeTokens.GetOrCreate(type);
+        NexusId newId = CreateNexusCore(typeId, members);
+        CopyProperties(properties, PropertyOwner(newId));
+        DeleteNexusCore(nexusId);
+        return new NexusReplacement(nexusId, newId);
     }
 
     private void DeleteNexusCore(NexusId nexusId)

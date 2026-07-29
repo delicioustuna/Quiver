@@ -118,6 +118,8 @@ internal sealed class StubSchemaApi : ISchemaEditor, INexusSchemaResolver
     public IReadOnlyList<string> ListNexusTypes() => _nexusTypes.Keys.ToList();
     public IReadOnlyList<string> ListRoles() => _roles.Keys.ToList();
 
+    public void EnsureRole(string name) => GetOrCreateRole(name);
+
     public RoleId GetOrCreateRole(string name)
     {
         if (!_roles.TryGetValue(name, out var id))

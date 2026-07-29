@@ -30,6 +30,9 @@ jobs:
           dotnet tool restore
           dotnet restore Quiver.slnx
 
+      - name: Build projects
+        run: dotnet build Quiver.slnx --configuration Release --no-restore
+
       - name: Generate architecture inventory
         shell: pwsh
         run: ./scripts/generate-docs.ps1

@@ -57,6 +57,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly ILogicalMutationSink? _logicalSink;
     private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
     private readonly PersistentEdgeDeltaStore? _edgeDeltas;
+    private readonly DatabaseIdentityStore _databaseIdentity;
+    private readonly Lock _databaseIdentityGate = new();
     private readonly RelationshipReuseCoordinator _relationshipReuse;
     private readonly CancellationTokenSource _scalarIndexRebuildCancellation = new();
     private readonly object _scalarIndexRebuildSync = new();
@@ -96,6 +98,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         LabelVertexIndex? labelIndex = null,
         EdgeDeltaHeadStore? edgeDeltaHeads = null,
         PersistentEdgeDeltaStore? edgeDeltas = null,
+        DatabaseIdentityStore? databaseIdentity = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
         long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
@@ -131,6 +134,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _coMembershipStore = coMembershipStore;
         _edgeDeltaHeads = edgeDeltaHeads;
         _edgeDeltas = edgeDeltas;
+        _databaseIdentity = databaseIdentity
+            ?? new DatabaseIdentityStore(container, createIfMissing: false);
         _txManager = txManager;
         _relationshipReuse = new RelationshipReuseCoordinator(
             _container.OpenTenant(
@@ -389,11 +394,35 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     internal IVertexIncidenceHeadStore VertexIncidenceHeadStoreForTest => _txManager.VertexIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
+    public bool TryGetDatabaseInstanceId(out DatabaseInstanceId databaseInstanceId)
+    {
+        lock (_databaseIdentityGate)
+            return _databaseIdentity.TryGet(out databaseInstanceId);
+    }
+    public DatabaseInstanceId EnsureDatabaseInstanceId()
+    {
+        lock (_databaseIdentityGate)
+        {
+            if (_databaseIdentity.TryGet(out DatabaseInstanceId databaseInstanceId))
+                return databaseInstanceId;
+
+            // Legacy DB でのtenant追加はcatalog、page table、headerの複数pageを
+            // 書き換える。独立write transactionのWAL commit完了後だけIDを
+            // readerへ公開し、crash途中の部分的なtenantを正本にしない。
+            using ITransaction identityTransaction = _txManager.BeginWrite();
+            DatabaseInstanceId created = _databaseIdentity.PrepareCreate();
+            identityTransaction.OnCommitted(
+                () => _databaseIdentity.PublishCreated(created));
+            identityTransaction.Commit();
+            return created;
+        }
+    }
     public IReadTransaction BeginReadTransaction()
         => new ReadTransaction(WrapGraphTransaction(_txManager.BeginRead(), readOnly: true));
 
     public IWriteTransaction BeginWriteTransaction()
     {
+        EnsureDatabaseInstanceId();
         if (Volatile.Read(ref _scalarIndexRebuildRequested) == 0
             && _indexManager.ListIndexDefinitions()
                 .Any(x => x.State != IndexLifecycleState.Ready))
@@ -843,8 +872,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _txManager.RequestCheckpoint(writerLeaseHeld: true);
 
         // 1. コンテナ (graph.quiver = コア / 索引 / 隣接 / token / epoch を同居) を page-by-page で
-        //    複製する。PinForRead でフレームレベル read lock を取りながら写すので、並行 writer は
-        //    同一ページ衝突時だけ短く待つ (block しない)。IncludeIndexes は単一ファイルでは no-op
+        //    複製する。snapshot全体がsingle-writer mutation lease内にあるためreaderは継続できるが、
+        //    writerはコピー完了まで待機する。IncludeIndexesは単一ファイルではno-op
         //    (索引はコンテナに同居するため常に含まれる)。
         CopyPagedFile(_container.Physical, targetFilePath);
 

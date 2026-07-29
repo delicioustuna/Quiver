@@ -554,6 +554,18 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
 
     public bool TryGetRoleId(string name, out RoleId id) => _roles.TryGet(name, out id);
 
+    public void EnsureRole(string name)
+    {
+        if (_roles.TryGet(name, out _)) return;
+        _ = WithMutationLease(() => _roles.GetOrCreate(name));
+    }
+
+    private void EnsureRole(string name, TransactionId owner)
+    {
+        if (_roles.TryGet(name, out _)) return;
+        _ = WithMutationLease(owner, () => _roles.GetOrCreate(name));
+    }
+
     private IDisposable AcquireMutationLease()
         => _acquireMutationLease?.Invoke() ?? NoopDisposable.Instance;
 
@@ -818,6 +830,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         public IReadOnlyList<string> ListRoles() => schema.ListRoles();
         public bool TryGetRoleId(string name, out RoleId id)
             => schema.TryGetRoleId(name, out id);
+        public void EnsureRole(string name)
+            => schema.EnsureRole(name, Owner);
 
     }
 

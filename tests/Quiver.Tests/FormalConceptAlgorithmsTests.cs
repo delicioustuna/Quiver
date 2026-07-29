@@ -242,7 +242,7 @@ public sealed class FormalConceptAlgorithmsTests
         FormalConceptOptions options = Options(100_000) with
         {
             MaxResults = 100_000,
-            TimeLimit = TimeSpan.FromMilliseconds(10),
+            TimeLimit = TimeSpan.FromMilliseconds(100),
         };
 
         FormalConceptResult timed = context.Read.EnumerateFormalConcepts(

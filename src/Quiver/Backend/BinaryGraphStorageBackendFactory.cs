@@ -61,6 +61,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
     public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
     {
+        bool initializeDatabaseIdentity = !File.Exists(filePath)
+            || new FileInfo(filePath).Length == 0;
         // filePath は単一コンテナ (*.quiver) のフルパス。親ディレクトリを用意する。
         var parentDir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
@@ -82,7 +84,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             poolPages,
             options.InitialFileAllocationBytes,
             options.MaximumFileGrowthStepBytes);
-        return OpenCore(filePath, options, pageManager, wal, container, recover: true);
+        return OpenCore(
+            filePath,
+            options,
+            pageManager,
+            wal,
+            container,
+            recover: true,
+            initializeDatabaseIdentity);
     }
 
     /// <summary>
@@ -93,7 +102,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var pageManager = new PageManager();
         var wal = new NullWriteAheadLog();
         var container = new SingleFileContainer(new InMemoryPagedFile());
-        var backend = OpenCore(string.Empty, options, pageManager, wal, container, recover: false);
+        var backend = OpenCore(
+            string.Empty,
+            options,
+            pageManager,
+            wal,
+            container,
+            recover: false,
+            initializeDatabaseIdentity: true);
         return new InMemoryGraphStorageBackend((BinaryGraphStorageBackend)backend);
     }
 
@@ -103,7 +119,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         PageManager pageManager,
         IWriteAheadLog wal,
         SingleFileContainer container,
-        bool recover)
+        bool recover,
+        bool initializeDatabaseIdentity)
     {
         // 先行 backend がトランザクション途中で終了している可能性がある
         // (crash シミュレーション等)。WAL の明示的 write-set 参照をクリーン状態へ戻す。
@@ -156,6 +173,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // テナントと各索引テナントの page-table は物理ページとして recovery 済みなので、
         // ここで container から開き直すだけで永続済み索引を materialize できる。
         var indexManager = new IndexManager(container);
+        var databaseIdentity = new DatabaseIdentityStore(
+            container,
+            initializeDatabaseIdentity);
 
         // 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
         // epoch (base hwm + tombstones) も EpochTenant に同居する。
@@ -365,6 +385,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             labelIndex,
             edgeDeltaHeads,
             edgeDeltas,
+            databaseIdentity,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,
             options.MinCheckpointThresholdBytes,

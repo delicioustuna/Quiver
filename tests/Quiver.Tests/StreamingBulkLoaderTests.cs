@@ -114,6 +114,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     {
         var dir1 = Path.Combine(_baseDir, "prop_in");
         var dir2 = Path.Combine(_baseDir, "prop_st");
+        InitializeMatchingDatabases(dir1, dir2);
         BuildWithProps(dir1, streaming: false);
         BuildWithProps(dir2, streaming: true);
 
@@ -176,6 +177,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     {
         var inmemDir = Path.Combine(_baseDir, "parity_in_" + Guid.NewGuid().ToString("N")[..8]);
         var streamDir = Path.Combine(_baseDir, "parity_st_" + Guid.NewGuid().ToString("N")[..8]);
+        InitializeMatchingDatabases(inmemDir, streamDir);
         Build(inmemDir, streaming: false, vertexCount, edges, buildAdj: false);
         Build(streamDir, streaming: true,  vertexCount, edges, buildAdj: false);
 
@@ -212,6 +214,18 @@ public sealed class StreamingBulkLoaderTests : IDisposable
                     new EdgeTypeId(0));
             loader.Commit();
         }
+    }
+
+    private static void InitializeMatchingDatabases(string firstDirectory, string secondDirectory)
+    {
+        string firstPath = Path.Combine(firstDirectory, "graph.quiver");
+        string secondPath = Path.Combine(secondDirectory, "graph.quiver");
+        using (QuiverDatabase.Open(firstPath))
+        {
+        }
+
+        Directory.CreateDirectory(secondDirectory);
+        File.Copy(firstPath, secondPath);
     }
 
     private static void BuildWithProps(string dir, bool streaming)

@@ -2,6 +2,7 @@ using Quiver.Core;
 using Quiver.Logical;
 using Quiver.Maintenance;
 using Quiver.Storage.Records;
+using Quiver.Storage.Upgrade;
 using Quiver.Transactions;
 
 namespace Quiver;
@@ -35,6 +36,13 @@ public sealed class QuiverDatabase : IDisposable
 
     /// <summary><see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
     public string Path => _path;
+
+    /// <summary>
+    /// 永続済みの export provenance ID を取得する。
+    /// v0.5 より前に作成され、まだ書き込みが行われていないDBでは <c>false</c> を返す。
+    /// </summary>
+    public bool TryGetDatabaseInstanceId(out DatabaseInstanceId databaseInstanceId)
+        => _backend.TryGetDatabaseInstanceId(out databaseInstanceId);
 
     /// <summary>
     /// 指定した単一データベースファイル (<c>*.quiver</c>) を開く (存在しない場合は新規作成)。
@@ -82,6 +90,26 @@ public sealed class QuiverDatabase : IDisposable
         options.Backend = BackendKind.InMemory;
         return Open(":memory:", options);
     }
+
+    /// <summary>
+    /// 閉じた Quiver データベースを、登録済みの手順で現行ストレージ形式へ移行する。
+    /// 移行対象は同じディレクトリの一時ファイルへ構築・検証し、source を直接書き換えない。
+    /// 現行形式の場合はファイルを変更せず <see cref="StorageUpgradeStatus.AlreadyCurrent"/> を返す。
+    /// </summary>
+    /// <param name="filePath">移行する単一データベースファイルのパス。</param>
+    /// <param name="options">バックアップとキャンセルのオプション。</param>
+    /// <returns>検出した形式と移行結果。</returns>
+    /// <exception cref="StorageUpgradeNotSupportedException">
+    /// 検出した形式から現行形式への移行手順がこの build に登録されていない。
+    /// </exception>
+    /// <remarks>
+    /// この API はデータベースを開く前に明示的に呼び出す offline operation である。
+    /// <see cref="Open"/> はストレージ移行を暗黙実行しない。
+    /// </remarks>
+    public static StorageUpgradeResult UpgradeStorage(
+        string filePath,
+        StorageUpgradeOptions? options = null)
+        => StorageUpgradeOrchestrator.Upgrade(filePath, options);
 
     /// <summary>
     /// 下層バックエンド内部 SPI。embedding adapter など内部経路専用で、公開 API ではない。
@@ -215,11 +243,12 @@ public sealed class QuiverDatabase : IDisposable
     }
 
     /// <summary>
-    /// 書き込みを止めずに <paramref name="targetFilePath"/> (<c>*.quiver</c>) へ
-    /// ライブスナップショットを取る。target は <see cref="Open"/> で独立した DB として開ける。
-    /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) 単一コンテナを
-    /// page-by-page で複製、(3) WAL を末尾までフラッシュして単一サイドカーを複製、という流れで、
-    /// 並行 writer はフレームレベルロックの粒度で短くしか待たない。target を開くと recovery が走り、
+    /// backendを閉じずに<paramref name="targetFilePath"/> (<c>*.quiver</c>)へ
+    /// ライブスナップショットを取る。targetは<see cref="Open"/>で独立したDBとして開ける。
+    /// binary backendではsingle-writer mutation leaseを取得し、(1) sharp checkpoint、
+    /// (2) 単一コンテナのpage単位コピー、(3) WALのflushとsidecarコピー、
+    /// (4) immutable全文artifactのコピーを行う。readerは継続できるが、writerは完了まで待機する。
+    /// targetを開くとrecoveryが走り、
     /// snapshot 時点までに明示 Commit を持つ transaction の PageImage だけが redo される。
     /// Commit を持たない transaction は winner にならないため、コピー先へ公開されない。
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。

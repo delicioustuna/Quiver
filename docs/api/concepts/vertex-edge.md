@@ -29,6 +29,7 @@ Property は owner と property key に束縛された versioned value であり
 | `Double` | `double` |
 | `String` | UTF-8 バイト列 |
 | `Bytes` | 任意バイト列 |
+| `FloatArray` | `float` の配列 |
 
 ```csharp
 tx.SetProperty(vertexId, "age",  PropertyValue.FromInt32(30));
@@ -48,3 +49,50 @@ var knowsType = tx.EditSchema.GetOrCreateEdgeType("KNOWS");
 var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
 tx.Commit();
 ```
+
+## Edge / Nexus の読み取りと構造置換
+
+Edgeの端点と型は`TryGetEdge`、全プロパティは`EnumerateProperties`で同じtransaction snapshotから読める。
+
+```csharp
+if (tx.TryGetEdge(edgeId, out var edge))
+    Console.WriteLine($"{edge.Source} -[{edge.Type}]-> {edge.Target}");
+
+var properties = tx.EnumerateProperties(edgeId);
+while (properties.MoveNext())
+    Console.WriteLine(properties.Current.KeyId);
+```
+
+Edgeの端点・型とNexusのメンバー・型は不変である。変更するときは置換APIを使う。
+置換は全プロパティを型とcardinalityを保って移すが、IDは維持しない。
+
+```csharp
+EdgeReplacement edgeReplacement = tx.ReplaceEdge(
+    oldEdgeId, newSource, newTarget, "AUTHORED");
+
+NexusReplacement nexusReplacement = tx.ReplaceNexus(
+    oldNexusId,
+    "Fact",
+    [new("Subject", subject), new("Object", replacementObject)]);
+```
+
+戻り値の`OldId` / `NewId`をapplication migrationの参照更新に利用する。
+
+個別Vertexのラベルを変える場合、単純な`Insert + Delete`では旧Vertexに接続する関係がcascade削除される。
+`ReplaceVertex`は新Vertexへ全propertyをコピーし、接続するEdgeとNexusを張り替えてから旧Vertexを削除する。
+複数Vertexが同じ関係に参加するときは、単体APIを順番に呼ばず`ReplaceVertices`へまとめて渡す。
+
+```csharp
+VertexGraphRewriteResult mappings = tx.ReplaceVertices([
+    new VertexRewriteRequest(oldPerson, "Customer"),
+    new VertexRewriteRequest(oldCompany, "Organization"),
+]);
+
+VertexId newPerson = mappings.VertexMappings
+    .Single(x => x.OldId == oldPerson).NewId;
+```
+
+batchは完全なVertex対応表を各Edge / Nexusへ一度だけ適用し、`VertexMappings`、`EdgeMappings`、
+`NexusMappings`を返す。IDは維持されないため、アプリケーション側の外部参照もこの対応表で更新する。
+構造置換は旧entityの全propertyを保存する。型付きmodelから削除またはrenameした旧keyは、置換後の
+新IDに対して`RemoveProperty`を明示しない限り残る。

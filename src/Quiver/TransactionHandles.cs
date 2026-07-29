@@ -41,6 +41,9 @@ public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
     public string? GetEdgeType(EdgeId edgeId) => _core.GetEdgeType(edgeId);
 
     /// <inheritdoc />
+    public bool TryGetEdge(EdgeId edgeId, out EdgeInfo edge) => _core.TryGetEdge(edgeId, out edge);
+
+    /// <inheritdoc />
     public PropertyValue GetProperty(VertexId vertexId, string key) => _core.GetProperty(vertexId, key);
 
     /// <inheritdoc />
@@ -69,6 +72,9 @@ public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
 
     /// <inheritdoc />
     public PropertyCursor EnumerateProperties(VertexId vertexId) => _core.EnumerateProperties(vertexId);
+
+    /// <inheritdoc />
+    public PropertyCursor EnumerateProperties(EdgeId edgeId) => _core.EnumerateProperties(edgeId);
 
     /// <inheritdoc />
     public PropertyCursor EnumerateProperties(NexusId nexusId) => _core.EnumerateProperties(nexusId);
@@ -179,6 +185,14 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
     public VertexId CreateVertex(LabelId labelId) => _core.CreateVertex(labelId);
     /// <inheritdoc />
     public void DeleteVertex(VertexId vertexId) => _core.DeleteVertex(vertexId);
+
+    /// <inheritdoc />
+    public VertexGraphRewriteResult ReplaceVertex(VertexId vertexId, string label)
+        => _core.ReplaceVertex(vertexId, label);
+
+    /// <inheritdoc />
+    public VertexGraphRewriteResult ReplaceVertices(IReadOnlyList<VertexRewriteRequest> rewrites)
+        => _core.ReplaceVertices(rewrites);
     /// <inheritdoc />
     public bool VertexExists(VertexId vertexId) => _core.VertexExists(vertexId);
     /// <inheritdoc />
@@ -195,6 +209,8 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
     /// <inheritdoc />
     public string? GetEdgeType(EdgeId edgeId) => _core.GetEdgeType(edgeId);
     /// <inheritdoc />
+    public bool TryGetEdge(EdgeId edgeId, out EdgeInfo edge) => _core.TryGetEdge(edgeId, out edge);
+    /// <inheritdoc />
     public EdgeId CreateEdge(VertexId source, VertexId target, string type)
         => _core.CreateEdge(source, target, type);
     /// <inheritdoc />
@@ -205,6 +221,13 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
         => _core.MergeEdge(source, target, type);
     /// <inheritdoc />
     public void DeleteEdge(EdgeId edgeId) => _core.DeleteEdge(edgeId);
+    /// <inheritdoc />
+    public EdgeReplacement ReplaceEdge(
+        EdgeId edgeId,
+        VertexId source,
+        VertexId target,
+        string type)
+        => _core.ReplaceEdge(edgeId, source, target, type);
     /// <inheritdoc />
     public void SetProperty(VertexId vertexId, string key, in PropertyValue value)
         => _core.SetProperty(vertexId, key, in value);
@@ -241,6 +264,8 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
         => _core.GetPropertyValues(edgeId, key);
     /// <inheritdoc />
     public PropertyCursor EnumerateProperties(VertexId vertexId) => _core.EnumerateProperties(vertexId);
+    /// <inheritdoc />
+    public PropertyCursor EnumerateProperties(EdgeId edgeId) => _core.EnumerateProperties(edgeId);
     /// <inheritdoc />
     public EdgeEnumerator EnumerateEdges(
         VertexId vertexId,
@@ -291,6 +316,12 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
         => _core.MergeNexus(type, members);
     /// <inheritdoc />
     public void DeleteNexus(NexusId nexusId) => _core.DeleteNexus(nexusId);
+    /// <inheritdoc />
+    public NexusReplacement ReplaceNexus(
+        NexusId nexusId,
+        string type,
+        ReadOnlySpan<NexusMember> members)
+        => _core.ReplaceNexus(nexusId, type, members);
     /// <inheritdoc />
     public NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null)
         => _core.GetMembers(nexusId, role);

@@ -83,6 +83,7 @@ internal static class GraphNexusEmitter
         EmitInsert(sb, model);
         EmitLoad(sb, model, multiValueProps);
         EmitUpdate(sb, model);
+        EmitReplace(sb, model);
 
         sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.NexusId id) => tx.DeleteNexus(id);");
         sb.AppendLine("}");
@@ -237,6 +238,38 @@ internal static class GraphNexusEmitter
             else
                 EmitSetProperty(sb, prop);
         }
+        sb.AppendLine("    }");
+        sb.AppendLine();
+    }
+
+    private static void EmitReplace(StringBuilder sb, GraphNexusModel model)
+    {
+        sb.AppendLine($"    public static Quiver.NexusReplacement Replace(IWriteTransaction tx, Quiver.Core.NexusId id, {model.ClassName} entity)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var __members = new System.Collections.Generic.List<Quiver.NexusMember>();");
+        foreach (var role in model.Roles)
+        {
+            if (role.IsMultiValued)
+            {
+                sb.AppendLine($"        if (entity.{role.PropertyName} != null)");
+                sb.AppendLine("        {");
+                sb.AppendLine($"            foreach (var __r in entity.{role.PropertyName})");
+                sb.AppendLine($"                __members.Add(new Quiver.NexusMember(\"{role.RoleName}\", __r.VertexId));");
+                sb.AppendLine("        }");
+            }
+            else if (role.IsOptional)
+            {
+                sb.AppendLine($"        if (entity.{role.PropertyName} is {{ }} __{role.PropertyName})");
+                sb.AppendLine($"            __members.Add(new Quiver.NexusMember(\"{role.RoleName}\", __{role.PropertyName}.VertexId));");
+            }
+            else
+            {
+                sb.AppendLine($"        __members.Add(new Quiver.NexusMember(\"{role.RoleName}\", entity.{role.PropertyName}.VertexId));");
+            }
+        }
+        sb.AppendLine($"        var __replacement = tx.ReplaceNexus(id, \"{model.NexusType}\", System.Runtime.InteropServices.CollectionsMarshal.AsSpan(__members));");
+        sb.AppendLine("        Update(tx, __replacement.NewId, entity);");
+        sb.AppendLine("        return __replacement;");
         sb.AppendLine("    }");
         sb.AppendLine();
     }

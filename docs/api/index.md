@@ -5,6 +5,9 @@ Pure C# で実装するグラフデータベースエンジン Quiver のドキ�
 ## このサイトの構成
 
 - **[Getting Started](getting-started.md)** — インストールから最初のクエリまでの最短経路
+- **[Graph JSON export](graph-export.md)** — 全graphと誘導サブグラフの外部交換
+- **[Graph JSON import](graph-import.md)** — 複数graph JSONの厳格なunion import
+- **[グラフ移行cookbook](migration-cookbook.md)** — 物理snapshot、storage upgrade、JSON交換、application migrationの使い分け
 - **[Concepts](concepts/index.md)** — Vertex / Edge / Nexus モデル、Transaction、Traversal、MERGE、KNN、Backends
 - **[Tutorials](tutorials/index.md)** — 短いコード例で手を動かしながら覚える
 - **[API surface snapshot](https://github.com/delicioustuna/Quiver/blob/main/tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt)** — 承認済みの公開 API 一覧

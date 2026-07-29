@@ -71,6 +71,14 @@ artifact ID、checksum、source high-water、lifecycle state を持つ小さい 
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
 Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。
+
+export provenance用の `DatabaseInstanceId` はoptional metadata tenant 32に保存する。
+新規DBでは一度生成し、再openと物理snapshot copyで維持する。tenantを持たないv0.4 DBを
+読み取りtransactionからexportしてもtenantを作らず、最初の書き込み開始前に独立したinternal
+transactionで生成・commitする。したがってcallerの最初のwrite transactionがrollbackしてもIDは維持する。
+`TryGetDatabaseInstanceId`はtenantを作らず、永続IDがまだ無い場合は`false`を返す。
+in-memory backendでもinstance lifetime中は一度生成したIDを維持するが、dispose後には残らない。
+このIDはsource document間の同一性判定専用であり、entity identityや認証境界ではない。
 vector definition catalog は target property と immutable segment policy を保持する。
 HNSW artifact と versioned manifest は primary property から再構築可能な derived data であり、primary property value の正本ではない。
 
@@ -93,6 +101,30 @@ WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。
 全文 index を持つ database は `*.quiver-ftseg/` artifact directory も保持する。
 online snapshot は container と WAL に加えてこの append-only artifact を複製する。
 reader の終了は待たない。
+
+## オフラインストレージ移行 {#storage-upgrade}
+
+`QuiverDatabase.UpgradeStorage(path, options)` は `Open` より前に呼ぶ明示的な
+offline operation である。先頭ページを `PagedFile` で開く前に raw inspection し、
+`QUIVER-SW` magic と family version を判定する。現行 family version 2 のデータベースは
+先頭ページの checksum まで検証した後、ファイルを書き換えず `AlreadyCurrent` を返す。
+
+現行 build に登録された移行 step がない source version は、source と target version を持つ
+`StorageUpgradeNotSupportedException` で拒否する。v0.4.0 と現行形式はどちらも family version 2
+であり、現行 build に旧 layout decoder や実変換 step は登録されていない。
+
+将来 step を登録するときも source page の in-place rewrite は行わない。step は排他された source の
+読み取りストリームから、source と同じディレクトリの一時 database を構築する。Quiver は一時 file を
+durable flush し、target family と step 固有の整合性検証が成功した後だけ switch marker を永続化する。
+その後 source を rollback copy へ rename し、完成済み target を source path へ rename する。
+各 rename 境界で中断しても、次の `UpgradeStorage` は marker と source / target / rollback copy の
+存在状態から切替を完了する。完成済み target が失われていれば rollback copy を source path へ戻す。
+
+移行前 copy は既定で `<source>.pre-upgrade-v<version>.bak` に保持する。
+`StorageUpgradeOptions.KeepBackup = false` でも切替完了までは内部 rollback copy を保持し、
+完成済み target の検証後だけ削除する。原子的な rename 境界を保つため、明示 backup path は
+source と同じディレクトリに限る。source WAL の解釈と clean-state の検証は format 固有 step の責務であり、
+汎用 orchestration が未知の WAL を削除または現行形式として解釈することはない。
 
 ## entity version sidecar {#entity-version-sidecar}
 

@@ -104,6 +104,9 @@ public class GraphNexusGeneratorTests
         generated.Should().Contain("public static Fact Load(");
         generated.Should().Contain("tx.GetMembers(id, \"Subject\")");
         generated.Should().Contain("tx.SetProperty(id, \"Predicate\",");
+        generated.Should().Contain("public static Quiver.NexusReplacement Replace(");
+        generated.Should().Contain("tx.ReplaceNexus(id, \"Fact\"");
+        generated.Should().Contain("Update(tx, __replacement.NewId, entity)");
         generated.Should().Contain("public static void Delete(");
         // Insert は CreateNexus を一度だけ呼ぶ。
         CountOccurrences(generated, "tx.CreateNexus(").Should().Be(1);

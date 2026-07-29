@@ -20,6 +20,10 @@ internal sealed class InMemoryGraphStorageBackend(
     public IGraphAccessMethods Access => _inner.Access;
     public BulkLoadCapabilities BulkLoad => _inner.BulkLoad;
     public string DataDirectory => string.Empty;
+    public bool TryGetDatabaseInstanceId(out DatabaseInstanceId databaseInstanceId)
+        => _inner.TryGetDatabaseInstanceId(out databaseInstanceId);
+    public DatabaseInstanceId EnsureDatabaseInstanceId()
+        => _inner.EnsureDatabaseInstanceId();
 
     public IReadTransaction BeginReadTransaction()
         => _inner.BeginReadTransaction();

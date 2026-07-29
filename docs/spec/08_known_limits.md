@@ -116,7 +116,8 @@ cancellationは`OperationCanceledException`を送出する。
 ### メンバー集合は作成時確定 {#nexus-immutable-members}
 
 Nexusのメンバー集合（ロールとVertexの組）は `CreateNexus` の時点で確定し、
-以後変更できない。変更は削除 + 再作成で表現する。プロパティは作成後も変更できる。
+以後in-placeには変更できない。`ReplaceNexus`は新しいNexusを作成して全プロパティを移し、
+旧Nexusを削除する原子的な糖衣であり、新しい`NexusId`を返す。プロパティは作成後も変更できる。
 
 **設計根拠**: メンバー集合が不変であることで、「型 + ロール付きメンバー集合」による同一性が
 well-defined になり、incidence チェーンの構築を作成時の一括処理にでき、
@@ -281,23 +282,26 @@ Close-by-Oneは明示stackで実行するがstateless continuationを返さな�
 作業量上限、または未列挙の一致概念が残る状態で結果数上限に達した列挙はterminalであり、continuationを返さない。
 結果数が全一致概念数とちょうど等しい場合は`Completed`であり、truncationとは報告しない。
 
-## 自動マイグレーションなし {#no-migration}
+## 暗黙ストレージ移行なし {#no-migration}
 
-QUIVER-SW family version 2 ではないデータベースは `StorageFormatMismatchException` で拒否する。
-旧 WAL は `WalFormatMismatchException` で拒否する。
-自動 migration と互換 reader は存在しないため、データベースは source data または logical export から作り直す。
+`QuiverDatabase.Open` は QUIVER-SW family version 2 ではないデータベースを
+`StorageFormatMismatchException` で拒否し、旧 WAL は `WalFormatMismatchException` で拒否する。
+open 中の自動 migration や fallback reader は存在しない。
 
-**設計根拠**: オンディスクフォーマットのマイグレーションは、全ページの読み書きとバリデーションが
-必要であり、データ破損リスクが高い。Quiver の主要ユースケース（ローカル RAG）ではソースデータ
-（元文書）が常に利用可能であるため、再構築コストはマイグレーションの複雑さと信頼性リスクに
-見合わない。SQLite も同様に手動 dump + restore を推奨するアプローチを取っている。
+物理形式の移行は、DB を閉じて `QuiverDatabase.UpgradeStorage` を明示的に呼ぶ。
+この API は current v2 なら無変更の `AlreadyCurrent` を返す。現行 build には実変換 step がないため、
+v2 以外は source / target version を持つ `StorageUpgradeNotSupportedException` となる。
+旧ファイルの magic や version を書き換えて現行形式を装ってはならない。
 
-**緩和策**: フォーマット変更を含むアップグレード時は以下の手順を踏む:
-1. ソースデータから新フォーマットで DB を再構築する（BulkLoader を活用）
-2. 旧 DB ファイルは rollback 用にバックアップとして保持する
+**設計根拠**: `Open` 時の予期しない長時間処理と source の in-place page rewrite を避ける。
+具体的な旧 layout reader は、実在する source layout と fixture を固定できる版でだけ登録する。
+移行 orchestration は検証済み target を別 file に構築し、durable marker 後の rename で切り替える。
+
+**緩和策**: 登録済み step のない形式は、元データまたは対応する旧 Quiver build の論理 export から
+現行 DB を新規構築する。旧 DB file は rollback と調査のため保持する。
 
 スキーマレベルの変更（ラベル名変更・プロパティキー追加等）は `IMigration` API
-でサポートされる。ここで言う「自動マイグレーションなし」は
+でサポートされる。ここで言う「暗黙ストレージ移行なし」は
 オンディスクの物理フォーマット変更のみを指す。
 適用履歴は database 内の transactional catalog に格納し、migration の mutation と同じ commit で追加する。
 rollback または crash で commit record が残らない migration は履歴にも現れない。
@@ -306,6 +310,45 @@ reopen 後の `GetMigrationHistory()` はこの catalog を読み、外部履歴
 **将来方針**: 1.x 内では QUIVER-SW family version を固定する。
 MAJOR バージョンアップ時には migration tool の提供を検討する
 （[api-stability.md §4](../api-stability.md#4-ファイル--wal-フォーマット互換性) 参照）。
+
+## Graph JSON import の原子性とstreaming範囲 {#graph-json-import}
+
+`GraphJsonImporter`は一つ以上のgraph JSON v1文書をcaller所有の`IWriteTransaction`へ結合する。
+同じsource database、entity kind、generationを含むpacked IDの組は一target IDへ対応し、
+定義が異なる重複、schema cardinality競合、missing reference、不正JSONは
+`GraphJsonImportException`で拒否する。異なるsource database間の意味的同一性は既定で推測しない。
+source packed IDはdocument-local referenceであってtargetの永続IDではないため、generation 0も
+source値として受理する。import先では新しいgeneration付きIDへ必ずmappingし、source値の維持を保証しない。
+
+`GraphJsonSemanticMergeOptions`を明示した場合だけ、labelとSingle identity property keyでVertexを
+既存targetへ照合する。候補0件は作成、1件は再利用、複数件はerrorとし、`MergeVertex`の任意候補選択へ
+委譲しない。identity propertyのmissing、Set、物理型競合はerrorであり、identity値は上書きしない。
+Edgeはmapped endpointとtype、Nexusはtypeと正規化member集合で同様に0 / 1 / 複数候補を判定する。
+複数の同構造relationがある場合も任意選択しない。
+
+全文書のVertex identity解決をidentity以外のproperty適用より先に完了する。Vertex、Edge、Nexusの
+propertyはsource database ID、entity kind、source packed IDの決定順で遅延適用し、文書順による結果差を
+避ける。競合方針は`Error`、`KeepTarget`、`OverwriteTarget`であり、Setはkeyの値集合全体に適用する。
+結果は新規作成数、同source identity重複数、semantic match数を区別する。
+
+semantic mergeは永続property indexの一候補だけを信用せず、operation初回にtargetのVertex、Edge、Nexusを
+各一度走査してoperation-local候補indexを構築する。新規作成entityもindexへ追加し、0 / 1 / 複数候補を
+維持する。一時indexの作業領域はtarget entity数、identity payload、Nexus member総数に比例する。
+また決定順適用のため、`Bytes`と`FloatArray`を含む全entity property payloadをEOFまでheapへ保持し、
+追加メモリはデコード後のproperty payload総量に比例する。temp spoolは提供しない。
+
+readerは文書全体をJSON DOMへ展開せず一entityずつ処理する。ただしsource identity mapと
+定義fingerprintはoperation完了まで保持する。streaming参照解決のため、`source`と`schema`は
+entity配列より前、`vertices`は`edges`と`nexuses`より前でなければならない。
+entity field、property、Set値、Nexus memberの並び順は同一性に影響しない。
+この一entity payloadのstreaming特性は通常のappend / unionに限られ、semantic mergeには適用しない。
+
+v0.5.0で保証する原子性は一write transactionに収まるimportである。importerはtransactionを
+commit / rollbackせずstreamも破棄しない。失敗後のrollback、成功後のcommitはcallerが行う。
+resumable import、部分commit、異なるDB間のfuzzy matchingは提供しない。
+`cancellationToken`はJSON token読取に加え、semantic target indexのentity / member走査と、EOF後の
+deferred entity / property / value適用境界で観測する。キャンセル時もtransactionはActiveのままcallerへ戻し、
+途中までのmutationはcallerのrollback対象とする。
 
 ## In-Process のみ {#in-process}
 

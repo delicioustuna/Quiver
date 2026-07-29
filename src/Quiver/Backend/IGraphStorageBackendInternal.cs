@@ -30,4 +30,10 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
     /// binary backend は <c>*.quiver</c> の親ディレクトリ。
     /// </summary>
     string DataDirectory { get; }
+
+    /// <summary>永続済みの export provenance ID を取得する。</summary>
+    bool TryGetDatabaseInstanceId(out DatabaseInstanceId databaseInstanceId);
+
+    /// <summary>export provenance ID が未生成なら作成して返す。</summary>
+    DatabaseInstanceId EnsureDatabaseInstanceId();
 }

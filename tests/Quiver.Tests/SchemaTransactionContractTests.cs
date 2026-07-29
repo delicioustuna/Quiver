@@ -179,7 +179,7 @@ public sealed class SchemaTransactionContractTests : IDisposable
     {
         string controlPath = Path.Combine(_directory, "control.quiver");
         (VertexId left, NexusId nexus) = SeedKnownGraph(_path);
-        SeedKnownGraph(controlPath);
+        File.Copy(_path, controlPath);
 
         using (var database = QuiverDatabase.Open(_path))
         {

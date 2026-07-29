@@ -49,3 +49,34 @@ Console.WriteLine($"{found.Count} 件, age = {found[0].Entity.Age}");
 tx.Mutate.Delete<Person>(aliceId);
 tx.Commit();
 ```
+
+生成される`Update`は従来どおりプロパティだけを変更する。Vertexの個別ラベル、Edgeの端点、
+またはNexusのロール束縛を
+変更する場合は、生成クラスの`Replace`を使う。`Replace`は新しいIDを返し、既存の全プロパティを
+移した後、渡した型付きmodelが宣言するプロパティを`Update`と同じ規則で上書きする。
+
+```csharp
+VertexGraphRewriteResult personIds = Customer.Replace(
+    tx, oldPersonId, new Customer { Name = "Alice", Age = 31 });
+
+EdgeReplacement edgeIds = Knows.Replace(
+    tx, oldEdgeId, aliceId, newFriendId, new Knows { Since = 2026 });
+
+NexusReplacement nexusIds = Fact.Replace(
+    tx, oldNexusId, new Fact
+    {
+        Subject = new GraphVertexRef<Person>(aliceId),
+        Object = new GraphVertexRef<Person>(newObjectId),
+        Predicate = "likes",
+    });
+```
+
+Vertexの生成`Replace`はgraph rewriteへ委譲するため、incident Edge / Nexusも新Vertexへ張り替わる。
+大量のmodel移行では単体の生成`Replace`を反復せず、`ReplaceVertices`で構造をbatch置換してから
+新IDに対して生成`Update`を適用する。
+
+生成`Replace`は旧entityの全propertyを先に保存し、target modelが宣言するpropertyだけを`Update`で
+上書きする。このため、target modelから削除したkeyやrename前の旧keyは自動では消えない。
+application migrationでは旧modelを読み、利用者が型変換と値写像を行って新modelを組み立て、
+`Replace`の戻り値に含まれる新IDへ`RemoveProperty`を明示して不要な旧keyを削除する。
+外部参照も同じ新IDへ更新する。この契約はVertex、Edge、Nexusで共通である。

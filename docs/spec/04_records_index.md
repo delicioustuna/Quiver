@@ -34,6 +34,10 @@ xmin/xmax は version header、Generation は `EntityVersionMeta` sidecar に置
 各Edgeは source と target の両Vertexについて prev/next にリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
 adjacency、delta、locator が raw Sequence を保持するため、通常の dead version 回収だけでは Edge Sequence を再利用しない。
 
+`IReadTransaction.TryGetEdge` は現在のsnapshotで可視なEdgeについて、generationを含む
+`EdgeId`、両端の`VertexId`、型名を`EdgeInfo`として返す。missingまたはstale generationでは
+`false`を返す。`EnumerateProperties(EdgeId)`はVertex / Nexusと同じowner-bound property cursorを返す。
+
 `RelationshipReuseCoordinator` は reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable checkpoint を順に完了し、その後だけ Sequence を free list へ返す。
 各 phase と対象 Sequence は primary catalog に永続化する。
 release 前の crash は再利用しない safe leak となり、reopen 後に未完了 phase から再開する。
@@ -66,6 +70,36 @@ header レコードが MVCC 可視性の正本になる。
   同じVertexが別ロールで参加すること、同じロールに複数Vertexが参加することは許される
 - Nexus型名とロール名は、ラベルと同様それぞれ独立したトークンストアで
   16 bit ID（`NexusTypeId` / internal な RoleId）にインターンされる
+
+## 構造置換 {#structural-replacement}
+
+Edgeの端点と型、およびNexusの型とメンバー集合はin-place更新しない。
+`IWriteTransaction.ReplaceEdge` / `ReplaceNexus`は同じwrite transaction内で次を行う。
+
+1. 旧entityの全propertyを物理型と`Single` / `Set` cardinality付きでキャプチャする。
+2. 指定された新構造を持つentityを新しいIDで作成する。
+3. `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray`を新ownerへコピーする。
+4. 旧entityを論理削除し、old/new IDを`EdgeReplacement` / `NexusReplacement`で返す。
+
+作成時の端点・arity・重複member・member可視性検証を再利用する。失敗は呼び出し側transactionの
+rollback契約に従う。置換前に開始したreaderは旧entityを、置換commit後に開始したreaderは新entityを
+参照し、同じIDの構造がsnapshot間で変化したようには見えない。
+
+Vertexのラベルを個別に変更してincident relationも張り替える場合は、`ReplaceVertex`または
+`ReplaceVertices`を使う。batchは全旧Vertexとpropertyを検証・materializeし、全新Vertexを先に作成する。
+その後、完全なold/new対応表をEdge端点とNexus memberへ一度適用し、各関係を一度だけ置換してから
+旧Vertexを削除する。self-loopの両端と、同一Nexus内に同じVertexが持つ複数roleもすべて張り替える。
+結果の`VertexMappings`、`EdgeMappings`、`NexusMappings`は新規IDへの参照更新に使える。
+missing / stale ID、batch内の重複要求、置換後に重複する`(role, VertexId)`は拒否し、失敗時の変更は
+呼び出し側write transactionのrollbackに従う。
+
+Source Generatorの生成`Update`はproperty-onlyのまま維持する。生成`Replace`はEdge / Nexusでは
+`ReplaceEdge` / `ReplaceNexus`、Vertexではincident relationを含む`ReplaceVertex`へ委譲した後、
+target modelが宣言するpropertyを生成`Update`と同じ規則で上書きする。構造置換が先に旧entityの
+全propertyをコピーするため、target modelから削除したkeyやrename前のkeyも自動では消えない。
+利用者は型変換と値写像を行い、不要な旧keyを新IDから`RemoveProperty`で削除する。
+複数Vertexの移行は単体の生成`Replace`を反復せず、`ReplaceVertices`へ全対象を渡してから
+各new IDへ生成`Update`を適用する。
 
 ## Incidence ストア {#incidence-store}
 
@@ -290,3 +324,23 @@ catalog manifest は generation、`xmin/xmax`、source committed high-water、ar
 
 検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
 プロセス内 rollback は transaction-owned write set の before-image を使う。
+
+## Graph JSON export {#graph-json-export}
+
+`GraphJsonExporter` は一つのread transaction snapshotをUTF-8の単一JSON objectへ出力する。
+top-levelは `format: "quiver-graph"`、`version: 1`、`source`、`schema`、`vertices`、
+`edges`、`nexuses` で構成し、各entity配列は `Utf8JsonWriter` へ逐次書き込む。
+
+source packed IDと `Int64` propertyは10進文字列、`Bytes`はBase64、`FloatArray`は
+JSON配列で表す。`Double`と `FloatArray` の非有限値は予約文字列 `NaN`、`Infinity`、
+`-Infinity` として有限numberから区別する。property entryはkey、`Single` / `Set` cardinality、
+物理 `PropertyValueType`、valueを保持する。日時系の元CLR型は物理保存時に失われているため
+`Int64`として出力する。
+
+`GraphSelection.All` は可視graph全体を表す。部分選択では、明示Edgeの両端と明示Nexusの
+全メンバーを最終Vertex集合へ加え、両端が集合内の全Edgeと、全メンバーが集合内の全Nexusを
+誘導出力する。選択IDの比較はSequenceだけでなくGenerationを含む。
+
+graph JSONは物理backupではなく外部交換形式である。WAL、索引artifact、索引definition、
+dead version、MVCC履歴は含めない。`WriteIndented`、property key選択、Bytes / FloatArray除外は
+表現の完全性より閲覧性とサイズを優先する明示optionである。

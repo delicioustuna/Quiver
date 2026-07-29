@@ -137,6 +137,15 @@ internal static class GraphEdgeEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        // 構造置換: endpoint/type は新Edgeへ反映し、コピー済みpropertyをtarget modelで上書きする。
+        sb.AppendLine($"    public static Quiver.EdgeReplacement Replace(IWriteTransaction tx, Quiver.Core.EdgeId id, Quiver.Core.VertexId from, Quiver.Core.VertexId to, {model.ClassName} entity)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        var __replacement = tx.ReplaceEdge(id, from, to, \"{model.EdgeType}\");");
+        sb.AppendLine("        Update(tx, __replacement.NewId, entity);");
+        sb.AppendLine("        return __replacement;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
         // 削除
         sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.EdgeId id) => tx.DeleteEdge(id);");
 

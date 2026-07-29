@@ -68,6 +68,9 @@ public class GraphVertexGeneratorTests
         generatedSource.Should().Contain("public static Quiver.Core.VertexId Insert(");
         generatedSource.Should().Contain("public static Person Load(");
         generatedSource.Should().Contain("public static void Update(");
+        generatedSource.Should().Contain("public static Quiver.VertexGraphRewriteResult Replace(");
+        generatedSource.Should().Contain("tx.ReplaceVertex(id, \"Person\")");
+        generatedSource.Should().Contain("Update(tx, __replacement.VertexMappings[0].NewId, entity)");
         generatedSource.Should().Contain("public static void Delete(");
     }
 
@@ -241,6 +244,9 @@ public class GraphEdgeGeneratorTests
         generatedSource.Should().Contain("tx.CreateEdge(from, to, \"KNOWS\")");
         generatedSource.Should().Contain("public static Knows Load(");
         generatedSource.Should().Contain("public static void Update(");
+        generatedSource.Should().Contain("public static Quiver.EdgeReplacement Replace(");
+        generatedSource.Should().Contain("tx.ReplaceEdge(id, from, to, \"KNOWS\")");
+        generatedSource.Should().Contain("Update(tx, __replacement.NewId, entity)");
         generatedSource.Should().Contain("public static void Delete(");
         // write sink の糖衣構文
         generatedSource.Should().Contain("public static long AddKnows(");

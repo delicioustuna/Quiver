@@ -29,15 +29,18 @@ public interface IGraphStorageBackend : IDisposable
     IWriteTransaction BeginWriteTransaction();
 
     /// <summary>
-    /// 書き込みを止めずに <paramref name="targetDirectory"/> に
+    /// backendを閉じずに<paramref name="targetDirectory"/>へ
     /// クラッシュ整合なライブスナップショットを取る。
     /// </summary>
+    /// <param name="targetDirectory">
+    /// 互換上の名前はdirectoryだが、binary backendではコピー先primary file (<c>*.quiver</c>)のパス。
+    /// </param>
+    /// <param name="options">snapshotオプション。</param>
     /// <exception cref="NotSupportedException">規定実装</exception>
-    // バイナリバックエンドの実装は: ベストエフォートでシャープチェックポイントを起動し、
-    // 全データページファイル / 索引ファイルを page-by-page で複製した後、WAL セグメントを
-    // 末尾までコピーする。並行で書き込むトランザクションは block されず、target を
-    // <see cref="QuiverDatabase.Open"/> で開いたときに recovery が WAL から redo / undo して
-    // snapshot 時点までの整合状態に収束する。
+    // binary backendはsingle-writer mutation lease内でprimary fileをpage-by-pageに複製し、
+    // WALとimmutable全文artifactを同じベース名へコピーする。targetを
+    // <see cref="QuiverDatabase.Open"/>で開いたときにrecoveryが明示Commitを持つ
+    // transactionだけをredoし、snapshot時点までの整合状態に収束する。
     void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => throw new NotSupportedException(
             "CreateSnapshot is not supported by this backend.");

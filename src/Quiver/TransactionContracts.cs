@@ -35,6 +35,12 @@ public interface IReadTransaction : IDisposable
     /// <summary>指定Edgeの型名を返す。存在しない場合は <c>null</c>。</summary>
     string? GetEdgeType(EdgeId edgeId);
 
+    /// <summary>
+    /// 指定Edgeの構造を現在のスナップショットから取得する。
+    /// 存在しない ID または世代が一致しない ID では <c>false</c> を返す。
+    /// </summary>
+    bool TryGetEdge(EdgeId edgeId, out EdgeInfo edge);
+
     /// <summary>Vertexのプロパティ値を取得する。</summary>
     PropertyValue GetProperty(VertexId vertexId, string key);
 
@@ -61,6 +67,9 @@ public interface IReadTransaction : IDisposable
 
     /// <summary>Vertexに付与された全プロパティを列挙する。</summary>
     PropertyCursor EnumerateProperties(VertexId vertexId);
+
+    /// <summary>Edgeに付与された全プロパティを列挙する。</summary>
+    PropertyCursor EnumerateProperties(EdgeId edgeId);
 
     /// <summary>Nexusに付与された全プロパティを列挙する。</summary>
     PropertyCursor EnumerateProperties(NexusId nexusId);
@@ -132,6 +141,16 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
     /// <summary>指定 ID のVertexを削除する。</summary>
     void DeleteVertex(VertexId vertexId);
 
+    /// <summary>
+    /// 指定Vertexを新しいラベルのVertexへ置換し、接続するEdgeとNexusを新Vertexへ張り替える。
+    /// </summary>
+    VertexGraphRewriteResult ReplaceVertex(VertexId vertexId, string label);
+
+    /// <summary>
+    /// 複数Vertexを一括置換する。関係は完全なVertex対応表を一度適用して各一回だけ再作成する。
+    /// </summary>
+    VertexGraphRewriteResult ReplaceVertices(IReadOnlyList<VertexRewriteRequest> rewrites);
+
     /// <summary>ラベルと scalar property が一致するVertexを返し、無ければ作成する。</summary>
     (VertexId Id, bool Created) MergeVertex(string label, string matchKey, in PropertyValue matchValue);
 
@@ -146,6 +165,15 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
 
     /// <summary>指定 ID のEdgeを削除する。</summary>
     void DeleteEdge(EdgeId edgeId);
+
+    /// <summary>
+    /// 指定Edgeを新しい端点と型を持つEdgeへ置換し、全プロパティを型と多重度を保って移す。
+    /// </summary>
+    EdgeReplacement ReplaceEdge(
+        EdgeId edgeId,
+        VertexId source,
+        VertexId target,
+        string type);
 
     /// <summary>Vertexにプロパティを設定する (既存値は上書き)。</summary>
     void SetProperty(VertexId vertexId, string key, in PropertyValue value);
@@ -194,6 +222,14 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
     /// <summary>Nexusを論理削除する。</summary>
     void DeleteNexus(NexusId nexusId);
 
+    /// <summary>
+    /// 指定Nexusを新しい型とメンバー集合を持つNexusへ置換し、全プロパティを型と多重度を保って移す。
+    /// </summary>
+    NexusReplacement ReplaceNexus(
+        NexusId nexusId,
+        string type,
+        ReadOnlySpan<NexusMember> members);
+
     /// <summary>Nexusにプロパティを設定する (既存値は上書き)。</summary>
     void SetProperty(NexusId nexusId, string key, in PropertyValue value);
 
@@ -220,6 +256,50 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
 
     /// <summary>指定 savepoint を解放する。</summary>
     void ReleaseSavepoint(SavepointId savepoint);
+}
+
+/// <summary>現在のスナップショットから読み取ったEdgeの不変な構造。</summary>
+public readonly record struct EdgeInfo(
+    EdgeId Id,
+    VertexId Source,
+    VertexId Target,
+    string Type);
+
+/// <summary>Vertex graph rewrite の一件分の要求。</summary>
+/// <param name="OldId">置換する既存VertexのID。</param>
+/// <param name="NewLabel">新Vertexへ設定するラベル。</param>
+public readonly record struct VertexRewriteRequest(VertexId OldId, string NewLabel);
+
+/// <summary>Vertex置換前後の論理ID。</summary>
+public readonly record struct VertexReplacement(VertexId OldId, VertexId NewId);
+
+/// <summary>Edge置換前後の論理 ID。</summary>
+public readonly record struct EdgeReplacement(EdgeId OldId, EdgeId NewId);
+
+/// <summary>Nexus置換前後の論理 ID。</summary>
+public readonly record struct NexusReplacement(NexusId OldId, NexusId NewId);
+
+/// <summary>Vertex graph rewrite で再作成された全entityの対応表。</summary>
+public sealed class VertexGraphRewriteResult
+{
+    internal VertexGraphRewriteResult(
+        VertexReplacement[] vertices,
+        EdgeReplacement[] edges,
+        NexusReplacement[] nexuses)
+    {
+        VertexMappings = Array.AsReadOnly(vertices);
+        EdgeMappings = Array.AsReadOnly(edges);
+        NexusMappings = Array.AsReadOnly(nexuses);
+    }
+
+    /// <summary>置換されたVertexの対応表。</summary>
+    public IReadOnlyList<VertexReplacement> VertexMappings { get; }
+
+    /// <summary>再作成されたEdgeの対応表。</summary>
+    public IReadOnlyList<EdgeReplacement> EdgeMappings { get; }
+
+    /// <summary>再作成されたNexusの対応表。</summary>
+    public IReadOnlyList<NexusReplacement> NexusMappings { get; }
 }
 
 /// <summary>Nexusを構成する 1 メンバー (ロール名と参加Vertexの組)。</summary>

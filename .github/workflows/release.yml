@@ -53,7 +53,11 @@ jobs:
         run: dotnet restore Quiver.slnx
 
       - name: Pack
-        run: dotnet pack Quiver.slnx --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+        run: |
+          dotnet pack src/Quiver/Quiver.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+          dotnet pack src/Quiver.Hosting/Quiver.Hosting.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+          dotnet pack src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+          dotnet pack src/Quiver.Rag/Quiver.Rag.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
 
       - name: Upload packages (artifact)
         uses: actions/upload-artifact@v4

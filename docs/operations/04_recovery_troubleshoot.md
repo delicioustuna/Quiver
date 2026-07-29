@@ -64,12 +64,24 @@ using var db = QuiverDatabase.Open(dir);   // ← ここで WAL replay (recovery
 
 **対処**:
 
-1. ファイルを上書きせず、調査用に退避する。
-2. 現行バージョンで作成したバックアップ、論理 export、または元データから新規 DB を構築する。
-3. 旧ファイルの magic や version を書き換えない。
-4. WAL だけを削除して起動しない。
+1. DB を開いている全プロセスを停止する。
+2. `QuiverDatabase.UpgradeStorage(path)` を `Open` より前に明示的に呼ぶ。
+3. `StorageUpgradeNotSupportedException` なら、対応する旧 build の論理 export または元データから
+   現行 DB を新規構築する。
+4. 旧ファイルの magic や version を書き換えない。
+5. WAL だけを削除して起動しない。
 
-Quiver は旧形式の decoder、JSON fallback、自動 migration を提供しない。
+```csharp
+StorageUpgradeResult result = QuiverDatabase.UpgradeStorage(path);
+Console.WriteLine($"storage={result.Status}, {result.SourceVersion} -> {result.TargetVersion}");
+
+using var db = QuiverDatabase.Open(path);
+```
+
+現行 family version 2 なら `AlreadyCurrent` となり、database file は変更されない。
+実変換が成功した版では、既定で `<source>.pre-upgrade-v<version>.bak` に移行前 file を保持する。
+切替途中の marker が残った場合は、次の `UpgradeStorage` が完成済み target の設置または source の復元を行う。
+`Open` は移行を暗黙実行しない。
 
 ### D. データは戻ったのに索引検索の結果がおかしい / 余分なヒットがある
 

@@ -93,6 +93,12 @@ public interface ISchemaEditor : ISchemaCatalog
 
     /// <summary>Nexus型名を ID に解決し、未登録なら新規発行する。</summary>
     NexusTypeId GetOrCreateNexusType(string name);
+
+    /// <summary>
+    /// Nexusメンバーのロール名を登録済みにする。
+    /// graph JSON schemaなど、entity作成前にロール集合を再生する用途で使用する。
+    /// </summary>
+    void EnsureRole(string name);
 }
 
 /// <summary>scalar index が比較に使う値と順序の種類。</summary>

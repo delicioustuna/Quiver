@@ -175,6 +175,15 @@ internal static class GraphVertexEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        // 構造置換: graph rewriteで全incident relationを新Vertexへ張り替え、target modelでpropertyを上書きする。
+        sb.AppendLine($"    public static Quiver.VertexGraphRewriteResult Replace(IWriteTransaction tx, Quiver.Core.VertexId id, {model.ClassName} entity)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        var __replacement = tx.ReplaceVertex(id, \"{model.Label}\");");
+        sb.AppendLine("        Update(tx, __replacement.VertexMappings[0].NewId, entity);");
+        sb.AppendLine("        return __replacement;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
         // 削除
         sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.VertexId id) => tx.DeleteVertex(id);");
 
