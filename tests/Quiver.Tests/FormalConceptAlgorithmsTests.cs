@@ -233,7 +233,7 @@ public sealed class FormalConceptAlgorithmsTests
     [Fact]
     public void Time_budget_returns_a_resumable_prefix_after_context_materialization()
     {
-        const int dimension = 16;
+        const int dimension = 24;
         var incidence = new bool[dimension, dimension];
         for (int obj = 0; obj < dimension; obj++)
             for (int attribute = 0; attribute < dimension; attribute++)
@@ -241,8 +241,10 @@ public sealed class FormalConceptAlgorithmsTests
         using TestContext context = CreateContext(incidence);
         FormalConceptOptions options = Options(100_000) with
         {
+            MinExtent = dimension - 1,
             MaxResults = 100_000,
-            TimeLimit = TimeSpan.FromMilliseconds(100),
+            MaxClosureEvaluations = long.MaxValue,
+            TimeLimit = TimeSpan.FromMilliseconds(500),
         };
 
         FormalConceptResult timed = context.Read.EnumerateFormalConcepts(

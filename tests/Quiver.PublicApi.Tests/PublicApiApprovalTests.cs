@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using FluentAssertions;
 using PublicApiGenerator;
 using Xunit;
@@ -77,10 +76,23 @@ public sealed class PublicApiApprovalTests
     private static string Normalize(string value) =>
         value.Replace("\r\n", "\n").TrimEnd('\n');
 
-    private static string BaselineDir([CallerFilePath] string? thisFilePath = null)
+    private static string BaselineDir()
     {
-        var dir = Path.Combine(Path.GetDirectoryName(thisFilePath)!, "PublicApi");
-        Directory.CreateDirectory(dir);
-        return dir;
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Quiver.slnx")))
+            {
+                return Path.Combine(
+                    directory.FullName,
+                    "tests",
+                    "Quiver.PublicApi.Tests",
+                    "PublicApi");
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Quiver repository root containing 'Quiver.slnx' was not found from '{AppContext.BaseDirectory}'.");
     }
 }
