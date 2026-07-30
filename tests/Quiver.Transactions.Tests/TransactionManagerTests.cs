@@ -153,15 +153,16 @@ public class TransactionManagerTests : IDisposable
             () => _manager.OldestActiveLsn);
         _manager.EnableCheckpointing(checkpointer, thresholdBytes: 0);
         using ITransaction writer = _manager.BeginWrite();
-        using var requestStarted = new ManualResetEventSlim();
+        var requestStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
         Task checkpoint = Task.Run(() =>
         {
-            requestStarted.Set();
+            requestStarted.SetResult(true);
             _manager.RequestCheckpoint();
         });
 
-        requestStarted.Wait(TimeSpan.FromSeconds(1)).Should().BeTrue();
+        await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await Task.Delay(TimeSpan.FromMilliseconds(100));
         checkpoint.IsCompleted.Should().BeFalse();
         pages.FlushCount.Should().Be(0);
