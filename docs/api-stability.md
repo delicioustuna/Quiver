@@ -46,21 +46,22 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 | 名前空間 | 対象 | 備考 |
 |---|---|---|
-| `Quiver` | ✅ 対象 | 公開ファサード (`QuiverDatabase`, `GraphTransaction`, options 等) |
-| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Vertex]` 等の属性 |
-| `Quiver.Core` | ✅ 対象 | 共通 ID 型、例外型、`EntityId` 等の基礎型 |
+| `Quiver` | ✅ 対象 | `GraphStore`、`GraphWorkspace`、不透明key、owned value、query/session |
+| `Quiver.Api` | ✅ 対象 | Match DSL、モデル属性、生成mapperの型付き参照 |
+| `Quiver.Core` | ✅ 対象 | 検索オプション、例外、演算子など承認baselineに残る基礎型 |
+| `Quiver.Rag` | ✅ 対象 | `GraphStore`上のDocument/Chunk取込と検索結果 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:
 
 - すべての `internal` 型・メンバー (`InternalsVisibleTo` 経由で見えるものを含む)
-- `Quiver.SourceGen` (Roslyn generator。生成 **コード** の出力安定性は別途 generator 側で管理)
-- `Quiver.Storage.*` / `Quiver.Query.*` / `Quiver.Index` 等の実装詳細名前空間。`Quiver` / `Quiver.Api` ファサード経由で使うこと
+- `Quiver.SourceGen` (Roslyn generator本体。生成される公開mapper契約はapprovalとconsumer gateで管理)
+- `Quiver.Storage.*`、backend SPI、物理ID、内部transaction / traversal実装
 - `Quiver.Hosting` / `Quiver.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
 - `[Experimental]` 属性付きのすべての API (§5 参照)
 
-> 実装詳細名前空間の public surface は最小化していくが、現時点では参照可能なものも残っている。**ファサード (`Quiver` / `Quiver.Api`) 以外への直接依存は将来予告なく壊れうる** ことを前提にすること。
+> リポジトリ内の回帰テストとサンプルは`InternalsVisibleTo`で旧実装を検査する場合がある。packされた利用者コードからは参照できず、互換性の対象にも含めない。
 
-このリストは [`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) の approval test で機械的に固定される (§6)。
+このリストは [`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) のapprovalと、pack済み独立consumerで機械的に固定される (§6)。
 
 ---
 
@@ -70,8 +71,8 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 1. **告知 (deprecate)**: 削除予定の 1 つ前の MINOR で `[Obsolete]` を付ける。
    ```csharp
-   [Obsolete("Use GraphTransaction.SeekIndex instead. Will be removed in v2.0.", error: false)]
-   public IReadOnlyList<VertexId> FindByIndex(string indexName, PropertyValue value) { ... }
+   [Obsolete("Use GraphStore.Read and GraphQuery instead. Will be removed in v2.0.", error: false)]
+   public IReadOnlyList<VertexKey> FindByIndex(string indexName, GraphValue value) { ... }
    ```
    - メッセージには **代替 API** と **削除予定バージョン** を必ず書く。
    - `error: false` のまま (コンパイルは通る)。
@@ -91,11 +92,15 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 | 変更 | 許容バージョン | 振る舞い |
 |---|---|---|
 | 後方互換な読み取り (旧フォーマットを読める) | MINOR / PATCH | 旧バージョンで作った DB をそのまま開ける |
-| **auto-upgrade** (開いた時点で新フォーマットへ書き換え) | MINOR | 初回オープン時に自動移行。移行前に backup を推奨する旨をログに出す |
+| 明示的な offline upgrade | MINOR | DBを閉じ、登録済みstepとrollback copyを使って明示的に切り替える |
 | **format bump で旧バージョン非互換** (新フォーマットを旧バイナリが読めない) | MAJOR | migration tool 必須。CHANGELOG に移行手順を明記 |
 
-- MINOR の auto-upgrade は **前方互換を壊しうる** (新しいバイナリで開いた DB を古いバイナリで開けなくなる)。ダウングレード前に backup を取ること。
-- フォーマットバージョンはファイルヘッダに記録される。非対応バージョンを開こうとした場合は明確な例外メッセージ (期待バージョンと実バージョン) を出して fail-fast する。
+- `GraphStore.Open`は自動upgradeを行わない。物理形式の変更を提供する版では、DBを閉じて実行する
+  offline migration toolまたは明示entrypointを用意し、登録済みstepだけを適用する。
+- フォーマットバージョンはファイルヘッダに記録される。非対応version、未知の必須header extension、
+  未知WAL recordは元ファイルを書き換える前にfail-fastする。
+- WALのlength prefixはframe境界とtruncation検出のために維持する。recordにrequired / ignorableの識別がない
+  family version 2では、未知recordを読み飛ばしてrecoveryを継続しない。
 
 ---
 
@@ -121,7 +126,7 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 ### 6.1 public API approval test
 
-[`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、`Quiver` アセンブリの public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
+[`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、`Quiver` と `Quiver.Rag` アセンブリの public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
 
 - public API に差分が出ると test が **fail** し、`*.received.txt` を出力する。
 - 意図した変更なら `*.received.txt` を `*.approved.txt` に上書きコミットする = **明示承認**。これにより「気づかないうちの breaking change」を PR diff として可視化する。
@@ -162,10 +167,11 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 - **1.x 内では QUIVER-SW family version を変更しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
   そのまま開ける。
-- 新機能が追加フィールドを必要とする場合は、既存レイアウトの予約領域またはオプショナルな拡張ページを
-  使い、旧バイナリでも読み飛ばせる形で追加する。
-- WAL フォーマットの後方互換も同様に維持する。新しい WAL レコードタイプを追加する場合、旧バージョンの
-  recovery は未知のレコードタイプを安全にスキップできるよう length-prefix を保持する。
+- page / WAL headerの予約領域は0のまま固定し、非0の未知extensionはfail-fastする。
+- 1.xで追加できる永続データは、旧buildが存在を無視してもprimary stateとrecoveryの意味が変わらず、
+  catalogがopaque tenantとして保持できるoptional derived dataに限定する。
+- WAL record集合はfamily version 2で固定する。1.xで新しいrecord typeを追加せず、未知typeはcorruptionとして
+  拒否する。新しいrecovery意味論が必要な変更は次のMAJORとfamily bumpで扱う。
 
 ### 7.3 挙動の安定性
 

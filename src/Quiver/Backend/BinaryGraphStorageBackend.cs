@@ -175,11 +175,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null,
                 _txManager.AcquireMutationLease(),
+                ValidateBulkUniqueConstraints,
                 RefreshDerivedIndexesAfterBulkLoad),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
                 _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null,
                 _txManager.AcquireMutationLease(),
+                ValidateBulkUniqueConstraints,
                 RefreshDerivedIndexesAfterBulkLoad),
         };
 
@@ -220,6 +222,55 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         {
             Volatile.Write(ref _scalarIndexRebuildRequested, 1);
             QueueScalarIndexRebuild();
+        }
+    }
+
+    private void ValidateBulkUniqueConstraints(BulkLoadConstraintInput input)
+    {
+        ScalarIndexDefinition[] definitions = _indexManager.ListIndexDefinitions()
+            .Select(metadata => metadata.Definition)
+            .Where(definition => definition.Unique)
+            .ToArray();
+        if (definitions.Length == 0)
+            return;
+
+        var labelByVertex = input.Vertices.ToDictionary(vertex => vertex.Id, vertex => vertex.LabelId);
+        foreach (ScalarIndexDefinition definition in definitions)
+        {
+            if (!_labelTokens.TryGet(definition.Target.Scope!, out LabelId labelId)
+                || !_propKeyTokens.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId))
+                continue;
+
+            var ownerByValue = new Dictionary<string, long>(StringComparer.Ordinal);
+            foreach ((long vertexId, List<BulkPropertyEntry> properties) in input.PropertiesByVertex)
+            {
+                if (!labelByVertex.TryGetValue(vertexId, out int ownerLabel)
+                    || ownerLabel != labelId.Value)
+                    continue;
+
+                foreach (BulkPropertyEntry property in properties)
+                {
+                    if (property.KeyId != keyId.Value)
+                        continue;
+                    if (property.Type != PropertyValueType.String)
+                    {
+                        throw new ConstraintException(
+                            $"Unique index '{definition.Name}' requires string values for " +
+                            $"property '{definition.Target.PropertyKey}'.");
+                    }
+
+                    string text = System.Text.Encoding.UTF8.GetString(property.Data ?? []);
+                    if (ownerByValue.TryGetValue(text, out long existingOwner)
+                        && existingOwner != vertexId)
+                    {
+                        throw new UniqueConstraintViolationException(
+                            definition.Name,
+                            definition.Target.Scope!,
+                            definition.Target.PropertyKey);
+                    }
+                    ownerByValue[text] = vertexId;
+                }
+            }
         }
     }
 

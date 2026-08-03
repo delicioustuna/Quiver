@@ -6,7 +6,7 @@ namespace Quiver.Api;
 /// 型付きトラバーサルを終端として辺を一括生成する <c>AddEdge</c> / <c>MergeEdge</c> 拡張。
 /// 端点の型整合は <c>IGraphEdge&lt;TEdge, TSource, TTarget&gt;</c> 制約で保証される。
 /// </summary>
-public static class TypedGraphTraversalWriteExtensions
+internal static class TypedGraphTraversalWriteExtensions
 {
     // 設計: 両端を先に materialize してからループ書き込みする (materialize-first)。
     // これにより書き込んだ辺が上流走査へ再投入される Halloween 問題が構造的に起きず、

@@ -15,7 +15,7 @@ namespace Quiver.Api;
 /// <param name="Edges">
 /// 経路上を順に辿るEdge列。要素数は <see cref="Vertices"/> の数 - 1。
 /// </param>
-public sealed record WeightedPathResult(
+internal sealed record WeightedPathResult(
     bool Found,
     double Distance,
     IReadOnlyList<VertexId> Vertices,
@@ -27,7 +27,7 @@ public sealed record WeightedPathResult(
 }
 
 /// <summary>A* の座標ヒューリスティックで用いる距離尺度。</summary>
-public enum HeuristicMetric
+internal enum HeuristicMetric
 {
     /// <summary>2 次元ユークリッド距離 (平面座標)。エッジ重みも平面距離のとき admissible。</summary>
     Euclidean,

@@ -11,7 +11,7 @@ namespace Quiver.Api;
 /// .Where() / .Not() に渡すサブトラバーサルのビルダー。
 /// 外側の現在エンティティを起点として内側プランを構築する。
 /// </summary>
-public sealed class SubTraversal
+internal sealed class SubTraversal
 {
     private readonly CorrelatedInputOperator _probe;
     private readonly LogicalOp _plan;

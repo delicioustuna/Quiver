@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace Quiver.Api.Internal;
 
@@ -213,8 +214,154 @@ internal static class ExpressionPredicate
 
     private static object? Eval(Expression e)
     {
-        if (e is ConstantExpression c) return c.Value;
-        // クロージャ変数・計算式などは compile して評価する。
-        return Expression.Lambda(Expression.Convert(e, typeof(object))).Compile().DynamicInvoke();
+        return e switch
+        {
+            ConstantExpression constant => constant.Value,
+            MemberExpression member => ReadMember(member),
+            UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } conversion =>
+                ConvertValue(Eval(conversion.Operand), conversion.Type),
+            UnaryExpression { NodeType: ExpressionType.Negate or ExpressionType.NegateChecked } negate =>
+                Negate(Eval(negate.Operand), negate.Type),
+            BinaryExpression binary when IsSupportedValueBinary(binary.NodeType) => EvaluateBinary(binary),
+            NewExpression created => InvokeConstructor(created),
+            _ => throw new NotSupportedException(
+                $"値式 '{e}' は型付き述語で評価できません。定数、捕捉変数、単純な数値式を使ってください。"),
+        };
     }
+
+    private static object? ReadMember(MemberExpression expression)
+    {
+        object? owner = expression.Expression is null ? null : Eval(expression.Expression);
+        return expression.Member switch
+        {
+            FieldInfo field => field.GetValue(owner),
+            PropertyInfo property when property.GetIndexParameters().Length == 0 => property.GetValue(owner),
+            _ => throw new NotSupportedException(
+                $"メンバ '{expression.Member.Name}' は型付き述語の値として評価できません。"),
+        };
+    }
+
+    private static object? InvokeConstructor(NewExpression expression)
+    {
+        if (expression.Constructor is null)
+            throw new NotSupportedException($"値式 '{expression}' に呼び出し可能なコンストラクタがありません。");
+        object?[] arguments = expression.Arguments.Select(Eval).ToArray();
+        return expression.Constructor.Invoke(arguments);
+    }
+
+    private static object? ConvertValue(object? value, Type targetType)
+    {
+        if (value is null)
+            return null;
+        Type effectiveType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (effectiveType.IsInstanceOfType(value))
+            return value;
+        if (effectiveType.IsEnum)
+            return Enum.ToObject(effectiveType, value);
+        return Convert.ChangeType(value, effectiveType, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static bool IsSupportedValueBinary(ExpressionType type) => type is
+        ExpressionType.Add or ExpressionType.AddChecked or
+        ExpressionType.Subtract or ExpressionType.SubtractChecked or
+        ExpressionType.Multiply or ExpressionType.MultiplyChecked or
+        ExpressionType.Divide or ExpressionType.Modulo or
+        ExpressionType.Coalesce;
+
+    private static object? EvaluateBinary(BinaryExpression expression)
+    {
+        object? left = Eval(expression.Left);
+        if (expression.NodeType == ExpressionType.Coalesce)
+            return left ?? Eval(expression.Right);
+        object? right = Eval(expression.Right);
+        if (left is null || right is null)
+            throw new NotSupportedException($"数値式 '{expression}' に null は使用できません。");
+
+        Type type = Nullable.GetUnderlyingType(expression.Type) ?? expression.Type;
+        return Type.GetTypeCode(type) switch
+        {
+            TypeCode.Int32 => CalculateInt32(expression.NodeType, Convert.ToInt32(left), Convert.ToInt32(right)),
+            TypeCode.Int64 => CalculateInt64(expression.NodeType, Convert.ToInt64(left), Convert.ToInt64(right)),
+            TypeCode.Single => CalculateSingle(expression.NodeType, Convert.ToSingle(left), Convert.ToSingle(right)),
+            TypeCode.Double => CalculateDouble(expression.NodeType, Convert.ToDouble(left), Convert.ToDouble(right)),
+            TypeCode.Decimal => CalculateDecimal(expression.NodeType, Convert.ToDecimal(left), Convert.ToDecimal(right)),
+            _ => throw new NotSupportedException(
+                $"型 {type.Name} の値式 '{expression}' は型付き述語で評価できません。"),
+        };
+    }
+
+    private static object Negate(object? value, Type type)
+    {
+        if (value is null)
+            throw new NotSupportedException("null は符号反転できません。");
+        Type effectiveType = Nullable.GetUnderlyingType(type) ?? type;
+        return Type.GetTypeCode(effectiveType) switch
+        {
+            TypeCode.Int32 => -Convert.ToInt32(value),
+            TypeCode.Int64 => -Convert.ToInt64(value),
+            TypeCode.Single => -Convert.ToSingle(value),
+            TypeCode.Double => -Convert.ToDouble(value),
+            TypeCode.Decimal => -Convert.ToDecimal(value),
+            _ => throw new NotSupportedException($"型 {effectiveType.Name} の値は符号反転できません。"),
+        };
+    }
+
+    private static int CalculateInt32(ExpressionType operation, int left, int right) => operation switch
+    {
+        ExpressionType.Add => left + right,
+        ExpressionType.AddChecked => checked(left + right),
+        ExpressionType.Subtract => left - right,
+        ExpressionType.SubtractChecked => checked(left - right),
+        ExpressionType.Multiply => left * right,
+        ExpressionType.MultiplyChecked => checked(left * right),
+        ExpressionType.Divide => left / right,
+        ExpressionType.Modulo => left % right,
+        _ => throw UnsupportedValueOperation(operation),
+    };
+
+    private static long CalculateInt64(ExpressionType operation, long left, long right) => operation switch
+    {
+        ExpressionType.Add => left + right,
+        ExpressionType.AddChecked => checked(left + right),
+        ExpressionType.Subtract => left - right,
+        ExpressionType.SubtractChecked => checked(left - right),
+        ExpressionType.Multiply => left * right,
+        ExpressionType.MultiplyChecked => checked(left * right),
+        ExpressionType.Divide => left / right,
+        ExpressionType.Modulo => left % right,
+        _ => throw UnsupportedValueOperation(operation),
+    };
+
+    private static float CalculateSingle(ExpressionType operation, float left, float right) => operation switch
+    {
+        ExpressionType.Add or ExpressionType.AddChecked => left + right,
+        ExpressionType.Subtract or ExpressionType.SubtractChecked => left - right,
+        ExpressionType.Multiply or ExpressionType.MultiplyChecked => left * right,
+        ExpressionType.Divide => left / right,
+        ExpressionType.Modulo => left % right,
+        _ => throw UnsupportedValueOperation(operation),
+    };
+
+    private static double CalculateDouble(ExpressionType operation, double left, double right) => operation switch
+    {
+        ExpressionType.Add or ExpressionType.AddChecked => left + right,
+        ExpressionType.Subtract or ExpressionType.SubtractChecked => left - right,
+        ExpressionType.Multiply or ExpressionType.MultiplyChecked => left * right,
+        ExpressionType.Divide => left / right,
+        ExpressionType.Modulo => left % right,
+        _ => throw UnsupportedValueOperation(operation),
+    };
+
+    private static decimal CalculateDecimal(ExpressionType operation, decimal left, decimal right) => operation switch
+    {
+        ExpressionType.Add or ExpressionType.AddChecked => left + right,
+        ExpressionType.Subtract or ExpressionType.SubtractChecked => left - right,
+        ExpressionType.Multiply or ExpressionType.MultiplyChecked => left * right,
+        ExpressionType.Divide => left / right,
+        ExpressionType.Modulo => left % right,
+        _ => throw UnsupportedValueOperation(operation),
+    };
+
+    private static NotSupportedException UnsupportedValueOperation(ExpressionType operation) =>
+        new($"値式の演算 {operation} は型付き述語で評価できません。");
 }

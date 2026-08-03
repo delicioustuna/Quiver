@@ -5,7 +5,7 @@ namespace Quiver.Api;
 /// 所属トランザクションが生きている間だけ有効で、呼び出し側が必ず破棄する責任を負う。
 /// </summary>
 /// <typeparam name="T">列挙する要素型。</typeparam>
-public interface ITraversalCursor<out T> : IDisposable
+internal interface ITraversalCursor<out T> : IDisposable
 {
     /// <summary>次の要素に進む。要素が無くなったら <c>false</c>。</summary>
     bool MoveNext();

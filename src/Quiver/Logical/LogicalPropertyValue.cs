@@ -8,7 +8,7 @@ namespace Quiver.Logical;
 /// 可変長 payload (String / Bytes) は内部配列にコピーするため、発行元のトランザクションが
 /// 破棄された後もエントリは有効なまま残る。
 /// </summary>
-public readonly struct LogicalPropertyValue
+internal readonly struct LogicalPropertyValue
 {
     /// <summary>プロパティ値の型。</summary>
     public PropertyValueType Type { get; }

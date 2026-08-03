@@ -1,5 +1,3 @@
-using Quiver.Core;
-
 namespace Quiver.Rag;
 
 /// <summary>
@@ -9,14 +7,14 @@ namespace Quiver.Rag;
 /// <param name="HeadingPath">代表チャンク (最上位ヒット) の見出しパス。</param>
 /// <param name="Document">親文書の参照 (<see cref="RagSearchOptions.IncludeDocument"/> が false のときは空)。</param>
 /// <param name="Rank">融合ランキング上の順位 (1 起点。マージ時は最良順位を採用)。</param>
-/// <param name="ChunkVertexId">代表チャンクのVertex ID。</param>
+/// <param name="ChunkVertexId">代表チャンクの不透明 key。</param>
 /// <param name="Score">代表チャンクのチャンネル別 score と融合結果。</param>
 public sealed record RagHit(
     string ChunkText,
     string HeadingPath,
     RagDocumentRef Document,
     int Rank,
-    VertexId ChunkVertexId,
+    VertexKey ChunkVertexId,
     RagScore Score);
 
 /// <summary>RAG 検索結果の融合方式。</summary>

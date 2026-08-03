@@ -12,6 +12,7 @@ internal sealed class OpenAiEmbedder : IChunkEmbedder, IDisposable
 {
     private readonly HttpClient _http;
     private readonly string _model;
+    private readonly string _profileId;
     private int _dimensions;
 
     public OpenAiEmbedder(EmbeddingConfig config)
@@ -25,9 +26,11 @@ internal sealed class OpenAiEmbedder : IChunkEmbedder, IDisposable
             _http.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.ApiKey);
         _model = config.Model;
+        _profileId = $"openai-compatible:{_http.BaseAddress}|{_model}";
         _dimensions = config.Dimensions ?? 0;
     }
 
+    public string ProfileId => _profileId;
     public int Dimensions => _dimensions;
 
     // ダミーテキストを投げて返却ベクトルの次元数を検出する

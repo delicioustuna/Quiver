@@ -1,6 +1,6 @@
 # 全文検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
 
 ## Definition {#definition}
 
@@ -60,7 +60,16 @@ Latin と ASCII は空白区切りの word token とし、CJK の連続は重な
 
 ユニグラム併用モードは CJK の補足 unigram も放出するが、補足 unigram を document length に含めない。
 
-`LowercaseFilter` と `StopWordFilter` の設定は versioned definition payload に保存し、reopen 後に同じ pipeline を再構築する。
+`LowercaseFilter`、`StopWordFilter`、`JapaneseOrthographicVariantFilter` の設定は versioned definition payload に保存し、
+reopen 後に同じ pipeline を再構築する。filter の種類だけでなく stop word と異字体写像も definition の同一性に含め、
+同じ index 名へ異なる設定を指定した場合は拒否する。
+
+`JapaneseOrthographicVariantFilter` は既定 pipeline へ自動追加しない opt-in filter である。parameterless 構成は
+`邉/邊↔辺`、`髙↔高`、`﨑↔崎`、`濵/濱↔浜`、`齋↔斎`、`齊↔斉`、`德↔徳`、`澤↔沢`、
+`瀨↔瀬`、`眞↔真`、`廣↔広`、`國↔国`、`學↔学`、`櫻↔桜` を同一字形グループとして扱う。
+利用者は一対一の異字体→標準字体写像を constructor へ渡し、必要な組だけへ限定できる。
+原文 property は変更せず、各 token の原形、標準形、同じ標準形へ結び付く登録異字体を索引時と検索時の双方で
+補足 token として放出する。一般の類義語や意味的な同義性は推測しない。
 
 永続表現を持たない custom `ITokenFilter` は schema definition として受け付けない。
 
@@ -77,6 +86,10 @@ Score(term, doc) = IDF × (tf × (K1 + 1)) / (tf + K1 × (1 - B + B × docLen / 
 ```
 
 `N`、`df`、総 document length、WAND 上界は、検索と同じ visible segment snapshot から求める。
+
+document length は UTF-8 byte 数や UTF-16 code unit 数ではなく `INormTokenCounter` が返す token 数である。
+CJK bigram では run 長 `n` に対して `n - 1`、孤立 CJK 文字は 1 とする。補足 unigram と異字体展開 token は
+postings と term frequency には参加するが document length へ重ねて加算しない。
 
 WAND 上界は `idf × (K1 + 1)` とし、上界の保守性を証明できない場合は strict scan へ fallback する。
 

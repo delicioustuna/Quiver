@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
 
 本書はエンジンの現時点での既知の限界と、安全に利用するための条件を記す。
 
@@ -14,23 +14,21 @@
 - **データベースごとに 1 プロセス。** `*.quiver` ファイルは排他 OS ファイルロック (`FileShare.None`) で
   開かれる。2 つ目のプロセスはこれを開けない。マルチプロセスやネットワークアクセスは存在しない —
   それが必要なら自前のサービスを前段に置くこと。
-- **データベースごとに 1 つの `QuiverDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
+- **データベースごとに1つの`GraphStore`をスレッド間で共有する。** インスタンスはスレッドセーフ。
   一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
-- **トランザクションハンドルは同時使用不可である。** write 文脈と MVCC 文脈は非同期フローに保持されるため、
-  `await` の継続や、重ならない `Task.Run` 越しの利用で WAL ロギングが暗黙に欠落することはない。
-  ただし同じ `IReadTransaction` または `IWriteTransaction` ハンドルを複数スレッドから同時に使うことは未サポートであり、
-  検出された場合は `TransactionException` をスローする。トランザクションから取得したカーソルや列挙子も、
-  トランザクション有効期間内に 1 つの操作フローで消費すること。
+- **callback scopeとsessionは同時使用不可である。** `Read` / `Write` callbackは同期境界であり、scopeをcallback外へ保持できない。
+  `Advanced` sessionも一つの操作フローで使用し、同じsessionを複数スレッドから同時に使わないこと。
 
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
 - **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
-  `BeginWriteTransaction()` を直列化する。2 本目の書き込みトランザクションは
-  `WriterContentionMode.Wait` なら `WriterWaitTimeout` まで待ち、期限を超えると `WriterBusyException` をスローする。
-  `WriterContentionMode.FailFast` は待機せず同じ例外をスローする。
+  `Write` callbackと`Advanced.BeginWrite()`を直列化する。2本目の書き込みは
+  `GraphWriterContentionMode.Wait`なら`WriterWaitTimeout`まで待ち、期限を超えると`WriterBusyException`をスローする。
+  `GraphWriterContentionMode.FailFast`は待機せず同じ例外をスローする。
   scalar index definition と全文 manifest の publish も同じ書き込み排他に従う。
+  label-scoped string unique 制約もこの単一 writer の mutation 前検査で直列化され、追加の利用者ロックを必要としない。
   immutable全文 artifact の構築は read snapshot で行うため、構築中も通常 writer は進行できる。
-- **リーダはブロックせず、ブロックもされない。** `BeginReadTransaction()` は開始時の一貫した
+- **リーダはブロックせず、ブロックもされない。** `Read` callbackと`Advanced.BeginRead()`は開始時の一貫した
   コミット済みスナップショットを取得し（snapshot isolation）、デフォルトではロックを取得しない。
   任意数のリーダがそれぞれのスレッド上で、単一のライタと並行して並列に動作する。リーダは自身の開始後に
   コミットされた書き込みを観測しない — より新しい状態を見るには新しいリーダを開くこと。
@@ -41,18 +39,18 @@
 最古 reader の snapshot が visibility horizon と WAL 切り詰め可能位置を固定する。
 vacuum はその horizon より前だけを回収するため、reader が存在しても安全な範囲では前進する。
 ただし長時間 reader が古い horizon を保持すると、property、payload、manifest、artifact と WAL の回収可能範囲が広がらない。
-トランザクションを開き、作業を行い、速やかに commit または dispose すること。
+sessionを開いた場合は作業を行い、速やかにcommitまたはdisposeすること。
 ユーザの思考時間、UI イベント、ネットワーク呼び出しをまたいでトランザクションを開いたままにしないこと。
 
 ### コミットと永続性 {#commit-durability}
 
-`Commit()` は WAL が fsync された後にのみ返る。返った後は、データはプロセスの kill や電源喪失を生き延びる
-（再オープン時にリカバリが再生する — [02_wal_recovery.md](02_wal_recovery.md) を参照）。`Commit()` なしで
-dispose されたトランザクション（例外が `using` スコープを巻き戻す場合も含む）はロールバックされる。
+`Write` callbackの正常終了または`GraphWriteSession.Commit()`は、WALがfsyncされた後にのみ返る。返った後は、データはプロセスのkillや電源喪失を生き延びる
+（再オープン時にリカバリが再生する — [02_wal_recovery.md](02_wal_recovery.md) を参照）。例外で終了したcallbackと、`Commit()`なしで
+disposeされたwrite sessionはrollbackされる。
 部分適用されたトランザクションが可視になることは決してない。
 
 この永続性保証は binary backend に適用される。インメモリバックエンド
-（`QuiverDatabase.CreateInMemory()` / `":memory:"`）の commit は同一インスタンス内の可視性と
+（`GraphStore.OpenMemory()`）のcommitは同一インスタンス内の可視性と
 rollback 原子性だけを保証し、プロセス終了やデータベースの破棄・再オープンを跨いでデータを保持しない。
 スナップショットと vacuum もサポート対象外である。
 
@@ -80,11 +78,11 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 
 ### 書き込みの直列化 {#write-serialization}
 
-書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で `BeginWriteTransaction()` を
+書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で`Write` callbackや`Advanced.BeginWrite()`を
 さらに `SemaphoreSlim` で囲む必要はない。高頻度の書き込みを扱うアプリケーションでは、専用の
 ライタキューでジョブを集約すると、自然なバッチングとリトライ制御を実装しやすい。
 
-読み取りにゲートは不要: `BeginReadTransaction()` を任意のスレッドで開き、互いに、そしてライタと
+読み取りにゲートは不要: `Read` callbackまたは`Advanced.BeginRead()`を任意のスレッドで開始し、互いに、そしてライタと
 並行して実行できる。
 
 複数の書き込みトランザクションを同時に進行させる機能はサポートしない。
@@ -245,6 +243,20 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。
 `Quiver.Benchmarks.RecallCheck`は、既定構成のtrue recall@10が0.95以上であることを検証する。
 
+## RAG ingestion profile の切り替え {#rag-ingestion-profile-switch}
+
+`Quiver.Rag` は一つのコーパスへ異なる chunking、embedding model、normalization、embedding input template を
+混在させない。既存 marker と異なる `RagIngestionProfile` は fail-fast で拒否する。
+同一 DB 内で旧 / 新 embedding index を online に二重維持して原子的に切り替える API は現在提供しない。
+profile を変更する場合は、別 DB に全 source document を再取込し、検証後にアプリケーション側で
+`RagStore` の参照を切り替える。marker のない旧コーパスを `AdoptLegacyIngestionProfile` で採用しても
+vector は再生成されず metadata property も backfill されないため、元の model と前処理を確実に特定できる場合に限る。
+旧 profile 採用と `MetadataIndexes` の同時指定は拒否する。
+
+metadata 等値条件は既定で Document label scan を行うため、文書数に比例する。
+低選択率で頻繁に使う string key は `RagMetadataIndex` へ明示昇格できるが、全件に近い条件では
+index seek 後も同数の Document を検証するため利点が小さい。任意の metadata schema や範囲 index を自動推測しない。
+
 ## 組み込みグラフ注釈の有限実行範囲 {#graph-annotation-limits}
 
 組み込みグラフ注釈はtransaction snapshotの全Vertexと対象Edgeを呼び出しごとにmaterializeする。
@@ -284,13 +296,13 @@ Close-by-Oneは明示stackで実行するがstateless continuationを返さな�
 
 ## 暗黙ストレージ移行なし {#no-migration}
 
-`QuiverDatabase.Open` は QUIVER-SW family version 2 ではないデータベースを
+`GraphStore.Open`はQUIVER-SW family version 2ではないデータベースを
 `StorageFormatMismatchException` で拒否し、旧 WAL は `WalFormatMismatchException` で拒否する。
 open 中の自動 migration や fallback reader は存在しない。
+page / WAL headerの予約領域が非0の場合と、未知WAL record typeもfail-fastし、databaseとWALを
+書き換えてから失敗することはない。WAL length prefixは未知recordを安全に無視できるという宣言ではない。
 
-物理形式の移行は、DB を閉じて `QuiverDatabase.UpgradeStorage` を明示的に呼ぶ。
-この API は current v2 なら無変更の `AlreadyCurrent` を返す。現行 build には実変換 step がないため、
-v2 以外は source / target version を持つ `StorageUpgradeNotSupportedException` となる。
+現行の安定公開APIは物理形式の変換を提供しない。非対応形式は元データまたは対応する旧buildの論理exportから新しいDBへ再構築する。
 旧ファイルの magic や version を書き換えて現行形式を装ってはならない。
 
 **設計根拠**: `Open` 時の予期しない長時間処理と source の in-place page rewrite を避ける。
@@ -300,12 +312,10 @@ v2 以外は source / target version を持つ `StorageUpgradeNotSupportedExcept
 **緩和策**: 登録済み step のない形式は、元データまたは対応する旧 Quiver build の論理 export から
 現行 DB を新規構築する。旧 DB file は rollback と調査のため保持する。
 
-スキーマレベルの変更（ラベル名変更・プロパティキー追加等）は `IMigration` API
-でサポートされる。ここで言う「暗黙ストレージ移行なし」は
-オンディスクの物理フォーマット変更のみを指す。
+内部migration基盤はスキーマレベルの変更を実行できるが、安定公開APIには含めない。ここで言う「暗黙ストレージ移行なし」はオンディスクの物理フォーマット変更を指す。
 適用履歴は database 内の transactional catalog に格納し、migration の mutation と同じ commit で追加する。
 rollback または crash で commit record が残らない migration は履歴にも現れない。
-reopen 後の `GetMigrationHistory()` はこの catalog を読み、外部履歴ファイルへ依存しない。
+内部migration履歴はこのcatalogを読み、外部履歴ファイルへ依存しない。
 
 **将来方針**: 1.x 内では QUIVER-SW family version を固定する。
 MAJOR バージョンアップ時には migration tool の提供を検討する
@@ -313,7 +323,7 @@ MAJOR バージョンアップ時には migration tool の提供を検討する
 
 ## Graph JSON import の原子性とstreaming範囲 {#graph-json-import}
 
-`GraphJsonImporter`は一つ以上のgraph JSON v1文書をcaller所有の`IWriteTransaction`へ結合する。
+内部`GraphJsonImporter`は一つ以上のgraph JSON v1文書を内部write transactionへ結合する。この交換形式は現行の安定公開APIには含めない。
 同じsource database、entity kind、generationを含むpacked IDの組は一target IDへ対応し、
 定義が異なる重複、schema cardinality競合、missing reference、不正JSONは
 `GraphJsonImportException`で拒否する。異なるsource database間の意味的同一性は既定で推測しない。

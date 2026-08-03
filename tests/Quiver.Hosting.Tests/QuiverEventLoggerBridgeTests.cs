@@ -32,23 +32,16 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         services.AddQuiver(options => options.DataDirectory = _dir);
 
         using var provider = services.BuildServiceProvider();
-        var db = provider.GetRequiredService<QuiverDatabase>();
-
-        long txId;
-        using (var tx = db.BeginWriteTransaction())
-        {
-            txId = tx.Id.Value;
-            tx.CreateVertex("Person");
-            tx.Commit();
-        }
+        var store = provider.GetRequiredService<GraphStore>();
+        store.Write(write => write.CreateVertex("Person"));
 
         var entry = capture.Entries
             .First(e =>
                 e.Category == "Quiver.Transaction"
-                && e.EventId.Id == 1
-                && e.ScopeValues.Any(kv => kv.Key == "quiver.tx.id" && Equals(kv.Value, txId)));
+                && e.EventId.Id == 1);
         entry.Level.Should().Be(LogLevel.Information);
-        entry.Message.Should().Contain($"tx {txId} committed");
+        entry.Message.Should().Contain("committed");
+        entry.ScopeValues.Should().Contain(kv => kv.Key == "quiver.tx.id");
         entry.ScopeValues.Should()
             .Contain(kv => kv.Key == "quiver.op" && Equals(kv.Value, "Commit"));
     }
@@ -60,11 +53,8 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         services.AddQuiver(options => options.DataDirectory = _dir);
 
         using var provider = services.BuildServiceProvider();
-        var db = provider.GetRequiredService<QuiverDatabase>();
-
-        using var tx = db.BeginWriteTransaction();
-        tx.CreateVertex("Person");
-        tx.Commit();
+        var store = provider.GetRequiredService<GraphStore>();
+        store.Write(write => write.CreateVertex("Person"));
     }
 
     private sealed class CapturingLoggerProvider : ILoggerProvider

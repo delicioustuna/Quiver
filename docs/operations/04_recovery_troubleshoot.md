@@ -14,7 +14,7 @@ Quiver は QUIVER-SW family の page-image WAL で durability を担保する。
 - **commit record を持たない transaction の `PageImage` は再生しない。**
 - 索引を含む B+Tree も同じ page WAL の対象なので、データと索引を同じ commit 境界で復旧する。
 - checkpoint は対応する `CheckpointBegin` と `CheckpointEnd` が揃った場合だけ採用する。
-- 旧 DB、旧 WAL、unknown record、truncation、checksum corruption は fail-fast で拒否する。
+- 旧 DB、旧 WAL、未知header extension、unknown record、truncation、checksum corruption は fail-fast で拒否する。
 
 つまり「再オープンすれば、最後に成功した commit の直後の整合状態に戻る」のが基本契約。
 再オープンは特別な操作ではなく、ただ `QuiverDatabase.Open(dir)` を呼ぶだけで recovery が自動で走る。

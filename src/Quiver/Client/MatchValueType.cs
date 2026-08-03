@@ -4,7 +4,7 @@ namespace Quiver.Api;
 /// <see cref="MatchTuple.TypeOf"/> が返すスロット値型。内部物理 enum
 /// (<c>Quiver.Query.Physical.TupleSlotType</c>) を公開 API 向けに写像した安定 enum。
 /// </summary>
-public enum MatchValueType : byte
+internal enum MatchValueType : byte
 {
     /// <summary>NULL / 未バインド。</summary>
     Null = 0,

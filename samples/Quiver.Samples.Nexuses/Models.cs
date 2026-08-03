@@ -4,7 +4,7 @@ namespace Quiver.Samples.Nexuses;
 
 // KG のエンティティVertex。
 [Vertex("Entity")]
-public partial class Entity
+internal partial class Entity
 {
     [Property]
     public string Name { get; set; } = "";
@@ -13,7 +13,7 @@ public partial class Entity
 // Quiver.Rag が取込時に作るチャンクVertex (label "Chunk") を型付きで読むための宣言。
 // 本文 (text) だけを写像する。
 [Vertex("Chunk")]
-public partial class Chunk
+internal partial class Chunk
 {
     [Property("text")]
     public string Text { get; set; } = "";
@@ -21,7 +21,7 @@ public partial class Chunk
 
 // ファクトの成立時点を表すVertex。
 [Vertex("TimePoint")]
-public partial class TimePoint
+internal partial class TimePoint
 {
     [Property]
     public string Date { get; set; } = "";
@@ -31,7 +31,7 @@ public partial class TimePoint
 // SourceGenerator が Insert / Load / Update / Delete と型保存トラバーサル糖衣
 // (FactAsSubject / Objects / OtherObjects / Source など) を生成する。
 [Nexus("Fact")]
-public partial class Fact
+internal partial class Fact
 {
     [Role("subject")]
     public GraphVertexRef<Entity> Subject { get; set; }

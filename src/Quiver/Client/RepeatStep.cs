@@ -9,7 +9,7 @@ namespace Quiver.Api;
 /// クロージャ内のフィルタや連鎖展開は未対応 — 内部の <c>VariableLengthExpandOperator</c> が
 /// 1 つの方向 + 型のみを受け取るため。
 /// </summary>
-public sealed class RepeatStep
+internal sealed class RepeatStep
 {
     internal Direction Direction { get; private set; } = Direction.Outgoing;
     internal string? TypeFilter { get; private set; }

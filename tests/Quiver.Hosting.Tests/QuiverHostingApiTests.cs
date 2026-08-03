@@ -3,7 +3,7 @@
 // 自動化する。
 //
 // 主目的:
-//   1. defensive read API: GET /vertices/{id} が HWM 超 / 負 ID で 404 を返し例外を露出しない。
+//   1. defensive read API: GET /vertices/{id} が不正・未知の不透明 ID で 404 を返す。
 //   2. POST/GET の round-trip 整合性 (label / property)。
 //   3. 不正リクエスト (空 body / 必須フィールド欠落) の 400 マッピング。
 //   4. Edge作成 + 不在端点での 404。
@@ -94,7 +94,7 @@ public sealed class QuiverHostingApiTests : IDisposable
         post.StatusCode.Should().Be(HttpStatusCode.Created);
         var created = await post.Content.ReadFromJsonAsync<CreatedVertexDto>();
         created.Should().NotBeNull();
-        created!.Id.Should().BeGreaterThanOrEqualTo(0L);
+        created!.Id.Should().NotBeEmpty();
 
         var get = await _client.GetAsync($"/vertices/{created.Id}");
         get.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -161,7 +161,7 @@ public sealed class QuiverHostingApiTests : IDisposable
     {
         var b = await CreateVertex("B");
         var resp = await _client.PostAsJsonAsync("/edges",
-            new { source = 999_999L, target = b, type = "KNOWS" });
+            new { source = Guid.NewGuid(), target = b, type = "KNOWS" });
         resp.StatusCode.Should().Be(HttpStatusCode.NotFound,
             "存在しないVertexを端点にした edge 作成は 404");
     }
@@ -238,14 +238,14 @@ public sealed class QuiverHostingApiTests : IDisposable
     [Fact]
     public async Task Concurrent_GETs_for_mix_of_existing_and_ghost_IDs_never_throw_500()
     {
-        var realIds = new List<long>();
+        var realIds = new List<Guid>();
         for (int i = 0; i < 8; i++)
             realIds.Add(await CreateVertex("Concurrent"));
 
         var tasks = new List<Task<HttpResponseMessage>>();
         for (int i = 0; i < 32; i++)
         {
-            long id = (i % 2 == 0) ? realIds[i % realIds.Count] : 1_000_000L + i;
+            Guid id = (i % 2 == 0) ? realIds[i % realIds.Count] : Guid.NewGuid();
             tasks.Add(_client.GetAsync($"/vertices/{id}"));
         }
         var responses = await Task.WhenAll(tasks);
@@ -271,7 +271,7 @@ public sealed class QuiverHostingApiTests : IDisposable
 
     // ----- ヘルパー -----
 
-    private async Task<long> CreateVertex(string label, string? name = null)
+    private async Task<Guid> CreateVertex(string label, string? name = null)
     {
         var resp = await _client.PostAsJsonAsync("/vertices", new { label, name });
         resp.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -279,8 +279,8 @@ public sealed class QuiverHostingApiTests : IDisposable
         return dto!.Id;
     }
 
-    private sealed record CreatedVertexDto(long Id, string Label, string? Name);
-    private sealed record GetVertexDto(long Id, string? Name);
+    private sealed record CreatedVertexDto(Guid Id, string Label, string? Name);
+    private sealed record GetVertexDto(Guid Id, string? Name);
     private sealed record StatsDto(long VertexCount, long EdgeCount);
 }
 

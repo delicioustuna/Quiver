@@ -299,6 +299,8 @@ graph expansion の定型を 1 API で提供する。エンジン本体 (`Quiver
 ```csharp
 sealed class MyEmbedder(MyModel model) : IChunkEmbedder
 {
+    // model、版、量子化、task 設定が変わったら別 ID にする。
+    public string ProfileId => "acme-embed-ja-v3-fp16-retrieval";
     public int Dimensions => 768;
     public async ValueTask<float[][]> EmbedAsync(
         IReadOnlyList<string> texts, CancellationToken ct = default)
@@ -316,7 +318,17 @@ using var db = QuiverDatabase.Open("rag.quiver");
 var store = new RagStore(db, new RagStoreOptions
 {
     EmbeddingDimensions = embedder.Dimensions,            // 注入する埋め込み器と一致させる
+    IngestionProfile = new RagIngestionProfile
+    {
+        EmbeddingProfileId = embedder.ProfileId,
+        NormalizationProfileId = "pdftools-nfkc-whitespace-v2",
+    },
     Chunking = new ChunkingOptions { TargetSize = 800, Overlap = 100 },
+    // 低選択率で頻繁に使う metadata key だけを昇格する。
+    MetadataIndexes =
+    [
+        new RagMetadataIndex("category", "ragMetadata.category", "idx_rag_metadata_category"),
+    ],
 });
 
 // 取込: 取込側 (PdfTools 等) が読み順復元・正規化したブロック列を渡す。
@@ -328,11 +340,14 @@ var doc = new IngestedDocument(
     {
         new IngestedBlock(BlockKind.Heading, "概要", HeadingLevel: 1),
         new IngestedBlock(BlockKind.Paragraph, "本文の段落 ..."),
-    });
+    })
+{
+    ContentRevision = "etag-2026-08-03",
+};
 
 var result = await store.UpsertDocumentAsync(doc, embedder);
-// result.Unchanged == true なら contentHash 一致の no-op (再取込はべき等)。
-// 内容変更なら result.ReplacedDocumentVertexId が旧 ID、
+// result.Disposition で no-op、属性だけの更新、本文差し替えを区別できる。
+// 本文変更なら result.ReplacedDocumentVertexId が旧 ID、
 // result.DocumentVertexId が新 ID。必要な利用者関係だけを明示的に再アンカーする。
 
 // 検索: queryText + queryVector の両方で RRF ハイブリッド、片方だけでも可。
@@ -368,8 +383,12 @@ store.DeleteDocument("docs/intro.md");
 
 **運用上の注意:**
 
-- **再取込のべき等性は `contentHash`（Blocks のハッシュ）で判定する。** Blocks を変えずに
-  `Title` / `Metadata` だけ変更しても no-op になり既存値が保たれる (再チャンク・再埋め込み回避)。
+- **再取込は `ingestionFingerprint` で判定する。** profile、Blocks の `contentHash`、`Title`、キー順を
+  正規化した `Metadata`、任意の `ContentRevision` がすべて同じなら no-op。Blocks が同じで表示属性だけが
+  変わった場合は `AttributesUpdated` となり、同じ Document ID と Chunk / vector を保って属性だけを更新する。
+- **取込 profile はコーパス単位で固定する。** chunking、embedding model、normalization、embedding input
+  template が変わると constructor または upsert が `RagIngestionProfileMismatchException` で拒否する。
+  変更時は別 DB へ全 source を再取込し、検証後に利用側の `RagStore` を切り替える。
 - **差し替え・削除は単一トランザクション。** 取込中にプロセスが落ちても「旧版が無傷」か
   「新版が完全」のどちらかで、中間状態は残らない。クラッシュ安全性はこの原子性に委ねている。
 - **内容変更は Document ID を維持しない。** `UpsertResult` は `ReplacedDocumentVertexId` と
@@ -379,12 +398,13 @@ store.DeleteDocument("docs/intro.md");
   `FusedScore`、`FusionMethod`、`ReciprocalRankConstant` を使い、片方のチャンネルを使わない場合は
   対応する生 score が `null` になる。
 - **埋め込みはトランザクションの外で先に実行される。** `IChunkEmbedder` が失敗しても DB は無変更。
-  `Dimensions` は `RagStoreOptions.EmbeddingDimensions` と一致している必要がある。
+  `Dimensions` と `ProfileId` は `RagStoreOptions` の構成と一致している必要がある。
 - **見出し語は BM25 でも引ける。** 見出しパスを前置した `searchText` を全文索引の対象にしているため、
   本文に出てこない見出しの語も検索でヒットする (`text` プロパティは原文スライスのまま保たれる)。
 - **メタデータの絞り込みは 2 系統。** 等値条件は `MetadataEquals` (検索前に母集団を絞る candidate-side
   push-down → recall hole が起きない)。範囲条件など複雑な述語は `MetadataFilter` (後段フィルタ。上位 K 件
-  取得後に除外するため、フィルタが大半を弾くと該当文書があっても 0 件になり得る)。
+  取得後に除外するため、フィルタが大半を弾くと該当文書があっても 0 件になり得る)。`MetadataEquals` は
+  既定で Document scan を使い、`MetadataIndexes` に昇格した string key だけ scalar index seek を使う。
 - **頻繁な再取込でも ANN グラフを in-place 更新しない。** 削除と上書きは flat delta へ記録し、
   削除が累積すると自動再構築する。長期間きわめて高頻度の churn を続ける場合のみ手動再構築を検討する。
 - 全文索引が未作成の場合 `RagStore.FullTextEnabled == false` となり、

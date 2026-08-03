@@ -15,7 +15,7 @@ namespace Quiver.Api;
 /// 委譲するための薄いラッパであり、別の実行経路を持たない。
 /// </remarks>
 /// <typeparam name="TNexus">対象Nexus型。</typeparam>
-public sealed class TypedGraphNexusTraversal<TNexus> where TNexus : IGraphNexus<TNexus>
+internal sealed class TypedGraphNexusTraversal<TNexus> where TNexus : IGraphNexus<TNexus>
 {
     private readonly GraphTraversal<NexusId> _inner;
     private readonly IReadTransaction _tx;

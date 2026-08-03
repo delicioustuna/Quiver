@@ -27,11 +27,16 @@ public sealed class RagIngestTests : IDisposable
     }
 
     private const int Dim = 8;
+    private const string EmbeddingProfileId = "fake-embedding-v1";
 
     private RagStore NewStore(QuiverDatabase db, int target = 8, int overlap = 0) =>
         new(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+            },
             Chunking = new ChunkingOptions { TargetSize = target, Overlap = overlap },
         });
 
@@ -43,13 +48,20 @@ public sealed class RagIngestTests : IDisposable
     // ── 決定的フェイク embedder ──
     private sealed class FakeEmbedder : IChunkEmbedder
     {
+        public string ProfileId { get; }
         public int Dimensions { get; }
         public int CallCount;
-        public FakeEmbedder(int dim) => Dimensions = dim;
+        public IReadOnlyList<string> LastInputs { get; private set; } = Array.Empty<string>();
+        public FakeEmbedder(int dim, string profileId = EmbeddingProfileId)
+        {
+            Dimensions = dim;
+            ProfileId = profileId;
+        }
 
         public ValueTask<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
         {
             CallCount++;
+            LastInputs = texts.ToArray();
             var result = new float[texts.Count][];
             for (int i = 0; i < texts.Count; i++)
             {
@@ -65,6 +77,7 @@ public sealed class RagIngestTests : IDisposable
 
     private sealed class ThrowingEmbedder : IChunkEmbedder
     {
+        public string ProfileId => EmbeddingProfileId;
         public int Dimensions => Dim;
         public ValueTask<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
             => throw new InvalidOperationException("boom");
@@ -145,6 +158,14 @@ public sealed class RagIngestTests : IDisposable
         return Encoding.UTF8.GetString(tx.GetProperty(docId, RagSchema.PropTitle).Utf8StringValue);
     }
 
+    private static string DocStringProperty(QuiverDatabase db, string sourceId, string propertyKey)
+    {
+        using var tx = db.BeginReadTransaction();
+        var (docId, found) = FindDoc(tx, sourceId);
+        if (!found || !tx.HasProperty(docId, propertyKey)) return string.Empty;
+        return Encoding.UTF8.GetString(tx.GetProperty(docId, propertyKey).Utf8StringValue);
+    }
+
     private static int KnnHitCount(QuiverDatabase db, string indexName, int k)
     {
         var q = new float[Dim];
@@ -154,6 +175,23 @@ public sealed class RagIngestTests : IDisposable
         int n = 0;
         while (cursor.MoveNext()) n++;
         return n;
+    }
+
+    private static int ScalarIndexHitCount(QuiverDatabase db, string indexName, string value)
+    {
+        using var tx = db.BeginReadTransaction();
+        var cursor = tx.SeekIndex(indexName, PropertyValue.FromString(value));
+        int count = 0;
+        try
+        {
+            while (cursor.MoveNext())
+                if (cursor.Current.Kind == EntityKind.Vertex) count++;
+        }
+        finally
+        {
+            cursor.Dispose();
+        }
+        return count;
     }
 
     // ── テスト ──
@@ -224,11 +262,11 @@ public sealed class RagIngestTests : IDisposable
         {
             anchor = tx.CreateVertex("Anchor");
             tx.CreateEdge(
-                initial.DocumentVertexId,
+                initial.DocumentVertexId.ToCore(),
                 anchor,
                 "USER_LINK");
             nexus = tx.CreateNexus("USER_CONTEXT", [
-                new("Document", initial.DocumentVertexId),
+                new("Document", initial.DocumentVertexId.ToCore()),
                 new("Anchor", anchor),
             ]);
             tx.Commit();
@@ -249,10 +287,10 @@ public sealed class RagIngestTests : IDisposable
         {
             foreach (var old in oldChunks)
                 tx.VertexExists(old).Should().BeFalse();
-            tx.VertexExists(initial.DocumentVertexId).Should().BeFalse();
-            tx.VertexExists(r.DocumentVertexId).Should().BeTrue();
+            tx.VertexExists(initial.DocumentVertexId.ToCore()).Should().BeFalse();
+            tx.VertexExists(r.DocumentVertexId.ToCore()).Should().BeTrue();
             var fromNew = tx.EnumerateEdges(
-                r.DocumentVertexId,
+                r.DocumentVertexId.ToCore(),
                 Direction.Outgoing,
                 "USER_LINK");
             fromNew.MoveNext().Should().BeFalse(
@@ -290,22 +328,219 @@ public sealed class RagIngestTests : IDisposable
     }
 
     [Fact]
-    public async Task Title_only_change_is_noop_and_keeps_old_title()
+    public async Task Title_only_change_updates_attributes_without_embedding()
     {
         using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body text") };
         var meta = new Dictionary<string, string>();
 
-        await store.UpsertDocumentAsync(
-            new IngestedDocument("d1", "Original Title", meta, blocks), new FakeEmbedder(Dim));
+        var embedder = new FakeEmbedder(Dim);
+        UpsertResult initial = await store.UpsertDocumentAsync(
+            new IngestedDocument("d1", "Original Title", meta, blocks), embedder);
 
-        // Blocks 不変・title だけ変更 → contentHash 一致で no-op (設計どおり title は更新されない)。
         var r = await store.UpsertDocumentAsync(
-            new IngestedDocument("d1", "Changed Title", meta, blocks), new FakeEmbedder(Dim));
+            new IngestedDocument("d1", "Changed Title", meta, blocks), embedder);
 
-        r.Unchanged.Should().BeTrue();
-        DocTitle(db, "d1").Should().Be("Original Title");
+        r.Disposition.Should().Be(RagUpsertDisposition.AttributesUpdated);
+        r.Unchanged.Should().BeFalse();
+        r.DocumentVertexId.Should().Be(initial.DocumentVertexId);
+        r.ReplacedDocumentVertexId.Should().BeNull();
+        embedder.CallCount.Should().Be(1);
+        DocTitle(db, "d1").Should().Be("Changed Title");
+    }
+
+    [Fact]
+    public async Task Metadata_and_revision_change_update_same_document_without_embedding()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = NewStore(db);
+        var embedder = new FakeEmbedder(Dim);
+        var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body text") };
+        var first = new IngestedDocument(
+            "d1",
+            "Title",
+            new Dictionary<string, string> { ["category"] = "old" },
+            blocks)
+        {
+            ContentRevision = "rev-1",
+        };
+        UpsertResult initial = await store.UpsertDocumentAsync(first, embedder);
+
+        var updated = first with
+        {
+            Metadata = new Dictionary<string, string> { ["category"] = "new" },
+            ContentRevision = "rev-2",
+        };
+        UpsertResult result = await store.UpsertDocumentAsync(updated, embedder);
+
+        result.Disposition.Should().Be(RagUpsertDisposition.AttributesUpdated);
+        result.DocumentVertexId.Should().Be(initial.DocumentVertexId);
+        result.ReplacedDocumentVertexId.Should().BeNull();
+        embedder.CallCount.Should().Be(1);
+        DocStringProperty(db, "d1", RagSchema.PropContentRevision).Should().Be("rev-2");
+        DocStringProperty(db, "d1", RagSchema.PropMetadataJson)
+            .Should().Be("{\"category\":\"new\"}");
+    }
+
+    [Fact]
+    public async Task Metadata_key_order_does_not_change_fingerprint()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = NewStore(db);
+        var embedder = new FakeEmbedder(Dim);
+        var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body text") };
+
+        await store.UpsertDocumentAsync(
+            new IngestedDocument(
+                "d1",
+                "Title",
+                new Dictionary<string, string> { ["b"] = "2", ["a"] = "1" },
+                blocks),
+            embedder);
+        UpsertResult result = await store.UpsertDocumentAsync(
+            new IngestedDocument(
+                "d1",
+                "Title",
+                new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" },
+                blocks),
+            embedder);
+
+        result.Disposition.Should().Be(RagUpsertDisposition.Unchanged);
+        embedder.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Embedder_profile_mismatch_is_rejected_before_embedding_or_database_change()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = NewStore(db);
+        var embedder = new FakeEmbedder(Dim, "different-model-v2");
+
+        var act = async () => await store.UpsertDocumentAsync(Doc("d1", "alpha"), embedder);
+
+        await act.Should().ThrowAsync<RagIngestionProfileMismatchException>();
+        embedder.CallCount.Should().Be(0);
+        using var tx = db.BeginReadTransaction();
+        FindDoc(tx, "d1").Found.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Chunk_text_embedding_template_excludes_heading_path()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var options = new RagStoreOptions
+        {
+            EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+                EmbeddingInputTemplate = RagEmbeddingInputTemplate.ChunkText,
+            },
+            Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
+        };
+        var store = new RagStore(db, options);
+        var embedder = new FakeEmbedder(Dim);
+        var document = new IngestedDocument(
+            "d1",
+            "Title",
+            new Dictionary<string, string>(),
+            [
+                new IngestedBlock(BlockKind.Heading, "Section", HeadingLevel: 1),
+                new IngestedBlock(BlockKind.Paragraph, "body"),
+            ]);
+
+        await store.UpsertDocumentAsync(document, embedder);
+
+        embedder.LastInputs.Should().Equal("body");
+    }
+
+    [Fact]
+    public async Task Promoted_metadata_property_and_index_follow_attribute_updates()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = new RagStore(db, new RagStoreOptions
+        {
+            EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+            },
+            MetadataIndexes =
+            [
+                new RagMetadataIndex("category", "ragMetadata.category", "idx_rag_metadata_category"),
+            ],
+            Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
+        });
+        var embedder = new FakeEmbedder(Dim);
+        var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body") };
+        var first = new IngestedDocument(
+            "d1",
+            "Title",
+            new Dictionary<string, string> { ["category"] = "old" },
+            blocks);
+        UpsertResult initial = await store.UpsertDocumentAsync(first, embedder);
+
+        ScalarIndexHitCount(db, "idx_rag_metadata_category", "old").Should().Be(1);
+        var changed = await store.UpsertDocumentAsync(
+            first with
+            {
+                Metadata = new Dictionary<string, string> { ["category"] = "new" },
+            },
+            embedder);
+
+        changed.Disposition.Should().Be(RagUpsertDisposition.AttributesUpdated);
+        changed.DocumentVertexId.Should().Be(initial.DocumentVertexId);
+        ScalarIndexHitCount(db, "idx_rag_metadata_category", "old").Should().Be(0);
+        ScalarIndexHitCount(db, "idx_rag_metadata_category", "new").Should().Be(1);
+
+        var removed = await store.UpsertDocumentAsync(
+            first with { Metadata = new Dictionary<string, string>() },
+            embedder);
+        removed.Disposition.Should().Be(RagUpsertDisposition.AttributesUpdated);
+        ScalarIndexHitCount(db, "idx_rag_metadata_category", "new").Should().Be(0);
+        embedder.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Promoted_metadata_seek_work_tracks_selectivity_instead_of_document_count()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = new RagStore(db, new RagStoreOptions
+        {
+            EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+            },
+            MetadataIndexes =
+            [
+                new RagMetadataIndex("rare", "ragMetadata.rare", "idx_rag_metadata_rare"),
+                new RagMetadataIndex("medium", "ragMetadata.medium", "idx_rag_metadata_medium"),
+                new RagMetadataIndex("all", "ragMetadata.all", "idx_rag_metadata_all"),
+            ],
+        });
+        var embedder = new FakeEmbedder(Dim);
+        for (int i = 0; i < 100; i++)
+        {
+            var metadata = new Dictionary<string, string> { ["all"] = "yes" };
+            if (i < 4) metadata["rare"] = "yes";
+            if (i < 25) metadata["medium"] = "yes";
+            await store.UpsertDocumentAsync(
+                new IngestedDocument(
+                    $"d{i:D3}",
+                    $"Document {i}",
+                    metadata,
+                    Array.Empty<IngestedBlock>()),
+                embedder);
+        }
+
+        using (var tx = db.BeginReadTransaction())
+            tx.Query.Vertices().HasLabel(RagSchema.DocumentLabel).ToList().Should().HaveCount(100);
+        ScalarIndexHitCount(db, "idx_rag_metadata_rare", "yes").Should().Be(4);
+        ScalarIndexHitCount(db, "idx_rag_metadata_medium", "yes").Should().Be(25);
+        ScalarIndexHitCount(db, "idx_rag_metadata_all", "yes").Should().Be(100);
+        embedder.CallCount.Should().Be(0, "empty documents do not require embedding");
     }
 
     [Fact]

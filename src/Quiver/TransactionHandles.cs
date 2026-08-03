@@ -10,7 +10,7 @@ namespace Quiver;
 /// 開始時点のスナップショットだけを公開する読み取りトランザクション。
 /// この runtime type は書き込み capability を実装しない。
 /// </summary>
-public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
+internal sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
 {
     private readonly GraphTransaction _core;
 
@@ -155,7 +155,7 @@ public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
 /// snapshot read に graph/schema mutation と commit/abort capability を加えた
 /// single-writer transaction。
 /// </summary>
-public sealed class WriteTransaction : IWriteTransaction, IReadTransactionInternal
+internal sealed class WriteTransaction : IWriteTransaction, IReadTransactionInternal
 {
     private readonly GraphTransaction _core;
 

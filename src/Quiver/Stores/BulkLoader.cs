@@ -8,7 +8,7 @@ namespace Quiver.Storage.Records;
 /// 提供される ID はすべて新規 (既存レコードと衝突しない) であることを前提とする。
 /// Self-loop はサポートするが、TgtPrev/TgtNext は SrcPrev/SrcNext をミラーする。
 /// </summary>
-public sealed class BulkLoader : IDisposable
+internal sealed class BulkLoader : IDisposable
 {
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
@@ -16,11 +16,12 @@ public sealed class BulkLoader : IDisposable
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
     private IDisposable? _writerLease;
+    private readonly Action<BulkLoadConstraintInput>? _beforeCommit;
     private readonly Action? _afterCommit;
 
-    private readonly List<PendingVertex> _vertices = new();
+    private readonly List<BulkVertexEntry> _vertices = new();
     private readonly List<PendingEdge> _edges = new();
-    private readonly Dictionary<long, List<PendingProp>> _propsByVertex = new();
+    private readonly Dictionary<long, List<BulkPropertyEntry>> _propsByVertex = new();
     // Edgeごとの payload lane 用 raw 値を収集する。
     // (EdgeId, PropertyKeyId) でキーイングしているため同一ローダが複数の payload キー
     // 候補を受けられるが、実際に inline されるのは WithPayloadLane で指定されたもののみ。
@@ -28,13 +29,12 @@ public sealed class BulkLoader : IDisposable
     private PayloadLaneSpec? _payloadSpec;
     private bool _committed;
 
-    private record struct PendingVertex(long Id, int LabelId);
     private record struct PendingEdge(long Id, long Src, long Tgt, int TypeId);
-    private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
     internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null,
         IDisposable? writerLease = null,
+        Action<BulkLoadConstraintInput>? beforeCommit = null,
         Action? afterCommit = null)
     {
         _vertexStore = vertexStore;
@@ -42,6 +42,7 @@ public sealed class BulkLoader : IDisposable
         _propStore = propStore;
         _container = container;
         _writerLease = writerLease;
+        _beforeCommit = beforeCommit;
         _afterCommit = afterCommit;
     }
 
@@ -50,7 +51,7 @@ public sealed class BulkLoader : IDisposable
     {
         ThrowIfCommitted();
         // 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
-        _vertices.Add(new PendingVertex(id.Sequence, label.Value));
+        _vertices.Add(new BulkVertexEntry(id.Sequence, label.Value));
     }
 
     /// <summary>Edgeを追加する (順不同で可)。</summary>
@@ -72,7 +73,7 @@ public sealed class BulkLoader : IDisposable
 
         if (!_propsByVertex.TryGetValue(vertexId.Sequence, out var props))
             _propsByVertex[vertexId.Sequence] = props = new();
-        props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
+        props.Add(new BulkPropertyEntry(key.Value, value.Type, value.Int64Value, data));
     }
 
     /// <summary>
@@ -104,6 +105,7 @@ public sealed class BulkLoader : IDisposable
     public void Commit()
     {
         ThrowIfCommitted();
+        _beforeCommit?.Invoke(new BulkLoadConstraintInput(_vertices, _propsByVertex));
         _committed = true;
         bool succeeded = false;
 

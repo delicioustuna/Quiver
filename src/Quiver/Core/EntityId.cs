@@ -4,7 +4,7 @@ namespace Quiver.Core;
 /// <see cref="EntityId"/> がどのエンティティ種別を指すかを示すタグ。
 /// ベクトルストアと内部タグ付き ID API で共有する。
 /// </summary>
-public enum EntityKind : byte
+internal enum EntityKind : byte
 {
     /// <summary>Vertex。</summary>
     Vertex = 1,

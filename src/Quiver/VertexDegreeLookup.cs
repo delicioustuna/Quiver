@@ -11,7 +11,7 @@ namespace Quiver;
 /// ID 空間が疎な場合は、パワーVertexエントリのみをマテリアライズするVertex毎辞書に
 /// フォールバックする (従来のメモリフットプリントを維持)。
 /// </summary>
-public sealed class VertexDegreeLookup
+internal sealed class VertexDegreeLookup
 {
     /// <summary>
     /// 密経路に進むための <c>(maxVertexId + 1) / vertexCount</c> の上限比率。既定 <c>4.0</c> なら

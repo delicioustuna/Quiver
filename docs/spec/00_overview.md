@@ -1,8 +1,8 @@
 # Quiver: システム概要
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
 >
-> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、horizon-aware maintenance、トランザクション境界付き query を実装している。
+> **current (as-built)**: 不透明keyの公開境界、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、horizon-aware maintenance、callback/session境界付きqueryを実装している。
 
 ## ポジショニング {#positioning}
 
@@ -26,12 +26,12 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 ┌─────────────────────────────────────────────────┐
 │  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
-│  QuiverDatabase (facade)                         │
-│  ├─ ISchemaCatalog / ISchemaEditor              │
-│  ├─ IReadTransaction / IWriteTransaction        │
-│  ├─ GraphTraversalSource / GraphMutationSource  │
-│  ├─ IDiagnosticsApi (consistency check, repair) │
-│  └─ Logical mutation sink (audit / replication) │
+│  GraphStore / GraphWorkspace (public facade)     │
+│  ├─ Read / Write callback scope                 │
+│  ├─ Advanced read / write session               │
+│  ├─ GraphQuery / Match                          │
+│  ├─ typed Source Generator mapper               │
+│  └─ opaque key / owned GraphValue               │
 ├─────────────────────────────────────────────────┤
 │  Query Engine                                   │
 │  ├─ Logical IR + Optimizer                      │
@@ -71,12 +71,36 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 `MetadataEquals` は一致文書の Chunk を scorer の候補集合へ渡し、全文と vector の top-k を候補集合内で確定する。
 後段 filter と oversampling を正しさの前提にしない。
 
+取込はコーパス単位の `RagIngestionProfile` を持つ。chunking profile と数値設定、embedding profile、
+normalization profile、embedding input template、vector 次元・距離尺度・index 名を決定的な fingerprint にし、
+全文 token filter 構成も同じ fingerprint に含める。
+初回初期化時に `RagIngestionProfile` Vertex へ記録する。同じ DB を異なる profile で開くと
+`RagIngestionProfileMismatchException` を schema 変更前に送出し、異なる embedding semantics を同じ index へ混在させない。
+profile marker のない旧 RAG コーパスは既定で拒否し、使用済み profile を呼び出し側が特定できる場合だけ
+`AdoptLegacyIngestionProfile` で明示採用する。この採用は metadata property を backfill しないため、
+`MetadataIndexes` との同時指定は拒否する。
+
+Document の `ingestionFingerprint` は profile fingerprint、Blocks の `contentHash`、title、キー順を正規化した metadata、
+任意の `ContentRevision` から算出する。全 fingerprint が一致すれば no-op、`contentHash` だけが一致して
+title、metadata、revision が変わった場合は同じ Document ID と Chunk / vector を保ったまま属性だけを更新する。
+Blocks が変わった場合だけ旧 Document と Chunk を置き換えて再埋め込みする。
+
+metadata は既定では `metadataJson` の Document label scan で絞る。`RagStoreOptions.MetadataIndexes` に利用者が
+選んだ string key を登録すると、その値を独立 property と `StringEquality` scalar index へ昇格し、
+`MetadataEquals` は該当 index の積集合から候補文書を始める。昇格しないキーと最終一致確認は
+`metadataJson` を正本として扱う。
+
+全文 token filter は既定で空である。日本語異字体を機械的に展開する場合は
+`RagStoreOptions.FullTextFilters` に `JapaneseOrthographicVariantFilter` を明示し、既定の原文保持と
+利用者が要求した検索時展開を索引単位で切り替える。設定変更は既存 corpus へ暗黙適用せず profile 不一致として拒否する。
+
 `RagHit.Score` は BM25 score、vector similarity、融合後 score、融合方式、RRF の rank 定数を返す。
 片方の検索チャンネルだけを使う場合は、使わない側の生 score を `null` にする。
 
-内容変更による upsert は Document ID を維持しない。
+Blocks の内容変更による upsert は Document ID を維持しない。
 旧 Document、Chunk、旧 ID に接続した Edge、旧 ID が参加した Nexus を同じ logical delete 境界で削除する。
-`UpsertResult` は旧 ID と新 ID の対応を返し、利用者が所有する関係だけを明示的に再アンカーできるようにする。
+`UpsertResult.Disposition` は `Created`、`Unchanged`、`AttributesUpdated`、`Replaced` を区別する。
+`Replaced` は旧`VertexKey`と新`VertexKey`の対応を返し、利用者が所有する関係だけを明示的に再アンカーできるようにする。
 旧 ID の利用者関係を新 ID へ暗黙継承しない。
 
 ## ファイルレイアウト {#file-layout}
@@ -89,8 +113,10 @@ snapshot は primary file、WAL、参照可能な artifact directory を一組�
 ## フォーマットバージョン {#format-version}
 
 現行のデータファイルと WAL は `QUIVER-SW` family version 2 である。
+v0.5.0も同じfamily version 2であり、同releaseが作成した固定fixtureは現行buildでopen、更新、再openできる。
 旧フォーマットを読み替える decoder と自動マイグレーションは提供しない。
 旧データベースは `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する。
+page / WAL headerの予約extensionと未知WAL recordは読み飛ばさず、元のdatabaseとWALを書き換える前に拒否する。
 
 ## 非目標 {#non-goals}
 

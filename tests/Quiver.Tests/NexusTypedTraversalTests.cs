@@ -34,6 +34,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
     private static List<long> Ids<T>(List<(VertexId Id, T Entity)> pairs) where T : IGraphVertex<T>
         => pairs.ConvertAll(p => (long)p.Id.Value);
 
+    private static GraphVertexRef<T> Ref<T>(VertexId id) where T : IGraphEntity<T> => new(id);
+
     [Fact]
     public void Single_role_typed_traversal_matches_untyped()
     {
@@ -46,8 +48,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             acme = Company.Insert(tx, new Company { Name = "Acme" });
             Employment.Insert(tx, new Employment
             {
-                Employee = alice,
-                Employer = acme,
+                Employee = Ref<Person>(alice),
+                Employer = Ref<Company>(acme),
                 Title = "Engineer",
                 Year = 2020,
             });
@@ -82,9 +84,9 @@ public sealed class NexusTypedTraversalTests : IDisposable
             var hq = Company.Insert(tx, new Company { Name = "HQ" });
             Meeting.Insert(tx, new Meeting
             {
-                Attendees = new List<GraphVertexRef<Person>> { a, b, c },
-                Organizer = a,
-                Venue = hq,
+                Attendees = new List<GraphVertexRef<Person>> { Ref<Person>(a), Ref<Person>(b), Ref<Person>(c) },
+                Organizer = Ref<Person>(a),
+                Venue = Ref<Company>(hq),
                 Topic = "Roadmap",
             });
             tx.Commit();
@@ -126,15 +128,15 @@ public sealed class NexusTypedTraversalTests : IDisposable
             // Venue あり / なしの 2 件。省略側は Venue ロールの行を放出しない。
             Meeting.Insert(tx, new Meeting
             {
-                Attendees = new List<GraphVertexRef<Person>> { a, b },
-                Organizer = a,
-                Venue = hq,
+                Attendees = new List<GraphVertexRef<Person>> { Ref<Person>(a), Ref<Person>(b) },
+                Organizer = Ref<Person>(a),
+                Venue = Ref<Company>(hq),
                 Topic = "With venue",
             });
             Meeting.Insert(tx, new Meeting
             {
-                Attendees = new List<GraphVertexRef<Person>> { a, b },
-                Organizer = a,
+                Attendees = new List<GraphVertexRef<Person>> { Ref<Person>(a), Ref<Person>(b) },
+                Organizer = Ref<Person>(a),
                 Venue = null,
                 Topic = "No venue",
             });
@@ -165,8 +167,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             bob = Person.Insert(tx, new Person { Name = "Bob" });
             // Subject と Object は同じVertex型 (Person) の別ロール。逆向きの 1 件も
             // 加え、ロール指定が方向を正しく区別することを確認する。
-            Statement.Insert(tx, new Statement { Subject = alice, Object = bob, Predicate = "knows" });
-            Statement.Insert(tx, new Statement { Subject = bob, Object = alice, Predicate = "employs" });
+            Statement.Insert(tx, new Statement { Subject = Ref<Person>(alice), Object = Ref<Person>(bob), Predicate = "knows" });
+            Statement.Insert(tx, new Statement { Subject = Ref<Person>(bob), Object = Ref<Person>(alice), Predicate = "employs" });
             tx.Commit();
         }
 
@@ -205,11 +207,11 @@ public sealed class NexusTypedTraversalTests : IDisposable
             globex = Company.Insert(tx, new Company { Name = "Globex" });
             Employment.Insert(tx, new Employment
             {
-                Employee = alice, Employer = acme, Title = "Engineer", Year = 2020,
+                Employee = Ref<Person>(alice), Employer = Ref<Company>(acme), Title = "Engineer", Year = 2020,
             });
             Employment.Insert(tx, new Employment
             {
-                Employee = alice, Employer = globex, Title = "Manager", Year = 2022,
+                Employee = Ref<Person>(alice), Employer = Ref<Company>(globex), Title = "Manager", Year = 2022,
             });
             tx.Commit();
         }

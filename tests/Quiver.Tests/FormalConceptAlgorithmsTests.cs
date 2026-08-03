@@ -117,11 +117,12 @@ public sealed class FormalConceptAlgorithmsTests
     }
 
     [Theory]
-    [InlineData(FormalConceptEnumerationStrategy.NextClosure)]
-    [InlineData(FormalConceptEnumerationStrategy.CloseByOne)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.NextClosure)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.CloseByOne)]
     public void MaxResults_equal_to_total_is_completed_not_truncated(
-        FormalConceptEnumerationStrategy strategy)
+        byte rawStrategy)
     {
+        var strategy = (FormalConceptEnumerationStrategy)rawStrategy;
         bool[,] incidence = RandomContext(8, 8, 61);
         using TestContext context = CreateContext(incidence);
         int total = context.Read.EnumerateFormalConcepts(
@@ -256,11 +257,12 @@ public sealed class FormalConceptAlgorithmsTests
     }
 
     [Theory]
-    [InlineData(FormalConceptEnumerationStrategy.NextClosure)]
-    [InlineData(FormalConceptEnumerationStrategy.CloseByOne)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.NextClosure)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.CloseByOne)]
     public void One_closure_budget_finishes_exactly_one_closure_and_is_terminal(
-        FormalConceptEnumerationStrategy strategy)
+        byte rawStrategy)
     {
+        var strategy = (FormalConceptEnumerationStrategy)rawStrategy;
         using TestContext context = CreateContext(RandomContext(16, 12, 71));
         FormalConceptOptions options = Options(100_000) with
         {
@@ -276,11 +278,12 @@ public sealed class FormalConceptAlgorithmsTests
     }
 
     [Theory]
-    [InlineData(FormalConceptEnumerationStrategy.NextClosure)]
-    [InlineData(FormalConceptEnumerationStrategy.CloseByOne)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.NextClosure)]
+    [InlineData((byte)FormalConceptEnumerationStrategy.CloseByOne)]
     public void One_closure_budget_completes_when_root_is_the_final_concept(
-        FormalConceptEnumerationStrategy strategy)
+        byte rawStrategy)
     {
+        var strategy = (FormalConceptEnumerationStrategy)rawStrategy;
         using TestContext context = CreateContext(new bool[,] { { true, true } });
         FormalConceptOptions options = Options(10) with
         {

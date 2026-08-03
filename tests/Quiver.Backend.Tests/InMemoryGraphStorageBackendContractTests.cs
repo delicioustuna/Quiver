@@ -11,7 +11,7 @@ namespace Quiver.Backend.Tests;
 public sealed class InMemoryGraphStorageBackendContractTests
     : GraphStorageBackendContractTests
 {
-    protected override IGraphStorageBackendFactory CreateFactory()
+    private protected override IGraphStorageBackendFactory CreateFactory()
         => new InMemoryGraphStorageBackendFactory();
 
     protected override string DatabasePath => ":memory:";

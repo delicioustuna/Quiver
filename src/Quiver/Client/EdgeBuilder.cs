@@ -8,7 +8,7 @@ namespace Quiver.Api;
 /// <see cref="From"/> と <see cref="To"/> で両端Vertexを指定し、必要なら <c>.P(...)</c> で
 /// プロパティを追加し、最後に <see cref="Next"/> で実際にエッジを作成する。
 /// </summary>
-public sealed class EdgeBuilder
+internal sealed class EdgeBuilder
 {
     private readonly IWriteTransaction _tx;
     private readonly string _type;

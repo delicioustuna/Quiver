@@ -57,7 +57,7 @@ internal interface ITransactionEdgeStore
 /// Edgeレコードを読み出したハンドル。端点 (source/target)、型、両端の双方向リンク、
 /// owner-bound property version chain の先頭参照を保持する (アロケーションを避ける ref struct)。
 /// </summary>
-public readonly ref struct EdgeReadHandle
+internal readonly ref struct EdgeReadHandle
 {
     private readonly EdgeId _id;
     private readonly bool _inUse;
@@ -164,7 +164,7 @@ internal ref struct EdgeWriteHandle
 /// あるVertexの隣接Edgeを双方向リンクに沿って列挙する前方イテレータ。
 /// 型 / 方向フィルタと MVCC 可視性スキップに対応する。
 /// </summary>
-public ref struct EdgeEnumerator
+internal ref struct EdgeEnumerator
 {
     private readonly IEdgeStore _store;
     private readonly IVertexStore _vertices;

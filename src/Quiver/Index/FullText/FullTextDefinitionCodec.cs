@@ -72,7 +72,7 @@ internal static class FullTextDefinitionCodec
             "Full-text definition does not use the current qft2 catalog format.");
     }
 
-    private static string EncodeFilters(IReadOnlyList<ITokenFilter>? filters)
+    internal static string EncodeFilters(IReadOnlyList<ITokenFilter>? filters)
     {
         if (filters is not { Count: > 0 })
             return string.Empty;
@@ -91,6 +91,14 @@ internal static class FullTextDefinitionCodec
                             .Order(StringComparer.Ordinal)
                             .Select(static word => Convert.ToBase64String(
                                 Encoding.UTF8.GetBytes(word)))));
+                    break;
+                case JapaneseOrthographicVariantFilter variants:
+                    encoded.Add("j," + string.Join(
+                        ',',
+                        variants.Mappings
+                            .OrderBy(static pair => pair.Key)
+                            .Select(static pair =>
+                                $"{(int)pair.Key:X4}:{(int)pair.Value:X4}")));
                     break;
                 default:
                     throw new NotSupportedException(
@@ -118,6 +126,34 @@ internal static class FullTextDefinitionCodec
                     .Split(',', StringSplitOptions.RemoveEmptyEntries);
                 filters.Add(new StopWordFilter(words.Select(static word =>
                     Encoding.UTF8.GetString(Convert.FromBase64String(word)))));
+                continue;
+            }
+            if (descriptor.StartsWith("j,", StringComparison.Ordinal))
+            {
+                string[] mappings = descriptor[2..]
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries);
+                var decoded = new List<KeyValuePair<char, char>>(mappings.Length);
+                foreach (string mapping in mappings)
+                {
+                    string[] pair = mapping.Split(':');
+                    if (pair.Length != 2
+                        || !ushort.TryParse(
+                            pair[0],
+                            NumberStyles.AllowHexSpecifier,
+                            CultureInfo.InvariantCulture,
+                            out ushort source)
+                        || !ushort.TryParse(
+                            pair[1],
+                            NumberStyles.AllowHexSpecifier,
+                            CultureInfo.InvariantCulture,
+                            out ushort canonical))
+                    {
+                        throw new InvalidDataException(
+                            $"Invalid Japanese orthographic mapping '{mapping}'.");
+                    }
+                    decoded.Add(new((char)source, (char)canonical));
+                }
+                filters.Add(new JapaneseOrthographicVariantFilter(decoded));
                 continue;
             }
             throw new InvalidDataException(

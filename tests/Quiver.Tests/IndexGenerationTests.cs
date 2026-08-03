@@ -29,13 +29,14 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- EntityRef のパックと展開 ----
 
     [Theory]
-    [InlineData(EntityKind.Vertex, 0L, 0)]
-    [InlineData(EntityKind.Vertex, 1L, 1)]
-    [InlineData(EntityKind.Edge, 42L, 7)]
-    [InlineData(EntityKind.Nexus, 99L, 3)]
-    [InlineData(EntityKind.Vertex, EntityRef.SequenceMask, EntityRef.MaxGeneration)]
-    public void EntityRef_roundtrips(EntityKind kind, long seq, int gen)
+    [InlineData((byte)EntityKind.Vertex, 0L, 0)]
+    [InlineData((byte)EntityKind.Vertex, 1L, 1)]
+    [InlineData((byte)EntityKind.Edge, 42L, 7)]
+    [InlineData((byte)EntityKind.Nexus, 99L, 3)]
+    [InlineData((byte)EntityKind.Vertex, EntityRef.SequenceMask, EntityRef.MaxGeneration)]
+    public void EntityRef_roundtrips(byte rawKind, long seq, int gen)
     {
+        var kind = (EntityKind)rawKind;
         long packed = EntityRef.Pack(kind, seq, gen);
         EntityRef.UnpackKind(packed).Should().Be(kind);
         EntityRef.UnpackSequence(packed).Should().Be(seq);

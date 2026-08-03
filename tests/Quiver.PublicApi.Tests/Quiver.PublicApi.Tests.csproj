@@ -20,5 +20,6 @@
   <ItemGroup>
     <!-- 公開API安定性保証の対象アセンブリ（docs/api-stability.md §2）。 -->
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
+    <ProjectReference Include="..\..\src\Quiver.Rag\Quiver.Rag.csproj" />
   </ItemGroup>
 </Project>

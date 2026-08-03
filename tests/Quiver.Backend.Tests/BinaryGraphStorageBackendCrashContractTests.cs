@@ -15,7 +15,7 @@ namespace Quiver.Backend.Tests;
 public sealed class BinaryGraphStorageBackendCrashContractTests
     : GraphStorageBackendCrashContractTests
 {
-    protected override IGraphStorageBackendFactory CreateFactory()
+    private protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
     // binary backend は単一ファイル *.quiver。コンテナは <dir>/graph.quiver、
@@ -138,6 +138,69 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         using var read = reopened.BeginReadTransaction();
         read.Schema.ListIndexes().Select(x => x.Name)
             .Should().NotContain("idx_uncommitted");
+    }
+
+    [Fact]
+    public void Unique_constraint_survives_kill_and_reopen()
+    {
+        IGraphStorageBackend? backend = Open();
+        using (var schema = backend.BeginWriteTransaction())
+        {
+            schema.EditSchema.CreateIndex(new ScalarIndexDefinition(
+                "uq_person_name",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+                IndexKind.StringEquality,
+                Unique: true));
+            schema.Commit();
+        }
+        using (var seed = backend.BeginWriteTransaction())
+        {
+            var vertex = seed.CreateVertex("Person");
+            seed.SetProperty(vertex, "name", PropertyValue.FromString("Alice"));
+            seed.Commit();
+        }
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var duplicate = reopened.BeginWriteTransaction();
+        var other = duplicate.CreateVertex("Person");
+        Action setDuplicate = () => duplicate.SetProperty(
+            other,
+            "name",
+            PropertyValue.FromString("Alice"));
+        setDuplicate.Should().Throw<UniqueConstraintViolationException>();
+    }
+
+    [Fact]
+    public void Uncommitted_unique_value_does_not_poison_recovery()
+    {
+        IGraphStorageBackend? backend = Open();
+        using (var schema = backend.BeginWriteTransaction())
+        {
+            schema.EditSchema.CreateIndex(new ScalarIndexDefinition(
+                "uq_person_name",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+                IndexKind.StringEquality,
+                Unique: true));
+            schema.Commit();
+        }
+
+        var dirty = backend.BeginWriteTransaction();
+        var abandoned = dirty.CreateVertex("Person");
+        dirty.SetProperty(abandoned, "name", PropertyValue.FromString("Available"));
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var claim = reopened.BeginWriteTransaction();
+        var owner = claim.CreateVertex("Person");
+        claim.SetProperty(owner, "name", PropertyValue.FromString("Available"));
+        claim.Commit();
+
+        using var read = reopened.BeginReadTransaction();
+        System.Text.Encoding.UTF8.GetString(
+            read.GetProperty(owner, "name").Utf8StringValue).Should().Be("Available");
     }
 
     [Theory]

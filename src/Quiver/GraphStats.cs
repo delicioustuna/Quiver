@@ -9,7 +9,7 @@ namespace Quiver;
 /// Vertexの次数分布を対数的バケット (0, 1, ≤3, ≤7, … ≤255, ∞) で集計するヒストグラム。
 /// オプティマイザの fan-out 推定や power vertex 判定の素材になる。
 /// </summary>
-public sealed class DegreeHistogram
+internal sealed class DegreeHistogram
 {
     // バケット上限: 0, 1, 3, 7, 15, 31, 63, 127, 255, ∞
     private readonly long[] _counts = new long[10];
@@ -55,7 +55,7 @@ public sealed class DegreeHistogram
 /// <param name="VertexId">対象Vertex。</param>
 /// <param name="OutDegree">出次数。</param>
 /// <param name="InDegree">入次数。</param>
-public readonly record struct VertexDegreeSummary(
+internal readonly record struct VertexDegreeSummary(
     VertexId VertexId,
     long OutDegree,
     long InDegree)
@@ -68,7 +68,7 @@ public readonly record struct VertexDegreeSummary(
 /// Nexusのメンバー数ごとの件数分布。
 /// オプティマイザが型ごとの展開 fan-out を見積もるための厳密な arity を保持する。
 /// </summary>
-public sealed class ArityHistogram
+internal sealed class ArityHistogram
 {
     private readonly SortedDictionary<int, long> _counts = new();
 
@@ -101,7 +101,7 @@ public sealed class ArityHistogram
 /// <summary>
 /// プロパティキーごとの統計。<see cref="GraphStats.Collect"/> が収集する。
 /// </summary>
-public sealed class PropertyKeyStats
+internal sealed class PropertyKeyStats
 {
     private readonly HashSet<long> _distinctScalars = [];
     private readonly HashSet<string> _distinctStrings = [];
@@ -213,7 +213,7 @@ public sealed class PropertyKeyStats
 /// グラフ全体の統計スナップショット。ラベル基数 / エッジ型頻度 / 次数分布 / プロパティ統計を保持し、
 /// クエリオプティマイザのコスト推定に使う。<see cref="QuiverDatabase.CollectStats()"/> で収集する。
 /// </summary>
-public sealed class GraphStats
+internal sealed class GraphStats
 {
     /// <summary>この値を超える総次数のVertexを <see cref="PowerVertices"/> に記録する既定しきい値。</summary>
     public const int PowerVertexDegreeThreshold = 256;
@@ -315,7 +315,7 @@ public sealed class GraphStats
     /// 指定フィルタ下での 1 ホップ展開のVertex毎 fan-out を推定する。
     /// 最も具体的なシグナル (方向 + 型) からグローバル平均へ段階的にフォールバックする。
     /// </summary>
-    public double EstimateFanOut(LabelId? sourceLabel, EdgeTypeId? typeFilter, Direction direction)
+    internal double EstimateFanOut(LabelId? sourceLabel, EdgeTypeId? typeFilter, Direction direction)
     {
         if (typeFilter.HasValue)
         {

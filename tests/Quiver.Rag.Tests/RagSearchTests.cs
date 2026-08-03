@@ -16,6 +16,7 @@ public sealed class RagSearchTests : IDisposable
     private readonly string _dir;
     private readonly string _path;
     private const int Dim = 8;
+    private const string EmbeddingProfileId = "fake-embedding-v1";
 
     public RagSearchTests()
     {
@@ -39,6 +40,7 @@ public sealed class RagSearchTests : IDisposable
 
     private sealed class FakeEmbedder : IChunkEmbedder
     {
+        public string ProfileId => EmbeddingProfileId;
         public int Dimensions => Dim;
         public ValueTask<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
         {
@@ -48,11 +50,18 @@ public sealed class RagSearchTests : IDisposable
         }
     }
 
-    private RagStore NewStore(QuiverDatabase db) =>
+    private RagStore NewStore(
+        QuiverDatabase db,
+        IReadOnlyList<RagMetadataIndex>? metadataIndexes = null) =>
         new(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+            },
             Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
+            MetadataIndexes = metadataIndexes ?? Array.Empty<RagMetadataIndex>(),
         });
 
     private static IngestedDocument Doc(string id, IReadOnlyDictionary<string, string>? meta, params string[] paras) =>
@@ -247,6 +256,35 @@ public sealed class RagSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task Metadata_equals_uses_promoted_scalar_index_and_keeps_candidate_semantics()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = NewStore(
+            db,
+            [new RagMetadataIndex("acl", "ragMetadata.acl", "idx_rag_metadata_acl")]);
+        var searcher = new RagSearcher(store);
+
+        await store.UpsertDocumentAsync(
+            Doc("pub", new Dictionary<string, string> { ["acl"] = "public" }, "shared Zphobos public note text"),
+            new FakeEmbedder());
+        await store.UpsertDocumentAsync(
+            Doc("sec", new Dictionary<string, string> { ["acl"] = "secret" }, "secret Zphobos hidden note text"),
+            new FakeEmbedder());
+
+        db.Schema.TryGetIndex("idx_rag_metadata_acl", out IndexInfo index).Should().BeTrue();
+        index.Definition.Should().BeOfType<ScalarIndexDefinition>()
+            .Which.Kind.Should().Be(IndexKind.StringEquality);
+        var hits = searcher.Search("Zphobos", null, new RagSearchOptions
+        {
+            NeighborExpansion = 0,
+            MetadataEquals = new Dictionary<string, string> { ["acl"] = "public" },
+        });
+
+        hits.Should().ContainSingle();
+        hits[0].Document.SourceId.Should().Be("pub");
+    }
+
+    [Fact]
     public async Task Metadata_equals_pushdown_avoids_recall_hole()
     {
         using var db = QuiverDatabase.Open(_path);
@@ -406,6 +444,10 @@ public sealed class RagSearchTests : IDisposable
         var store = new RagStore(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = EmbeddingProfileId,
+            },
             Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
         });
         // 単語 UNIQ を先頭に置き 1 段落 (>40 char) を分割させる。
@@ -442,7 +484,7 @@ public sealed class RagSearchTests : IDisposable
 
         hits.Should().HaveCount(1);
         hits[0].Document.SourceId.Should().BeEmpty();
-        hits[0].ChunkVertexId.Value.Should().NotBe(0); // 代表Vertexは入る
+        hits[0].ChunkVertexId.IsValid.Should().BeTrue(); // 代表Vertexは入る
     }
 
     [Fact]

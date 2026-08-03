@@ -54,4 +54,10 @@ public sealed class IndexedAttribute : Attribute
 
     /// <summary>明示指定された索引名 (省略時は <c>null</c>)。</summary>
     public string? IndexName { get; }
+
+    /// <summary>
+    /// 同じlabel内で文字列値を一意にする場合は<c>true</c>。
+    /// 文字列のSingle cardinalityプロパティでだけ使用できる。
+    /// </summary>
+    public bool Unique { get; set; }
 }

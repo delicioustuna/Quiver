@@ -6,7 +6,7 @@ namespace Quiver.Logical;
 /// コミット済みバッチを到着順にメモリ保持する参照実装の <see cref="ILogicalMutationSink"/>。
 /// テスト / デバッグ検査 / 小規模な監査向けで、本番のレプリケーション用途ではない。
 /// </summary>
-public sealed class InMemoryLogicalMutationSink : ILogicalMutationSink
+internal sealed class InMemoryLogicalMutationSink : ILogicalMutationSink
 {
     private readonly object _lock = new();
     private readonly List<CommittedBatch> _batches = new();

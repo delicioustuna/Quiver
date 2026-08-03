@@ -5,7 +5,7 @@ namespace Quiver.Samples.SourceGen;
 // [Vertex] / [Indexed] / [Property] を付けると、Roslyn SourceGenerator が
 // Insert / InsertIndexed / Load / Update / Delete / FindByName を自動生成する。
 [Vertex("Person")]
-public partial class Person
+internal partial class Person
 {
     [Indexed("idx_person_name")]
     [Property]
@@ -27,7 +27,7 @@ public partial class Person
 }
 
 [Edge<Person, Person>("KNOWS")]
-public partial class Knows
+internal partial class Knows
 {
     [Property]
     public string Since { get; set; } = "";

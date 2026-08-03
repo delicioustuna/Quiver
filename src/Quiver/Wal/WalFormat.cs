@@ -9,6 +9,7 @@ internal static class WalFormat
     internal const int FileHeaderSize = 16;
     internal const byte FamilyVersion = StorageFormatVersion.Current;
     private const byte WalKind = (byte)'W';
+    private const int HeaderExtensionOffset = 11;
 
     internal static void Initialize(FileStream stream)
     {
@@ -47,6 +48,13 @@ internal static class WalFormat
                 $"QUIVER-SW/WAL v{FamilyVersion}");
         }
 
+        if (!IsZero(header[HeaderExtensionOffset..]))
+        {
+            throw new WalFormatMismatchException(
+                $"QUIVER-SW/WAL v{FamilyVersion} with an unsupported header extension",
+                $"QUIVER-SW/WAL v{FamilyVersion} without extensions");
+        }
+
         stream.Position = FileHeaderSize;
     }
 
@@ -58,4 +66,14 @@ internal static class WalFormat
             or WalRecordType.CheckpointBegin
             or WalRecordType.CheckpointEnd
             or WalRecordType.FileTruncate;
+
+    private static bool IsZero(ReadOnlySpan<byte> bytes)
+    {
+        foreach (byte value in bytes)
+        {
+            if (value != 0) return false;
+        }
+
+        return true;
+    }
 }

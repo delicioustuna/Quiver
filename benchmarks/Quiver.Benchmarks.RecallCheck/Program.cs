@@ -12,9 +12,9 @@ var scenario = new RecallScenario(
     HnswEfConstruction: 400,
     MinimumRecall: 0.95);
 
-if (!RunScenario(scenario))
+if (!RunScenario(scenario) || !RetrievalQualityGate.Run())
 {
-    Console.Error.WriteLine("RecallCheck FAILED: recall fell below the current threshold.");
+    Console.Error.WriteLine("RecallCheck FAILED: a retrieval quality threshold was not met.");
     return 1;
 }
 

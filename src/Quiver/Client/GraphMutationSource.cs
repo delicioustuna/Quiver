@@ -7,7 +7,7 @@ namespace Quiver.Api;
 /// 書き込みトランザクションに所有される graph mutation の入口。
 /// query を組み立てる場合は同じトランザクションの <see cref="IReadTransaction.Query"/> を使う。
 /// </summary>
-public sealed class GraphMutationSource
+internal sealed class GraphMutationSource
 {
     private readonly IWriteTransaction _transaction;
 

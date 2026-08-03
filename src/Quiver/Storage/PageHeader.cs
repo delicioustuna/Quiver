@@ -16,17 +16,21 @@ internal static class PageHeader
     private const int OffsetMagic = 0;
     private const int OffsetVersion = 9;
     private const int OffsetKind = 10;
+    private const int OffsetReservedBeforePageId = 11;
     private const int OffsetPageId = 16;
     private const int OffsetLsn = 24;
     private const int OffsetChecksum = 32;
+    private const int OffsetReservedAfterChecksum = 36;
 
     public static void Write(Span<byte> page, PageId pageId, PageKind kind, long lsn)
     {
         FamilyMagic.CopyTo(page[OffsetMagic..]);
         page[OffsetVersion] = FamilyVersion;
         page[OffsetKind] = (byte)kind;
+        page[OffsetReservedBeforePageId..OffsetPageId].Clear();
         BinaryPrimitives.WriteInt64LittleEndian(page[OffsetPageId..], pageId.Value);
         BinaryPrimitives.WriteInt64LittleEndian(page[OffsetLsn..], lsn);
+        page[OffsetReservedAfterChecksum..Size].Clear();
         uint crc = ComputeChecksum(page);
         BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetChecksum..], crc);
     }
@@ -47,6 +51,13 @@ internal static class PageHeader
         byte version = page[OffsetVersion];
         if (version != FamilyVersion)
             throw new StorageFormatMismatchException("database", version, FamilyVersion);
+
+        if (!IsZero(page[OffsetReservedBeforePageId..OffsetPageId])
+            || !IsZero(page[OffsetReservedAfterChecksum..Size]))
+        {
+            throw new CorruptionException(
+                $"Unsupported database page header extension on page {expectedPageId.Value}.");
+        }
 
         long pageId = BinaryPrimitives.ReadInt64LittleEndian(page[OffsetPageId..]);
         if (pageId != expectedPageId.Value)
@@ -78,5 +89,15 @@ internal static class PageHeader
         page[..Size].CopyTo(header);
         BinaryPrimitives.WriteUInt32LittleEndian(header[OffsetChecksum..], 0);
         return Crc32.HashToUInt32(header) ^ Crc32.HashToUInt32(page[Size..]);
+    }
+
+    private static bool IsZero(ReadOnlySpan<byte> bytes)
+    {
+        foreach (byte value in bytes)
+        {
+            if (value != 0) return false;
+        }
+
+        return true;
     }
 }

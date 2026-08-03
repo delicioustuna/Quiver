@@ -2,6 +2,7 @@ using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage;
 using Quiver.Storage.Records;
+using Quiver.Storage.Upgrade;
 using Quiver.Transactions;
 using Quiver.Storage.Wal;
 
@@ -63,6 +64,18 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     {
         bool initializeDatabaseIdentity = !File.Exists(filePath)
             || new FileInfo(filePath).Length == 0;
+        if (!initializeDatabaseIdentity)
+        {
+            byte version = StorageFormatInspector.Inspect(filePath);
+            if (version != StorageFormatVersion.Current)
+            {
+                throw new StorageFormatMismatchException(
+                    "database",
+                    version,
+                    StorageFormatVersion.Current);
+            }
+        }
+
         // filePath は単一コンテナ (*.quiver) のフルパス。親ディレクトリを用意する。
         var parentDir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);

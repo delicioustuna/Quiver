@@ -1,12 +1,30 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Quiver;
 using Quiver.Api;
 using Quiver.Core;
+using Quiver.Storage.Records;
 
 var mode = args.Length > 0 ? args[0] : "movie";
 var pathArg = args.Length > 1 ? args[1] : null;
 
 switch (mode)
 {
+    case "--portability-produce":
+        ProducePortabilityBundle(
+            pathArg ?? throw new ArgumentException("bundle path is required"),
+            args.Length > 2 ? args[2] : "unknown");
+        break;
+    case "--portability-verify-update":
+        VerifyAndUpdatePortabilityBundle(
+            pathArg ?? throw new ArgumentException("bundle path is required"));
+        break;
+    case "--portability-verify":
+        VerifyPortabilityBundle(
+            pathArg ?? throw new ArgumentException("bundle path is required"),
+            expectedStage: 1);
+        break;
     case "--hierarchical":
         GenerateHierarchical(pathArg ?? Path.Combine(AppContext.BaseDirectory, "sample2.quiver"));
         break;
@@ -261,3 +279,321 @@ static void GenerateHierarchical(string outputPath)
 
     PrintStats(db);
 }
+
+static void ProducePortabilityBundle(string bundlePath, string origin)
+{
+    string root = Path.GetFullPath(bundlePath);
+    string databasePath = Path.Combine(root, "graph.quiver");
+    if (File.Exists(databasePath))
+        throw new InvalidOperationException($"portability bundle already exists: {root}");
+    Directory.CreateDirectory(root);
+
+    var state = new PortabilityOracle(
+        FormatVersion: 1,
+        Origin: origin,
+        Stage: 0,
+        PrimaryVertexId: 0,
+        SecondaryVertexId: 0,
+        UpdatedVertexId: null,
+        SnapshotRelativePath: "snapshot/stage-0/graph.quiver");
+
+    using (var database = QuiverDatabase.Open(databasePath))
+    {
+        EditSchema(database, schema =>
+        {
+            schema.CreateIndex(new ScalarIndexDefinition(
+                "uq_portable_key",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "key", "Document"),
+                IndexKind.StringEquality,
+                Unique: true));
+            schema.CreateIndex(new VectorIndexDefinition(
+                "vec_portable",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Document"),
+                Dimensions: 3,
+                SegmentPolicy: new VectorSegmentPolicy(
+                    MaximumDeltaEntries: 1,
+                    MaximumSegments: 2)));
+            schema.CreateIndex(new FullTextIndexDefinition(
+                "ft_portable",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Document"),
+                SegmentPolicy: new FullTextSegmentPolicy(
+                    MaximumDeltaEntries: 1,
+                    MaximumSegments: 2)));
+        });
+
+        VertexId primary;
+        VertexId secondary;
+        using (var write = database.BeginWriteTransaction())
+        {
+            primary = write.CreateVertex("Document");
+            write.SetProperty(primary, "key", PropertyValue.FromString("portable-0"));
+            write.SetProperty(primary, "body", PropertyValue.FromString("日本語の可搬性を検証する文書"));
+            write.SetVectorProperty(EntityRef.From(primary), "embedding", [1f, 0f, 0f]);
+
+            secondary = write.CreateVertex("Document");
+            write.SetProperty(secondary, "key", PropertyValue.FromString("portable-1"));
+            write.SetProperty(secondary, "body", PropertyValue.FromString("cross platform database fixture"));
+            write.SetVectorProperty(EntityRef.From(secondary), "embedding", [0f, 1f, 0f]);
+            write.Commit();
+        }
+
+        state = state with
+        {
+            PrimaryVertexId = primary.Value,
+            SecondaryVertexId = secondary.Value,
+        };
+        WaitForPortableArtifacts(database);
+        AssertPortableDatabase(database, state);
+        CreatePortableSnapshot(database, root, state.SnapshotRelativePath);
+    }
+
+    WriteOracle(root, state);
+    WriteBundleHashes(root);
+    VerifyBundleHashes(root);
+    Console.WriteLine($"PORTABILITY produce ok: {origin} -> {root}");
+}
+
+static void VerifyAndUpdatePortabilityBundle(string bundlePath)
+{
+    string root = Path.GetFullPath(bundlePath);
+    VerifyBundleHashes(root);
+    PortabilityOracle state = ReadOracle(root);
+    if (state.Stage != 0)
+        throw new InvalidOperationException($"expected stage 0 bundle, found stage {state.Stage}");
+
+    using (var recoverySnapshot = QuiverDatabase.Open(
+               Path.Combine(root, state.SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar))))
+        AssertPortableDatabase(recoverySnapshot, state);
+
+    string databasePath = Path.Combine(root, "graph.quiver");
+    using (var database = QuiverDatabase.Open(databasePath))
+    {
+        AssertPortableDatabase(database, state);
+        VertexId updated;
+        using (var write = database.BeginWriteTransaction())
+        {
+            var primary = new VertexId(state.PrimaryVertexId);
+            write.SetProperty(
+                primary,
+                "body",
+                PropertyValue.FromString("日本語の可搬性を更新後も検証する文書"));
+            write.SetVectorProperty(EntityRef.From(primary), "embedding", [0.9f, 0.1f, 0f]);
+
+            updated = write.CreateVertex("Document");
+            write.SetProperty(updated, "key", PropertyValue.FromString("portable-cross"));
+            write.SetProperty(updated, "body", PropertyValue.FromString("cross platform update marker"));
+            write.SetVectorProperty(EntityRef.From(updated), "embedding", [0f, 0f, 1f]);
+            write.Commit();
+        }
+
+        state = state with
+        {
+            Stage = 1,
+            UpdatedVertexId = updated.Value,
+            SnapshotRelativePath = "snapshot/stage-1/graph.quiver",
+        };
+        WaitForPortableArtifacts(database);
+        AssertPortableDatabase(database, state);
+        CreatePortableSnapshot(database, root, state.SnapshotRelativePath);
+    }
+
+    WriteOracle(root, state);
+    WriteBundleHashes(root);
+    VerifyBundleHashes(root);
+    Console.WriteLine($"PORTABILITY update ok: {state.Origin} -> {root}");
+}
+
+static void VerifyPortabilityBundle(string bundlePath, int expectedStage)
+{
+    string root = Path.GetFullPath(bundlePath);
+    VerifyBundleHashes(root);
+    PortabilityOracle state = ReadOracle(root);
+    if (state.Stage != expectedStage)
+        throw new InvalidOperationException(
+            $"expected stage {expectedStage} bundle, found stage {state.Stage}");
+
+    using (var database = QuiverDatabase.Open(Path.Combine(root, "graph.quiver")))
+        AssertPortableDatabase(database, state);
+    using (var snapshot = QuiverDatabase.Open(
+               Path.Combine(root, state.SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar))))
+        AssertPortableDatabase(snapshot, state);
+    var original = state with
+    {
+        Stage = 0,
+        UpdatedVertexId = null,
+        SnapshotRelativePath = "snapshot/stage-0/graph.quiver",
+    };
+    using (var recoverySnapshot = QuiverDatabase.Open(
+               Path.Combine(root, original.SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar))))
+        AssertPortableDatabase(recoverySnapshot, original);
+
+    Console.WriteLine($"PORTABILITY verify ok: {state.Origin}, stage {state.Stage} -> {root}");
+}
+
+static void WaitForPortableArtifacts(QuiverDatabase database)
+{
+    var backend = (BinaryGraphStorageBackend)database.BackendInternal;
+    backend.WaitForVectorSegmentMergeForTest();
+    backend.WaitForFullTextSegmentMergeForTest();
+    if (backend.VectorSegmentMergeErrorForTest is { } vectorError)
+        throw new InvalidOperationException("vector segment merge failed", vectorError);
+    if (backend.FullTextSegmentMergeErrorForTest is { } textError)
+        throw new InvalidOperationException("full-text segment merge failed", textError);
+}
+
+static void AssertPortableDatabase(QuiverDatabase database, PortabilityOracle state)
+{
+    ConsistencyReport consistency = database.Diagnostics.CheckConsistency();
+    if (!consistency.IsConsistent)
+        throw new InvalidOperationException(
+            $"database is inconsistent: {string.Join("; ", consistency.Issues)}");
+
+    using var read = database.BeginReadTransaction();
+    var primary = new VertexId(state.PrimaryVertexId);
+    var secondary = new VertexId(state.SecondaryVertexId);
+    Require(read.VertexExists(primary), "primary vertex is missing");
+    Require(read.VertexExists(secondary), "secondary vertex is missing");
+    Require(ReadString(read, primary, "key") == "portable-0", "primary key mismatch");
+    Require(ReadString(read, secondary, "key") == "portable-1", "secondary key mismatch");
+
+    string expectedPrimaryBody = state.Stage == 0
+        ? "日本語の可搬性を検証する文書"
+        : "日本語の可搬性を更新後も検証する文書";
+    Require(ReadString(read, primary, "body") == expectedPrimaryBody, "primary body mismatch");
+    Require(Seek(read, "portable-0").SequenceEqual([primary]), "scalar index mismatch");
+    Require(read.Query.Search("ft_portable", "可搬性", 10).ToList().Contains(primary),
+        "full-text index mismatch");
+
+    using (VectorSearchCursor vector = read.KnnSearch("vec_portable", [1f, 0f, 0f], 3))
+    {
+        Require(vector.MoveNext(), "vector index returned no result");
+        Require(vector.Current.Owner == EntityRef.From(primary), "vector nearest neighbor mismatch");
+    }
+
+    if (state.Stage == 1)
+    {
+        VertexId updated = new(state.UpdatedVertexId
+            ?? throw new InvalidOperationException("stage 1 oracle has no updated vertex"));
+        Require(read.VertexExists(updated), "updated vertex is missing");
+        Require(ReadString(read, updated, "key") == "portable-cross", "updated key mismatch");
+        Require(Seek(read, "portable-cross").SequenceEqual([updated]), "updated scalar index mismatch");
+        Require(read.Query.Search("ft_portable", "update", 10).ToList().Contains(updated),
+            "updated full-text index mismatch");
+    }
+}
+
+static IReadOnlyList<VertexId> Seek(IReadTransaction read, string key)
+{
+    var result = new List<VertexId>();
+    using EntityRefEnumerator cursor = read.SeekIndex(
+        "uq_portable_key",
+        PropertyValue.FromString(key));
+    while (cursor.MoveNext())
+    {
+        if (cursor.Current.Kind == EntityKind.Vertex)
+            result.Add(new VertexId(cursor.Current.Value));
+    }
+    return result;
+}
+
+static string ReadString(IReadTransaction read, VertexId vertex, string key)
+    => Encoding.UTF8.GetString(read.GetProperty(vertex, key).Utf8StringValue);
+
+static void CreatePortableSnapshot(
+    QuiverDatabase database,
+    string root,
+    string relativePath)
+{
+    string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    database.CreateSnapshot(path);
+    Require(File.Exists(path), $"snapshot was not created: {path}");
+    Require(Directory.Exists(path + "-ftseg"), "snapshot full-text artifacts are missing");
+    if (relativePath.Contains("stage-0", StringComparison.Ordinal))
+    {
+        Require(File.Exists(path + "-wal"), "recovery snapshot WAL is missing");
+        Require(new FileInfo(path + "-wal").Length > 0, "recovery snapshot WAL is empty");
+    }
+}
+
+static PortabilityOracle ReadOracle(string root)
+{
+    string json = File.ReadAllText(Path.Combine(root, "oracle.json"), Encoding.UTF8);
+    return JsonSerializer.Deserialize<PortabilityOracle>(json)
+        ?? throw new InvalidDataException("oracle.json is empty");
+}
+
+static void WriteOracle(string root, PortabilityOracle state)
+{
+    string json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+    File.WriteAllText(Path.Combine(root, "oracle.json"), json + "\n", new UTF8Encoding(false));
+}
+
+static void WriteBundleHashes(string root)
+{
+    string hashPath = Path.Combine(root, "hashes.sha256");
+    string[] files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        .Where(path => !Path.GetFullPath(path).Equals(
+            Path.GetFullPath(hashPath),
+            StringComparison.OrdinalIgnoreCase))
+        .OrderBy(path => Path.GetRelativePath(root, path).Replace('\\', '/'), StringComparer.Ordinal)
+        .ToArray();
+    var lines = new List<string>(files.Length);
+    foreach (string file in files)
+    {
+        string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+        string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).ToLowerInvariant();
+        lines.Add($"{hash}  {relative}");
+    }
+    File.WriteAllText(hashPath, string.Join("\n", lines) + "\n", new UTF8Encoding(false));
+}
+
+static void VerifyBundleHashes(string root)
+{
+    string hashPath = Path.Combine(root, "hashes.sha256");
+    var expectedFiles = new HashSet<string>(StringComparer.Ordinal);
+    foreach (string line in File.ReadLines(hashPath, Encoding.UTF8))
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            continue;
+        int separator = line.IndexOf("  ", StringComparison.Ordinal);
+        if (separator != 64)
+            throw new InvalidDataException($"invalid hash line: {line}");
+        string expected = line[..separator];
+        string relative = line[(separator + 2)..];
+        if (!expectedFiles.Add(relative))
+            throw new InvalidDataException($"duplicate hash entry: {relative}");
+        string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+        string actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+        if (!actual.Equals(expected, StringComparison.Ordinal))
+            throw new InvalidDataException($"hash mismatch: {relative}");
+    }
+
+    var actualFiles = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        .Where(path => !Path.GetFullPath(path).Equals(
+            Path.GetFullPath(hashPath),
+            StringComparison.OrdinalIgnoreCase))
+        .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+        .ToHashSet(StringComparer.Ordinal);
+    if (!actualFiles.SetEquals(expectedFiles))
+    {
+        string extra = string.Join(", ", actualFiles.Except(expectedFiles).Order(StringComparer.Ordinal));
+        string missing = string.Join(", ", expectedFiles.Except(actualFiles).Order(StringComparer.Ordinal));
+        throw new InvalidDataException($"hash file set mismatch; extra=[{extra}], missing=[{missing}]");
+    }
+}
+
+static void Require(bool condition, string message)
+{
+    if (!condition)
+        throw new InvalidDataException(message);
+}
+
+internal sealed record PortabilityOracle(
+    int FormatVersion,
+    string Origin,
+    int Stage,
+    long PrimaryVertexId,
+    long SecondaryVertexId,
+    long? UpdatedVertexId,
+    string SnapshotRelativePath);

@@ -26,7 +26,7 @@ namespace Quiver.Storage.Records;
 /// <c>buildAdjacencyIndex: false</c> を選び、必要なら後段で <c>QuiverDatabase.CompactAdjacency()</c> を
 /// 呼ぶことを推奨する。
 /// </summary>
-public sealed class StreamingBulkLoader : IDisposable
+internal sealed class StreamingBulkLoader : IDisposable
 {
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
@@ -34,6 +34,7 @@ public sealed class StreamingBulkLoader : IDisposable
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
     private IDisposable? _writerLease;
+    private readonly Action<BulkLoadConstraintInput>? _beforeCommit;
     private readonly Action? _afterCommit;
 
     private const int EdgeRecordSize = 28; // Id(8) + Src(8) + Tgt(8) + TypeId(4)
@@ -46,20 +47,18 @@ public sealed class StreamingBulkLoader : IDisposable
     private long _maxEdgeId = -1;
     private long _maxVertexId = -1;
 
-    private readonly List<PendingVertex> _vertices = new();
-    private readonly Dictionary<long, List<PendingProp>> _propsByVertex = new();
+    private readonly List<BulkVertexEntry> _vertices = new();
+    private readonly Dictionary<long, List<BulkPropertyEntry>> _propsByVertex = new();
     private readonly Dictionary<(long EdgeId, int KeyId), long> _edgePayloads = new();
     private PayloadLaneSpec? _payloadSpec;
     private bool _committed;
     private bool _disposed;
 
-    private record struct PendingVertex(long Id, int LabelId);
-    private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
-
     internal StreamingBulkLoader(
         VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null,
         IDisposable? writerLease = null,
+        Action<BulkLoadConstraintInput>? beforeCommit = null,
         Action? afterCommit = null)
     {
         _vertexStore = vertexStore;
@@ -67,6 +66,7 @@ public sealed class StreamingBulkLoader : IDisposable
         _propStore = propStore;
         _container = container;
         _writerLease = writerLease;
+        _beforeCommit = beforeCommit;
         _afterCommit = afterCommit;
 
         _tempPath = Path.Combine(
@@ -82,7 +82,7 @@ public sealed class StreamingBulkLoader : IDisposable
     {
         ThrowIfCommitted();
         // 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
-        _vertices.Add(new PendingVertex(id.Sequence, label.Value));
+        _vertices.Add(new BulkVertexEntry(id.Sequence, label.Value));
         if (id.Sequence > _maxVertexId) _maxVertexId = id.Sequence;
     }
 
@@ -123,7 +123,7 @@ public sealed class StreamingBulkLoader : IDisposable
 
         if (!_propsByVertex.TryGetValue(vertexId.Sequence, out var props)) // key は Sequence
             _propsByVertex[vertexId.Sequence] = props = new();
-        props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
+        props.Add(new BulkPropertyEntry(key.Value, value.Type, value.Int64Value, data));
     }
 
     /// <summary>隣接インデックスに inline する payload lane を設定する (Kind は Int64 / Double のみ)。</summary>
@@ -146,6 +146,7 @@ public sealed class StreamingBulkLoader : IDisposable
     public void Commit()
     {
         ThrowIfCommitted();
+        _beforeCommit?.Invoke(new BulkLoadConstraintInput(_vertices, _propsByVertex));
         _committed = true;
         bool succeeded = false;
 

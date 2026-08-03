@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Quiver.Core;
+using Quiver.Storage.Records;
+using Quiver.Text;
 using Xunit;
 
 namespace Quiver.Rag.Tests;
@@ -24,7 +26,14 @@ public sealed class RagStoreInitializationTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static RagStoreOptions Options(int dim = 8) => new() { EmbeddingDimensions = dim };
+    private static RagStoreOptions Options(int dim = 8) => new()
+    {
+        EmbeddingDimensions = dim,
+        IngestionProfile = new RagIngestionProfile
+        {
+            EmbeddingProfileId = "fake-embedding-v1",
+        },
+    };
 
     [Fact]
     public void Constructor_creates_expected_indexes()
@@ -96,12 +105,76 @@ public sealed class RagStoreInitializationTests : IDisposable
     }
 
     [Fact]
+    public void Japanese_variant_expansion_is_explicitly_configurable_for_rag()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        _ = new RagStore(db, Options() with
+        {
+            FullTextFilters = [new JapaneseOrthographicVariantFilter()],
+        });
+
+        FullTextIndexDefinition definition = db.Schema.ListIndexes()
+            .Select(static index => index.Definition)
+            .OfType<FullTextIndexDefinition>()
+            .Should().ContainSingle().Which;
+        definition.Filters.Should().ContainSingle()
+            .Which.Should().BeOfType<JapaneseOrthographicVariantFilter>();
+
+        using (var write = db.BeginWriteTransaction())
+        {
+            VertexId chunk = write.CreateVertex(RagSchema.ChunkLabel);
+            write.SetProperty(
+                chunk,
+                RagSchema.PropSearchText,
+                PropertyValue.FromString("渡邉直美"));
+            write.Commit();
+        }
+
+        using var read = db.BeginReadTransaction();
+        read.Query.Search(RagSchema.ChunkTextIndex, "渡辺", 10).ToList()
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Reopen_with_different_fulltext_expansion_is_rejected()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        RagStoreOptions configured = Options() with
+        {
+            FullTextFilters =
+            [
+                new JapaneseOrthographicVariantFilter(
+                    new Dictionary<char, char> { ['邉'] = '辺' }),
+            ],
+        };
+        _ = new RagStore(db, configured);
+
+        var reopenWithSameMapping = () => new RagStore(db, configured);
+        reopenWithSameMapping.Should().NotThrow();
+
+        var act = () => new RagStore(db, Options() with
+        {
+            FullTextFilters =
+            [
+                new JapaneseOrthographicVariantFilter(
+                    new Dictionary<char, char> { ['髙'] = '高' }),
+            ],
+        });
+
+        act.Should().Throw<RagIngestionProfileMismatchException>();
+    }
+
+    [Fact]
     public void Custom_vector_index_name_and_dimensions_are_honored()
     {
         using var db = QuiverDatabase.Open(_path);
         var store = new RagStore(db, new RagStoreOptions
         {
             EmbeddingDimensions = 16,
+            IngestionProfile = new RagIngestionProfile
+            {
+                EmbeddingProfileId = "fake-embedding-v1",
+            },
             VectorIndexName = "my_embeddings",
             VectorMetric = DistanceMetric.Dot,
         });
@@ -122,7 +195,7 @@ public sealed class RagStoreInitializationTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             var act = () => new RagStore(db, Options(dim: 16));
-            act.Should().Throw<InvalidOperationException>().WithMessage("*次元*");
+            act.Should().Throw<RagIngestionProfileMismatchException>();
         }
     }
 
@@ -130,13 +203,91 @@ public sealed class RagStoreInitializationTests : IDisposable
     public void Reopen_with_mismatched_metric_throws()
     {
         using (var db = QuiverDatabase.Open(_path))
-            _ = new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 8, VectorMetric = DistanceMetric.Cosine });
+            _ = new RagStore(db, Options() with { VectorMetric = DistanceMetric.Cosine });
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            var act = () => new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 8, VectorMetric = DistanceMetric.Dot });
-            act.Should().Throw<InvalidOperationException>().WithMessage("*距離尺度*");
+            var act = () => new RagStore(db, Options() with { VectorMetric = DistanceMetric.Dot });
+            act.Should().Throw<RagIngestionProfileMismatchException>();
         }
+    }
+
+    [Fact]
+    public void Reopen_with_mismatched_chunking_profile_is_rejected()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        _ = new RagStore(db, Options() with
+        {
+            Chunking = new ChunkingOptions { TargetSize = 800, Overlap = 100 },
+        });
+
+        var act = () => new RagStore(db, Options() with
+        {
+            Chunking = new ChunkingOptions { TargetSize = 400, Overlap = 50 },
+        });
+
+        var exception = act.Should()
+            .Throw<RagIngestionProfileMismatchException>()
+            .Which;
+        exception.StoredFingerprint.Should().NotBeEmpty();
+        exception.RequestedFingerprint.Should().NotBe(exception.StoredFingerprint);
+    }
+
+    [Fact]
+    public void Reopen_with_mismatched_embedding_input_template_is_rejected()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        _ = new RagStore(db, Options());
+
+        var act = () => new RagStore(db, Options() with
+        {
+            IngestionProfile = Options().IngestionProfile with
+            {
+                EmbeddingInputTemplate = RagEmbeddingInputTemplate.ChunkText,
+            },
+        });
+
+        act.Should().Throw<RagIngestionProfileMismatchException>();
+    }
+
+    [Fact]
+    public void Legacy_corpus_requires_explicit_profile_adoption_before_schema_changes()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        using (var tx = db.BeginWriteTransaction())
+        {
+            tx.EditSchema.GetOrCreateLabel(RagSchema.DocumentLabel);
+            tx.CreateVertex(RagSchema.DocumentLabel);
+            tx.Commit();
+        }
+        db.Schema.ListIndexes().Should().BeEmpty();
+
+        var reject = () => new RagStore(db, Options());
+
+        reject.Should().Throw<RagIngestionProfileMismatchException>();
+        db.Schema.ListIndexes().Should().BeEmpty(
+            "profile preflight は不一致の旧コーパスへ schema を追加しない");
+
+        var promoteWithoutBackfill = () => new RagStore(db, Options() with
+        {
+            AdoptLegacyIngestionProfile = true,
+            MetadataIndexes =
+            [
+                new RagMetadataIndex("category", "ragMetadata.category", "idx_rag_metadata_category"),
+            ],
+        });
+        promoteWithoutBackfill.Should().Throw<RagIngestionProfileMismatchException>();
+        db.Schema.ListIndexes().Should().BeEmpty();
+
+        var adopted = new RagStore(db, Options() with
+        {
+            AdoptLegacyIngestionProfile = true,
+        });
+        adopted.Options.IngestionProfile.EmbeddingProfileId
+            .Should().Be("fake-embedding-v1");
+
+        var reopen = () => new RagStore(db, Options());
+        reopen.Should().NotThrow();
     }
 
     [Fact]
@@ -162,7 +313,7 @@ public sealed class RagStoreInitializationTests : IDisposable
     public void Invalid_dimensions_throw()
     {
         using var db = QuiverDatabase.Open(_path);
-        var act = () => new RagStore(db, new RagStoreOptions { EmbeddingDimensions = 0 });
+        var act = () => new RagStore(db, Options(dim: 0));
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -170,7 +321,7 @@ public sealed class RagStoreInitializationTests : IDisposable
     public void Null_arguments_throw()
     {
         using var db = QuiverDatabase.Open(_path);
-        ((Action)(() => new RagStore(null!, Options()))).Should().Throw<ArgumentNullException>();
+        ((Action)(() => new RagStore((GraphStore)null!, Options()))).Should().Throw<ArgumentNullException>();
         ((Action)(() => new RagStore(db, null!))).Should().Throw<ArgumentNullException>();
     }
 }

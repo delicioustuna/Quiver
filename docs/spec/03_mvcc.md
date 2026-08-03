@@ -1,14 +1,15 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-01）
 
 ## 公開トランザクション能力 {#public-capabilities}
 
-公開 API は読み取り能力を `IReadTransaction`、書き込み能力を `IWriteTransaction` として分離する。
-`BeginReadTransaction()` は `IReadTransaction` を返し、query、スキーマ参照、エンティティ参照だけを公開する。
-`BeginWriteTransaction()` は `IWriteTransaction` を返し、読み取り能力に加えて mutation、スキーマ編集、commit、rollback、savepoint を公開する。
-トラバーサルは `Query`、mutation DSL は書き込みハンドルの `Mutate` から開始する。
-読み取りハンドルに書き込みメソッドを持たせて実行時に拒否する設計は採用しない。
+公開APIは`GraphStore`を既定入口とし、読み取り能力を`GraphReadAccess`、書き込み能力を`GraphWriteAccess`として型で分離する。
+通常操作は`Read` / `Write`の同期callbackで実行する。read callbackは開始時snapshotを読み、write callbackは正常終了時だけ自動commitし、例外時はrollbackする。callback scopeは終了時に失効し、同じstoreのcallbackへの再入と`Task` / `ValueTask`の返却を拒否する。
+
+長時間snapshotと明示transactionは`GraphStore.Advanced.BeginRead()` / `BeginWrite()`からsessionとして開く。`GraphWriteSession`は`Commit`または`Rollback`を明示し、未完了の`Dispose`はrollbackする。`GraphWorkspace`は同じcallback能力上にSource Generatorのtyped mapperを重ねる。
+
+公開境界は`VertexKey`、`EdgeKey`、`NexusKey`と所有権付き`GraphValue`を返す。内部transaction interface、`Quiver.Storage.*`、借用`ref struct`、物理ID、backend SPIは公開しない。queryは各accessの`Query`から開始する。
 
 ## 分離レベル {#isolation}
 
@@ -60,7 +61,7 @@ Active -> Preparing -> Committed
 writer lease の取得は既定で最大 5 秒待機する。
 `WriterContentionMode.Wait` は `WriterWaitTimeout` まで待ち、取得できなければ `WriterBusyException` を送出する。
 `WriterContentionMode.FailFast` は二本目の writer を待たずに同じ例外を送出する。
-facade、backend、manager、bulk、schema、maintenance の mutation 入口は同じ lease を使う。
+callback、session、backend、manager、bulk、schema、maintenanceのmutation入口は同じleaseを使う。
 
 ## commit {#commit}
 
@@ -76,7 +77,7 @@ active writer の dirty page は commit fsync 前にデータファイルへ書�
 commit はデータページの flush を待たず、dirty page は後続 checkpoint または退避で書く。
 バッファプール内に退避可能な frame がなくなると `TransactionTooLargeException` を送出し、その writer を自動 abort して lease を解放する。
 
-## abort と savepoint {#abort-savepoint}
+## 内部abortとsavepoint {#abort-savepoint}
 
 各 write pin は変更前のページを transaction-owned write set に保存する。
 明示 abort と commit なしの dispose は before-image を LIFO 順に適用してプロセス内の変更を復元し、`Abort` を WAL へ記録する。
@@ -95,8 +96,8 @@ commit hook は durable manifest generation を in-memory snapshotへ反映し�
 
 ラベル、Edge 型、Nexus 型、ロール、プロパティキー、索引定義はデータと同じ書き込みトランザクションに属する。
 書き込みトランザクションは `EditSchema` で未コミットの変更を参照できる。
-別の reader と `QuiverDatabase.Schema` は、その変更が commit されるまで参照できない。
-reader の `Schema` は開始時の不変な `ISchemaCatalog` を保持し、後続 commit によって変化しない。
+別のreaderは、その変更がcommitされるまで参照できない。
+内部readerのschema catalogは開始時の不変snapshotを保持し、後続commitによって変化しない。
 rollback と `RollbackTo` はスキーマページと索引定義を同じ before-image 境界まで戻す。
 未知の名前を読み取り API に渡した場合は空結果または missing を返し、トークンを作成しない。
 
@@ -110,9 +111,8 @@ page LSN が image LSN 以上なら適用済みとして読み飛ばし、loser 
 
 ## 読み取り専用トランザクション {#read-only}
 
-読み取り専用トランザクションは snapshot を取得するが、WAL record と page before-image を生成しない。
-読み取り専用 transaction から write API を呼び出すことはできない。
+読み取りcallbackと`GraphReadSession`の内部transactionはsnapshotを取得するが、WAL recordとpage before-imageを生成しない。
+読み取りaccessにはwrite APIが存在しない。
 `SnapshotRegistry` は active reader 数、最古 reader の経過時間、開始位置、高水位を保持する。
 長時間 reader は警告対象にできるが、強制失効しない。
-`IDiagnosticsApi.GetSnapshotDiagnostics()` はこの状態を public な診断値として返す。
-OpenTelemetry と EventSource は active snapshot 数と最古 snapshot age を同じ registry から観測する。
+OpenTelemetryとEventSourceはactive snapshot数と最古snapshot ageを同じregistryから観測する。

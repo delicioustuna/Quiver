@@ -9,7 +9,7 @@ namespace Quiver;
 /// 開始時点のスナップショットを読むトランザクション。
 /// エンティティとプロパティの読み取り、query、read-only schema catalog を提供する。
 /// </summary>
-public interface IReadTransaction : IDisposable
+internal interface IReadTransaction : IDisposable
 {
     /// <summary>トランザクション識別子。</summary>
     TransactionId Id { get; }
@@ -124,7 +124,7 @@ public interface IReadTransaction : IDisposable
 /// <summary>
 /// 読み取り能力に mutation、schema edit、commit/abort を加えた書き込みトランザクション。
 /// </summary>
-public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
+internal interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
 {
     /// <summary>このトランザクションで schema mutation を行う入口。</summary>
     ISchemaEditor EditSchema { get; }
@@ -259,7 +259,7 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
 }
 
 /// <summary>現在のスナップショットから読み取ったEdgeの不変な構造。</summary>
-public readonly record struct EdgeInfo(
+internal readonly record struct EdgeInfo(
     EdgeId Id,
     VertexId Source,
     VertexId Target,
@@ -268,19 +268,19 @@ public readonly record struct EdgeInfo(
 /// <summary>Vertex graph rewrite の一件分の要求。</summary>
 /// <param name="OldId">置換する既存VertexのID。</param>
 /// <param name="NewLabel">新Vertexへ設定するラベル。</param>
-public readonly record struct VertexRewriteRequest(VertexId OldId, string NewLabel);
+internal readonly record struct VertexRewriteRequest(VertexId OldId, string NewLabel);
 
 /// <summary>Vertex置換前後の論理ID。</summary>
-public readonly record struct VertexReplacement(VertexId OldId, VertexId NewId);
+internal readonly record struct VertexReplacement(VertexId OldId, VertexId NewId);
 
 /// <summary>Edge置換前後の論理 ID。</summary>
-public readonly record struct EdgeReplacement(EdgeId OldId, EdgeId NewId);
+internal readonly record struct EdgeReplacement(EdgeId OldId, EdgeId NewId);
 
 /// <summary>Nexus置換前後の論理 ID。</summary>
-public readonly record struct NexusReplacement(NexusId OldId, NexusId NewId);
+internal readonly record struct NexusReplacement(NexusId OldId, NexusId NewId);
 
 /// <summary>Vertex graph rewrite で再作成された全entityの対応表。</summary>
-public sealed class VertexGraphRewriteResult
+internal sealed class VertexGraphRewriteResult
 {
     internal VertexGraphRewriteResult(
         VertexReplacement[] vertices,
@@ -303,13 +303,13 @@ public sealed class VertexGraphRewriteResult
 }
 
 /// <summary>Nexusを構成する 1 メンバー (ロール名と参加Vertexの組)。</summary>
-public readonly record struct NexusMember(string Role, VertexId VertexId);
+internal readonly record struct NexusMember(string Role, VertexId VertexId);
 
 /// <summary>
 /// Nexusのメンバーを列挙する ref struct 列挙子。
 /// ロールフィルタ付きの場合は一致するロールのメンバーのみを返す。
 /// </summary>
-public ref struct NexusMemberEnumerator
+internal ref struct NexusMemberEnumerator
 {
     private NexusIncidenceEnumerator _inner;
     private readonly ITokenStore<RoleId> _roleTokens;
@@ -373,7 +373,7 @@ public ref struct NexusMemberEnumerator
 /// 型・ロールフィルタ付きの場合は一致するもののみを返す。
 /// 同一Nexusに複数ロールで参加している場合も重複なく列挙する。
 /// </summary>
-public ref struct NexusIdEnumerator
+internal ref struct NexusIdEnumerator
 {
     private VertexIncidenceEnumerator _inner;
     private readonly INexusStore _nexuses;
@@ -437,7 +437,7 @@ public ref struct NexusIdEnumerator
 }
 
 /// <summary><c>long</c> 列挙子を <see cref="VertexId"/> に変換するための薄いラッパ。</summary>
-public ref struct VertexIdEnumerator
+internal ref struct VertexIdEnumerator
 {
     private IEnumerator<long>? _inner;
     private VertexId _current;
@@ -479,7 +479,7 @@ public ref struct VertexIdEnumerator
 }
 
 /// <summary>scalar index が返す型付き entity 参照を列挙する前方列挙子。</summary>
-public ref struct EntityRefEnumerator
+internal ref struct EntityRefEnumerator
 {
     private IEnumerator<long>? _inner;
     private readonly Func<long, EntityRef?>? _materialize;

@@ -27,6 +27,8 @@ public sealed class NexusGeneratedCrudTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
+    private static GraphVertexRef<T> Ref<T>(VertexId id) where T : IGraphEntity<T> => new(id);
+
     [Fact]
     public void Single_role_insert_load_update_delete_roundtrips()
     {
@@ -40,8 +42,8 @@ public sealed class NexusGeneratedCrudTests : IDisposable
             acme = Company.Insert(tx, new Company { Name = "Acme" });
             id = Employment.Insert(tx, new Employment
             {
-                Employee = alice,
-                Employer = acme,
+                Employee = Ref<Person>(alice),
+                Employer = Ref<Company>(acme),
                 Title = "Engineer",
                 Year = 2020,
             });
@@ -63,8 +65,8 @@ public sealed class NexusGeneratedCrudTests : IDisposable
         {
             Employment.Update(tx, id, new Employment
             {
-                Employee = alice,
-                Employer = acme,
+                Employee = Ref<Person>(alice),
+                Employer = Ref<Company>(acme),
                 Title = "Senior Engineer",
                 Year = 2023,
             });
@@ -113,9 +115,9 @@ public sealed class NexusGeneratedCrudTests : IDisposable
 
             id = Meeting.Insert(tx, new Meeting
             {
-                Attendees = new List<GraphVertexRef<Person>> { a, b, c },
-                Organizer = a,
-                Venue = loc,
+                Attendees = new List<GraphVertexRef<Person>> { Ref<Person>(a), Ref<Person>(b), Ref<Person>(c) },
+                Organizer = Ref<Person>(a),
+                Venue = Ref<Company>(loc),
                 Topic = "Roadmap",
             });
             tx.Commit();
@@ -147,8 +149,8 @@ public sealed class NexusGeneratedCrudTests : IDisposable
             b = Person.Insert(tx, new Person { Name = "B" });
             id = Meeting.Insert(tx, new Meeting
             {
-                Attendees = new List<GraphVertexRef<Person>> { a, b },
-                Organizer = a,
+                Attendees = new List<GraphVertexRef<Person>> { Ref<Person>(a), Ref<Person>(b) },
+                Organizer = Ref<Person>(a),
                 Venue = null,
                 Topic = "Sync",
             });

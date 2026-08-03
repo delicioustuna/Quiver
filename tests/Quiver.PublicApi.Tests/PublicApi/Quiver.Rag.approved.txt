@@ -1,0 +1,209 @@
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Rag.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Rag")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("RagSandbox")]
+namespace Quiver.Rag
+{
+    public enum BlockKind
+    {
+        Paragraph = 0,
+        Heading = 1,
+        Table = 2,
+        Code = 3,
+    }
+    public sealed class ChunkDraft : System.IEquatable<Quiver.Rag.ChunkDraft>
+    {
+        public ChunkDraft(string Text, int Ordinal, string HeadingPath, int? Page, int CharStart, int CharEnd) { }
+        public int CharEnd { get; init; }
+        public int CharStart { get; init; }
+        public string HeadingPath { get; init; }
+        public int Ordinal { get; init; }
+        public int? Page { get; init; }
+        public string Text { get; init; }
+    }
+    public static class Chunker
+    {
+        public const string BlockSeparator = "\n\n";
+        public static System.Collections.Generic.IReadOnlyList<Quiver.Rag.ChunkDraft> Chunk(System.Collections.Generic.IReadOnlyList<Quiver.Rag.IngestedBlock> blocks, Quiver.Rag.ChunkingOptions? options = null) { }
+    }
+    public sealed class ChunkingOptions : System.IEquatable<Quiver.Rag.ChunkingOptions>
+    {
+        public ChunkingOptions() { }
+        public int MaxChunkSize { get; init; }
+        public int Overlap { get; init; }
+        public int TargetSize { get; init; }
+    }
+    public interface IChunkEmbedder
+    {
+        int Dimensions { get; }
+        string ProfileId { get; }
+        System.Threading.Tasks.ValueTask<float[][]> EmbedAsync(System.Collections.Generic.IReadOnlyList<string> texts, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class IngestedBlock : System.IEquatable<Quiver.Rag.IngestedBlock>
+    {
+        public IngestedBlock(Quiver.Rag.BlockKind Kind, string Text, int? HeadingLevel = default, int? Page = default) { }
+        public int? HeadingLevel { get; init; }
+        public Quiver.Rag.BlockKind Kind { get; init; }
+        public int? Page { get; init; }
+        public string Text { get; init; }
+    }
+    public sealed class IngestedDocument : System.IEquatable<Quiver.Rag.IngestedDocument>
+    {
+        public IngestedDocument(string SourceId, string Title, System.Collections.Generic.IReadOnlyDictionary<string, string> Metadata, System.Collections.Generic.IReadOnlyList<Quiver.Rag.IngestedBlock> Blocks) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Rag.IngestedBlock> Blocks { get; init; }
+        public string? ContentRevision { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Metadata { get; init; }
+        public string SourceId { get; init; }
+        public string Title { get; init; }
+    }
+    public static class IngestedDocumentJson
+    {
+        public static System.Text.Json.JsonSerializerOptions Options { get; }
+        public static Quiver.Rag.IngestedDocument? Deserialize(string json) { }
+        public static string Serialize(Quiver.Rag.IngestedDocument document) { }
+    }
+    public sealed class RagDocumentRef : System.IEquatable<Quiver.Rag.RagDocumentRef>
+    {
+        public RagDocumentRef(string SourceId, string Title) { }
+        public string SourceId { get; init; }
+        public string Title { get; init; }
+    }
+    public enum RagEmbeddingInputTemplate
+    {
+        ChunkText = 0,
+        HeadingPathAndChunkText = 1,
+    }
+    public enum RagFusionMethod
+    {
+        TextOnly = 0,
+        VectorOnly = 1,
+        ReciprocalRankFusion = 2,
+    }
+    public sealed class RagHit : System.IEquatable<Quiver.Rag.RagHit>
+    {
+        public RagHit(string ChunkText, string HeadingPath, Quiver.Rag.RagDocumentRef Document, int Rank, Quiver.VertexKey ChunkVertexId, Quiver.Rag.RagScore Score) { }
+        public string ChunkText { get; init; }
+        public Quiver.VertexKey ChunkVertexId { get; init; }
+        public Quiver.Rag.RagDocumentRef Document { get; init; }
+        public string HeadingPath { get; init; }
+        public int Rank { get; init; }
+        public Quiver.Rag.RagScore Score { get; init; }
+    }
+    public sealed class RagIngestionProfile : System.IEquatable<Quiver.Rag.RagIngestionProfile>
+    {
+        public RagIngestionProfile() { }
+        public string ChunkingProfileId { get; init; }
+        public Quiver.Rag.RagEmbeddingInputTemplate EmbeddingInputTemplate { get; init; }
+        public required string EmbeddingProfileId { get; init; }
+        public string NormalizationProfileId { get; init; }
+    }
+    public sealed class RagIngestionProfileMismatchException : System.InvalidOperationException
+    {
+        public RagIngestionProfileMismatchException(string storedFingerprint, string requestedFingerprint, string message) { }
+        public string RequestedFingerprint { get; }
+        public string StoredFingerprint { get; }
+    }
+    public sealed class RagMetadata : System.IEquatable<Quiver.Rag.RagMetadata>
+    {
+        public RagMetadata(string SourceId, string Title, System.Collections.Generic.IReadOnlyDictionary<string, string> Metadata) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Metadata { get; init; }
+        public string SourceId { get; init; }
+        public string Title { get; init; }
+    }
+    public sealed class RagMetadataIndex : System.IEquatable<Quiver.Rag.RagMetadataIndex>
+    {
+        public RagMetadataIndex(string MetadataKey, string PropertyKey, string IndexName) { }
+        public string IndexName { get; init; }
+        public string MetadataKey { get; init; }
+        public string PropertyKey { get; init; }
+    }
+    public static class RagSchema
+    {
+        public const string ChunkLabel = "Chunk";
+        public const string ChunkTextIndex = "idx_rag_chunk_text";
+        public const string ChunkVectorIndex = "rag_chunk_embedding";
+        public const string DocSourceIndex = "idx_rag_doc_source";
+        public const string DocumentLabel = "Document";
+        public const string HasChunkType = "HAS_CHUNK";
+        public const string IngestionProfileLabel = "RagIngestionProfile";
+        public const string NextChunkType = "NEXT_CHUNK";
+        public const string PropCharEnd = "charEnd";
+        public const string PropCharStart = "charStart";
+        public const string PropContentHash = "contentHash";
+        public const string PropContentRevision = "contentRevision";
+        public const string PropEmbedding = "embedding";
+        public const string PropHeadingPath = "headingPath";
+        public const string PropIngestedAt = "ingestedAt";
+        public const string PropIngestionFingerprint = "ingestionFingerprint";
+        public const string PropMetadataJson = "metadataJson";
+        public const string PropOrdinal = "ordinal";
+        public const string PropPage = "page";
+        public const string PropProfileDescriptor = "profileDescriptor";
+        public const string PropProfileFingerprint = "profileFingerprint";
+        public const string PropSearchText = "searchText";
+        public const string PropSourceId = "sourceId";
+        public const string PropText = "text";
+        public const string PropTitle = "title";
+    }
+    public sealed class RagScore : System.IEquatable<Quiver.Rag.RagScore>
+    {
+        public RagScore(double? Bm25Score, float? VectorSimilarity, double FusedScore, Quiver.Rag.RagFusionMethod FusionMethod, int ReciprocalRankConstant) { }
+        public double? Bm25Score { get; init; }
+        public double FusedScore { get; init; }
+        public Quiver.Rag.RagFusionMethod FusionMethod { get; init; }
+        public int ReciprocalRankConstant { get; init; }
+        public float? VectorSimilarity { get; init; }
+    }
+    public sealed class RagSearchOptions : System.IEquatable<Quiver.Rag.RagSearchOptions>
+    {
+        public RagSearchOptions() { }
+        public bool IncludeDocument { get; init; }
+        public int K { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string>? MetadataEquals { get; init; }
+        public System.Func<Quiver.Rag.RagMetadata, bool>? MetadataFilter { get; init; }
+        public int NeighborExpansion { get; init; }
+    }
+    public sealed class RagSearcher
+    {
+        public RagSearcher(Quiver.Rag.RagStore store) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Rag.RagHit> Search(string queryText, float[]? queryVector, Quiver.Rag.RagSearchOptions? options = null) { }
+    }
+    public sealed class RagStore
+    {
+        public RagStore(Quiver.GraphStore store, Quiver.Rag.RagStoreOptions options) { }
+        public bool FullTextEnabled { get; }
+        public Quiver.GraphStore GraphStore { get; }
+        public Quiver.Rag.RagStoreOptions Options { get; }
+        public string VectorIndexName { get; }
+        public bool DeleteDocument(string sourceId) { }
+        public System.Threading.Tasks.ValueTask<Quiver.Rag.UpsertResult> UpsertDocumentAsync(Quiver.Rag.IngestedDocument doc, Quiver.Rag.IChunkEmbedder embedder, System.Threading.CancellationToken ct = default) { }
+    }
+    public sealed class RagStoreOptions : System.IEquatable<Quiver.Rag.RagStoreOptions>
+    {
+        public RagStoreOptions() { }
+        public bool AdoptLegacyIngestionProfile { get; init; }
+        public Quiver.Rag.ChunkingOptions Chunking { get; init; }
+        public required int EmbeddingDimensions { get; init; }
+        public bool EnableFullTextIndex { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Text.ITokenFilter> FullTextFilters { get; init; }
+        public required Quiver.Rag.RagIngestionProfile IngestionProfile { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Rag.RagMetadataIndex> MetadataIndexes { get; init; }
+        public string VectorIndexName { get; init; }
+        public Quiver.Core.DistanceMetric VectorMetric { get; init; }
+    }
+    public enum RagUpsertDisposition
+    {
+        Created = 0,
+        Unchanged = 1,
+        AttributesUpdated = 2,
+        Replaced = 3,
+    }
+    public readonly struct UpsertResult : System.IEquatable<Quiver.Rag.UpsertResult>
+    {
+        public UpsertResult(Quiver.Rag.RagUpsertDisposition Disposition, int ChunkCount, Quiver.VertexKey DocumentVertexId, Quiver.VertexKey? ReplacedDocumentVertexId) { }
+        public int ChunkCount { get; init; }
+        public Quiver.Rag.RagUpsertDisposition Disposition { get; init; }
+        public Quiver.VertexKey DocumentVertexId { get; init; }
+        public Quiver.VertexKey? ReplacedDocumentVertexId { get; init; }
+        public bool Unchanged { get; }
+    }
+}

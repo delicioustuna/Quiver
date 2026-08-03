@@ -162,7 +162,7 @@ public sealed class PersistenceH0Result
 public sealed record PersistenceClusterEstimate(int ClusterCount, float? SeparationScale, bool UsedDisconnectedComponents);
 
 /// <summary>vector index の snapshot 全体から 0 次パーシステンスを計算する。</summary>
-public static class PersistenceH0Algorithms
+internal static class PersistenceH0Algorithms
 {
     /// <summary>
     /// 指定 vector index が対象にする現在の snapshot 可視な全 vector から H0 barcode を計算する。

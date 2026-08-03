@@ -122,6 +122,52 @@ public class GraphVertexGeneratorTests
     }
 
     [Fact]
+    public void Generator_emits_unique_scalar_index_definition()
+    {
+        var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
+        var engineRef = typeof(Quiver.IWriteTransaction).Assembly.Location;
+
+        var source = """
+            using Quiver;
+            using Quiver.Api;
+            namespace MyApp;
+
+            [Vertex("Person")]
+            public partial class Person
+            {
+                [Property, Indexed("person_name", Unique = true)]
+                public string Name { get; set; } = "";
+            }
+            """;
+
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(Path.Combine(
+                Path.GetDirectoryName(typeof(object).Assembly.Location)!,
+                "System.Runtime.dll")),
+            MetadataReference.CreateFromFile(attributeRef),
+            MetadataReference.CreateFromFile(engineRef),
+        };
+
+        var compilation = CSharpCompilation.Create("TestAssembly",
+            syntaxTrees: [tree],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        compilation.GetDiagnostics().Should().NotContain(
+            diagnostic => diagnostic.Severity == DiagnosticSeverity.Error,
+            "the source-generator fixture must bind all attributes");
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new GraphVertexGenerator());
+        driver = driver.RunGenerators(compilation);
+
+        var generatedSource = driver.GetRunResult().GeneratedTrees.Single().ToString();
+        generatedSource.Should().Contain(
+            "new Quiver.ScalarIndexDefinition(\"person_name\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"Name\", \"Person\"), Quiver.IndexKind.StringEquality, true)");
+    }
+
+    [Fact]
     public void Generator_emits_MultiValue_List_property()
     {
         var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;

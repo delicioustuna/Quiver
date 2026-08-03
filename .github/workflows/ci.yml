@@ -1,7 +1,6 @@
 name: CI
 
-# CI-1: build + test。段階導入のため初期は windows-latest 単独で緑化し、
-# 安定後に matrix へ ubuntu-latest を追加する (tasks/ops.md CI-1 の方針)。
+# build + test。Windows / Linux の双方を同じ固定 gate とする。
 on:
   push:
     branches: [main]
@@ -23,9 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 段階導入: まず windows-latest のみ。Linux 固有の差分 (path 区切り /
-        # MMF 挙動 / 大文字小文字) を潰してから後続 PR で ubuntu-latest を足す。
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 

@@ -16,7 +16,7 @@ namespace Quiver.Api;
 /// 同じ型の別Nexusを続けて作成する用途にビルダを再利用できる。
 /// </para>
 /// </remarks>
-public sealed class NexusBuilder
+internal sealed class NexusBuilder
 {
     private readonly IWriteTransaction _tx;
     private readonly string _type;

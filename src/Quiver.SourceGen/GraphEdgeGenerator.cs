@@ -70,6 +70,7 @@ public sealed class GraphEdgeGenerator : IIncrementalGenerator
                 : classSymbol.ContainingNamespace.ToDisplayString(),
             ClassName = classSymbol.Name,
             EdgeType = edgeType,
+            IsPublic = classSymbol.DeclaredAccessibility == Accessibility.Public,
             SourceFqn = sourceFqn,
             TargetFqn = targetFqn,
         };

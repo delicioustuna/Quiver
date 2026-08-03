@@ -7,7 +7,7 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>形式概念の列挙方法。</summary>
-public enum FormalConceptEnumerationStrategy
+internal enum FormalConceptEnumerationStrategy
 {
     /// <summary>一括列挙では Close-by-One、継続可能なページ列挙では NextClosure を選ぶ。</summary>
     Auto = 0,
@@ -18,7 +18,7 @@ public enum FormalConceptEnumerationStrategy
 }
 
 /// <summary>形式概念列挙の終了理由。</summary>
-public enum FormalConceptTerminationReason
+internal enum FormalConceptTerminationReason
 {
     /// <summary>文脈の全概念を列挙した。</summary>
     Completed = 0,
@@ -41,7 +41,7 @@ public enum FormalConceptTerminationReason
 }
 
 /// <summary>Nexus incidence から形式概念を列挙する際のフィルタと有限実行上限。</summary>
-public sealed record FormalConceptOptions
+internal sealed record FormalConceptOptions
 {
     /// <summary>結果に含める extent の最小要素数。</summary>
     public int MinExtent { get; init; }
@@ -70,13 +70,13 @@ public sealed record FormalConceptOptions
 /// <summary>Galois 閉包で得た一つの形式概念。</summary>
 /// <param name="Extent">対象の決定的な full packed-ID 順配列。</param>
 /// <param name="Intent">属性 Nexus の決定的な full packed-ID 順配列。</param>
-public sealed record FormalConcept(IReadOnlyList<EntityRef> Extent, IReadOnlyList<EntityRef> Intent);
+internal sealed record FormalConcept(IReadOnlyList<EntityRef> Extent, IReadOnlyList<EntityRef> Intent);
 
 /// <summary>
 /// 同じ transaction object とその同じ snapshot/context だけで使える継続位置。
 /// 永続化、reopen、別 transaction への受け渡しはサポートしない。
 /// </summary>
-public sealed class FormalConceptContinuation
+internal sealed class FormalConceptContinuation
 {
     internal FormalConceptContinuation(
         IReadTransaction transaction,
@@ -124,7 +124,7 @@ public sealed class FormalConceptContinuation
 }
 
 /// <summary>形式概念列挙の決定的な prefix と終了状態。</summary>
-public sealed class FormalConceptResult
+internal sealed class FormalConceptResult
 {
     internal FormalConceptResult(
         IReadOnlyList<FormalConcept> concepts,
@@ -176,7 +176,7 @@ public sealed class FormalConceptResult
 }
 
 /// <summary>Nexus と member Vertex の incidence を formal context として形式概念を列挙する。</summary>
-public static class FormalConceptAlgorithms
+internal static class FormalConceptAlgorithms
 {
     /// <summary>
     /// 指定型の可視 Nexus を属性、指定ロールの member Vertex を対象として概念を列挙する。

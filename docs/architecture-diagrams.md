@@ -86,14 +86,21 @@ sequenceDiagram
     participant DB as IWriteTransaction
 
     Ext->>Rag: UpsertDocumentAsync(IngestedDocument)
-    Rag->>Chk: ブロック列をチャンク分割
-    Rag->>Emb: EmbedAsync(チャンクテキスト[])
-    Emb-->>Rag: float[][]
-    Rag->>DB: Document Vertex作成
-    Rag->>DB: Chunk Vertex N 件作成
-    Rag->>DB: HAS_CHUNK / NEXT_CHUNK 作成
-    Rag->>DB: 全文インデックス登録 + ベクトル登録
-    Rag->>DB: Commit
+    Rag->>Rag: corpus profile と document fingerprint を検証
+    alt fingerprint が完全一致
+        Rag-->>Ext: Unchanged（DB変更なし）
+    else Blocks は同じで属性だけ変更
+        Rag->>DB: title / metadata / revision 更新
+        Rag->>DB: Commit
+        Rag-->>Ext: AttributesUpdated
+    else Blocks が変更
+        Rag->>Chk: ブロック列をチャンク分割
+        Rag->>Emb: EmbedAsync(チャンクテキスト[])
+        Emb-->>Rag: float[][]
+        Rag->>DB: Document / Chunk / relation / vector を置換
+        Rag->>DB: Commit
+        Rag-->>Ext: Created または Replaced
+    end
 ```
 
 ---
@@ -104,13 +111,16 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    Doc["Document<br/>sourceId, title,<br/>contentHash"]
+    Profile["RagIngestionProfile<br/>profileFingerprint"]
+    Doc["Document<br/>sourceId, title, contentHash,<br/>ingestionFingerprint, metadataJson"]
     C1["Chunk #1<br/>text, ordinal"]
     C2["Chunk #2"]
     C3["Chunk #3"]
     VecIdx[("ベクトルインデックス<br/>rag_chunk_embedding")]
     FtsIdx[("全文インデックス<br/>idx_rag_chunk_text")]
+    MetaIdx[("任意 metadata scalar index")]
 
+    Profile -. corpus contract .-> Doc
     Doc -- HAS_CHUNK --> C1
     Doc -- HAS_CHUNK --> C2
     Doc -- HAS_CHUNK --> C3
@@ -120,6 +130,7 @@ flowchart LR
     C2 -.- VecIdx
     C3 -.- VecIdx
     C1 -.- FtsIdx
+    Doc -. opt-in .- MetaIdx
     C2 -.- FtsIdx
     C3 -.- FtsIdx
 ```

@@ -875,7 +875,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         var p = Quiver.Api.Match.GraphPattern.Vertex("p", "Person");
         var q = Quiver.Api.Match.GraphPattern.Vertex("q", "Person");
 
-        var results = g.Match(p.Out<KnowsEdge>(q))
+        var results = g.Match(p.Out("KNOWS", q))
                        .Return(ctx => ctx.Load<PersonVertex>("q"))
                        .ToList();
 

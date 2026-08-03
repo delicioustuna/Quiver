@@ -5,7 +5,7 @@ namespace Quiver.Storage.Records;
 /// <summary>
 /// <see cref="PropertyValueType"/> から <see cref="PropertyTypeFlags"/> への分岐なしルックアップ。
 /// </summary>
-public static class PropertyValueTypeExtensions
+internal static class PropertyValueTypeExtensions
 {
     private static readonly PropertyTypeFlags[] s_table =
     [

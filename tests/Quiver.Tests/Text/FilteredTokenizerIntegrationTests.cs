@@ -98,4 +98,97 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
         read.Query.Search("reopen_idx", "durable", 10).ToList()
             .Should().ContainSingle();
     }
+
+    [Fact]
+    public void Japanese_variant_mapping_is_opt_in_and_matches_after_tokenization()
+    {
+        _db.EditSchema(schema =>
+        {
+            schema.CreateIndex(new FullTextIndexDefinition(
+                "plain_idx",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "plain", "Doc"),
+                TokenizerId: MixedBigramTokenizer.DefaultTokenizerId));
+            schema.CreateIndex(new FullTextIndexDefinition(
+                "variant_idx",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "variant", "Doc"),
+                TokenizerId: MixedBigramTokenizer.DefaultTokenizerId,
+                Filters: [new JapaneseOrthographicVariantFilter()]));
+        });
+
+        using (var write = _db.BeginWriteTransaction())
+        {
+            VertexId document = write.CreateVertex("Doc");
+            write.SetProperty(
+                document,
+                "plain",
+                PropertyValue.FromString("渡邉直美"));
+            write.SetProperty(
+                document,
+                "variant",
+                PropertyValue.FromString("渡邉直美"));
+            write.Commit();
+        }
+
+        using var read = _db.BeginReadTransaction();
+        read.Query.Search("plain_idx", "渡辺", 10).ToList().Should().BeEmpty(
+            "既定の全文索引は異字体を暗黙に変更しない");
+        read.Query.Search("variant_idx", "渡辺", 10).ToList()
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Japanese_variant_mapping_is_reconstructed_after_reopen()
+    {
+        string path = Path.Combine(_dir, "variant-reopen.quiver");
+        using (var database = QuiverDatabase.Open(path))
+        {
+            database.EditSchema(schema => schema.CreateIndex(
+                new FullTextIndexDefinition(
+                    "variant_idx",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"),
+                    TokenizerId: MixedBigramTokenizer.DefaultTokenizerId,
+                    Filters:
+                    [
+                        new JapaneseOrthographicVariantFilter(
+                            new Dictionary<char, char> { ['邉'] = '辺' }),
+                    ])));
+            using var write = database.BeginWriteTransaction();
+            VertexId document = write.CreateVertex("Doc");
+            write.SetProperty(
+                document,
+                "body",
+                PropertyValue.FromString("渡邉直美"));
+            write.Commit();
+        }
+
+        using var reopened = QuiverDatabase.Open(path);
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Search("variant_idx", "渡辺", 10).ToList()
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Different_variant_mapping_is_not_treated_as_same_definition()
+    {
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(
+            "variant_conflict",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"),
+            Filters:
+            [
+                new JapaneseOrthographicVariantFilter(
+                    new Dictionary<char, char> { ['邉'] = '辺' }),
+            ])));
+
+        var act = () => _db.EditSchema(schema => schema.CreateIndex(
+            new FullTextIndexDefinition(
+                "variant_conflict",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"),
+                Filters:
+                [
+                    new JapaneseOrthographicVariantFilter(
+                        new Dictionary<char, char> { ['邉'] = '邊' }),
+                ])));
+
+        act.Should().Throw<ConstraintException>();
+    }
 }

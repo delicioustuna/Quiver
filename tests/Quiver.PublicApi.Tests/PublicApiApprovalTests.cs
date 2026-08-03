@@ -18,9 +18,10 @@ public sealed class PublicApiApprovalTests
 {
     public static IEnumerable<object[]> StableAssemblies()
     {
-        // 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに
-        // 統合されたため、安定性の対象は 1 アセンブリのみ (3 つの typeof はすべて同一 Assembly を指す)。
-        yield return new object[] { typeof(global::Quiver.QuiverDatabase).Assembly };
+        // 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに統合されている。
+        // 安定対象の add-on である Quiver.Rag は独立 assembly として固定する。
+        yield return new object[] { typeof(global::Quiver.GraphStore).Assembly };
+        yield return new object[] { typeof(global::Quiver.Rag.RagStore).Assembly };
     }
 
     [Theory]
@@ -71,6 +72,46 @@ public sealed class PublicApiApprovalTests
                 File.Delete(receivedPath);
             }
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(StableAssemblies))]
+    public void PublicApi_does_not_export_storage_ref_struct_or_backend_spi(Assembly assembly)
+    {
+        Type[] exported = assembly.GetExportedTypes();
+
+        Type[] storageTypes = exported
+            .Where(type => type.Namespace is not null
+                && type.Namespace.StartsWith("Quiver.Storage", StringComparison.Ordinal))
+            .ToArray();
+        Type[] byRefLikeTypes = exported.Where(type => type.IsByRefLike).ToArray();
+        Type[] backendTypes = exported
+            .Where(type => type.Name == "IGraphStorageBackend"
+                || type.Name == "IGraphStorageBackendFactory")
+            .ToArray();
+        string[] removedContractTypes =
+        [
+            "QuiverDatabase",
+            "QuiverDatabaseOptions",
+            "IReadTransaction",
+            "IWriteTransaction",
+            "ReadTransaction",
+            "WriteTransaction",
+            "GraphTraversalSource",
+            "GraphMutationSource",
+            "VertexId",
+            "EdgeId",
+            "NexusId",
+            "EntityRef",
+        ];
+        Type[] legacyContractTypes = exported
+            .Where(type => removedContractTypes.Contains(type.Name, StringComparer.Ordinal))
+            .ToArray();
+
+        storageTypes.Should().BeEmpty("storage record and cursor types are implementation details");
+        byRefLikeTypes.Should().BeEmpty("the stable public contract must use owned managed values and cursors");
+        backendTypes.Should().BeEmpty("backend implementations are selected by product options, not injected as a public SPI");
+        legacyContractTypes.Should().BeEmpty("the adopted contract uses GraphStore, owned values, and opaque keys");
     }
 
     private static string Normalize(string value) =>

@@ -1,12 +1,15 @@
 # ストレージ & ページング
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-02）
 
 ## ページフォーマット {#page-format}
 
 - **ページサイズ**: 8,192 バイト (`PagedFile.PageSizeConst`)
 - **ページヘッダ**: 40 バイト（`QUIVER-SW` magic、family version、PageId、PageKind、LSN、CRC32 checksum）
 - **ボディ**: `BodySize = PageSize - HeaderSize` バイト
+
+page headerの予約byteは0である。同じfamily versionを名乗るpageに非0の未知header extensionがある場合、
+`Open`はWAL sidecarを作成する前に`CorruptionException`で拒否する。
 
 ## PagedFile {#paged-file}
 
@@ -87,6 +90,8 @@ HNSW artifact と versioned manifest は primary property から再構築可能�
 カタログテナントは、論理ストア名（インデックス名、FT インデックス名など）から
 その `fileKind` バイトへのマッピングを保持する。カタログ自体もコンテナ内のテナントであり、
 WAL リカバリフェーズ中に復旧される。
+現行buildが利用しないtenant descriptorもopaque entryとしてcatalogへ保持される。旧buildが無視しても
+primary stateとrecoveryの意味が変わらないoptional dataに限り、既知tenantの更新後もdescriptorとpage tableを維持する。
 
 正常終了後の再オープンでは、カタログから versioned entity store、owner-bound property store、primary payload store、adjacency segment を同じ形式で復元する。
 カタログは checkpoint 済み committed high-water と次の transaction ID も保持する。
@@ -108,6 +113,8 @@ reader の終了は待たない。
 offline operation である。先頭ページを `PagedFile` で開く前に raw inspection し、
 `QUIVER-SW` magic と family version を判定する。現行 family version 2 のデータベースは
 先頭ページの checksum まで検証した後、ファイルを書き換えず `AlreadyCurrent` を返す。
+通常の`Open`も同じraw inspectionをWAL作成より前に行い、非対応familyと未知header extensionを元fileの
+書換えなしで拒否する。
 
 現行 build に登録された移行 step がない source version は、source と target version を持つ
 `StorageUpgradeNotSupportedException` で拒否する。v0.4.0 と現行形式はどちらも family version 2

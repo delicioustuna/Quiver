@@ -59,6 +59,7 @@ public class GraphNexusGeneratorTests
     // 属性コンストラクタの束縛が壊れてロール名などの引数が読めなくなる)。
     private const string Header = """
         using System.Collections.Generic;
+        using Quiver;
         using Quiver.Api;
         """;
 
@@ -274,10 +275,10 @@ public class GraphNexusGeneratorTests
     }
 
     [Fact]
-    public void Typed_traversal_call_sites_compile()
+    public void Typed_workspace_call_sites_compile()
     {
-        // 単一・複数・nullable 省略可能ロール、同一Vertex型の複数ロールを含む
-        // 呼び出しコードが生成糖衣とあわせてコンパイルできることを検証する。
+        // 単一・複数・nullable 省略可能ロールを含む Nexus が、公開 workspace
+        // 境界から型を保ったまま追加・復元できることを検証する。
         var source = Header + VertexStub + """
 
             [Nexus("Fact")]
@@ -292,19 +293,23 @@ public class GraphNexusGeneratorTests
 
             public static class CallSites
             {
-                public static void Chains(Quiver.Api.GraphTraversalSource g)
+                public static GraphNexusEntity<Fact> Add(
+                    TypedGraphWriteScope write,
+                    GraphEntity<Person> subject,
+                    GraphEntity<Person> @object,
+                    GraphEntity<Place> place)
                 {
-                    // 同一Vertex型 (Person) の複数ロール: Subject 起点から Object へ。
-                    List<Person> objects = g.Vertices<Person>().FactAsSubject().Object().ToList();
-                    // 複数メンバーロールはVertexトラバーサルを返す (コレクションを行に載せない)。
-                    List<Person> attendees = g.Vertices<Person>().FactAsAttendees().Attendees().ToList();
-                    // co-membership: 起点を除いた同ロールメンバー。
-                    List<Person> others = g.Vertices<Person>().FactAsAttendees().OtherAttendees().ToList();
-                    // nullable 省略可能ロールも通常のVertexトラバーサルへ戻る。
-                    List<Place> places = g.Vertices<Person>().FactAsSubject().Location().ToList();
-                    // Nexusプロパティの式ツリーフィルタ。
-                    long n = g.Vertices<Person>().FactAsSubject().Has(f => f.Predicate, "born-in").Count();
+                    return write.Add(new Fact
+                    {
+                        Subject = subject,
+                        Object = @object,
+                        Attendees = new[] { (GraphVertexRef<Person>)subject, @object },
+                        Location = place,
+                        Predicate = "born-in",
+                    });
                 }
+
+                public static Fact Get(TypedGraphReadScope read, GraphNexusEntity<Fact> fact) => read.Get(fact);
             }
             """;
 
@@ -315,10 +320,10 @@ public class GraphNexusGeneratorTests
     }
 
     [Fact]
-    public void Wrong_vertex_type_role_expansion_is_compile_error()
+    public void Wrong_vertex_type_role_assignment_is_compile_error()
     {
-        // Subject ロールは Person に束縛されているため、Place のトラバーサルから
-        // FactAsSubject を呼ぶコードはコンパイルエラーになる (実行時エラーにしない)。
+        // Subject ロールは Person に束縛されているため、Place の参照を代入する
+        // コードはコンパイルエラーになる (実行時エラーにしない)。
         var source = Header + VertexStub + """
 
             [Nexus("Fact")]
@@ -330,9 +335,9 @@ public class GraphNexusGeneratorTests
 
             public static class CallSites
             {
-                public static void Wrong(Quiver.Api.GraphTraversalSource g)
+                public static Fact Wrong(GraphEntity<Place> place)
                 {
-                    g.Vertices<Place>().FactAsSubject();
+                    return new Fact { Subject = place, Object = place };
                 }
             }
             """;
@@ -340,8 +345,7 @@ public class GraphNexusGeneratorTests
         var (_, diagnostics, compilation) = Run(source);
 
         diagnostics.Value.Should().BeEmpty();
-        // レシーバ型不一致の拡張メソッド解決失敗 (CS1929) を期待する。
-        CompileErrors(compilation).Should().Contain(d => d.Id == "CS1929" || d.Id == "CS1061");
+        CompileErrors(compilation).Should().Contain(d => d.Id == "CS0029");
     }
 
     private static int CountOccurrences(string haystack, string needle)

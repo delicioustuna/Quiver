@@ -9,7 +9,7 @@ namespace Quiver.Api.Match;
 /// Match DSL の <see cref="ReturnClause{TResult}"/> 内で射影クロージャに渡される
 /// 行コンテキスト。パターン変数名から <see cref="MatchContextRow"/> を解決する。
 /// </summary>
-public sealed class MatchContext
+internal sealed class MatchContext
 {
     private readonly QueryRow _row;
     private readonly IReadTransaction _tx;
@@ -66,7 +66,7 @@ public sealed class MatchContext
 }
 
 /// <summary><see cref="MatchContext.this[string]"/> から取り出される個別Vertexへの参照。</summary>
-public readonly struct MatchContextRow
+internal readonly struct MatchContextRow
 {
     private readonly VertexId _vertexId;
     private readonly IReadTransaction _tx;

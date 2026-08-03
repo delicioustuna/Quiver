@@ -59,7 +59,7 @@ internal readonly record struct PropertyVersionRef(long Value)
 }
 
 /// <summary>プロパティ値の物理型。オンディスクのプロパティレコードに 1 バイトで格納される。</summary>
-public enum PropertyValueType : byte
+internal enum PropertyValueType : byte
 {
     /// <summary>真偽値 (<see cref="bool"/>)。</summary>
     Bool = 1,
@@ -81,7 +81,7 @@ public enum PropertyValueType : byte
 /// プロパティの 1 値を型タグ付きで保持する読み取り専用ビュー。スカラ値はインラインの long に、
 /// 文字列 / バイト列は <see cref="ReadOnlySpan{T}"/> に保持する (アロケーションを避けるため ref struct)。
 /// </summary>
-public readonly ref struct PropertyValue
+internal readonly ref struct PropertyValue
 {
     private readonly long _scalar;
     private readonly ReadOnlySpan<byte> _span;
@@ -202,7 +202,7 @@ internal readonly ref struct PropertyVersionRecord
 }
 
 /// <summary>所有者に属するプロパティのキー、多重度、値を表します。物理レコードIDは公開しません。</summary>
-public readonly ref struct PropertyEntry
+internal readonly ref struct PropertyEntry
 {
     internal PropertyEntry(PropertyKeyId keyId, PropertyCardinality cardinality, PropertyValue value)
     {
@@ -222,7 +222,7 @@ public readonly ref struct PropertyEntry
 }
 
 /// <summary>単一エンティティの可視なプロパティを列挙する前方カーソルです。</summary>
-public ref struct PropertyCursor
+internal ref struct PropertyCursor
 {
     private readonly IPropertyStore _store;
     private readonly EntityRef _owner;
@@ -287,7 +287,7 @@ public ref struct PropertyCursor
 /// <see cref="PropertyCursor"/> をラップし、指定 <see cref="PropertyKeyId"/> に一致する
 /// エントリだけを返す。
 /// </summary>
-public ref struct PropertyValuesEnumerator
+internal ref struct PropertyValuesEnumerator
 {
     private PropertyCursor _inner;
     private readonly PropertyKeyId _keyId;

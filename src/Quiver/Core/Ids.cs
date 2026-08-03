@@ -11,7 +11,7 @@ namespace Quiver.Core;
 
 /// <summary>Vertexの識別子。<paramref name="Value"/> は世代 (上位) と slot 局所 ID (下位) を詰めた packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct VertexId(long Value)
+internal readonly record struct VertexId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly VertexId Invalid = new(-1);
@@ -41,7 +41,7 @@ public readonly record struct VertexId(long Value)
 
 /// <summary>Edge (エッジ) の識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct EdgeId(long Value)
+internal readonly record struct EdgeId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly EdgeId Invalid = new(-1);
@@ -67,7 +67,7 @@ public readonly record struct EdgeId(long Value)
 
 /// <summary>Nexusの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct NexusId(long Value)
+internal readonly record struct NexusId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly NexusId Invalid = new(-1);

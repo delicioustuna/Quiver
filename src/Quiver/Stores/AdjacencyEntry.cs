@@ -40,7 +40,7 @@ internal readonly struct AdjacencySegmentEntry
 /// <summary>
 /// adjacency segment の payload lane に格納する値の種別。
 /// </summary>
-public enum PayloadKind : byte
+internal enum PayloadKind : byte
 {
     /// <summary>payload lane 無し。</summary>
     None = 0,
@@ -56,7 +56,7 @@ public enum PayloadKind : byte
 /// <see cref="DefaultRaw"/> はそのキーの値を持たない (または型が異なる) エッジに代入する生の
 /// 64bit 値。既定値ポリシーはビュー構築時に固定される。
 /// </summary>
-public readonly struct PayloadLaneSpec
+internal readonly struct PayloadLaneSpec
 {
     /// <summary>inline する値の種別。</summary>
     public readonly PayloadKind Kind;

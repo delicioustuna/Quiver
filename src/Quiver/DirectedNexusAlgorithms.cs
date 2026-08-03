@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>有向Nexusの探索が終了した理由。</summary>
-public enum DirectedNexusTerminationReason
+internal enum DirectedNexusTerminationReason
 {
     /// <summary>探索空間を完走した。</summary>
     Completed,
@@ -16,7 +16,7 @@ public enum DirectedNexusTerminationReason
 }
 
 /// <summary>最短導出でtailコストを集約する方式。</summary>
-public enum DerivationCostMode
+internal enum DerivationCostMode
 {
     /// <summary>Nexusコストと全tailの導出コストを加算する。</summary>
     Additive,
@@ -28,10 +28,10 @@ public enum DerivationCostMode
 /// <param name="transaction">探索と同じsnapshotに束縛された読み取りトランザクション。</param>
 /// <param name="nexusId">コストを取得するNexus。</param>
 /// <returns>0以上の有限値。</returns>
-public delegate double NexusCostSelector(IReadTransaction transaction, NexusId nexusId);
+internal delegate double NexusCostSelector(IReadTransaction transaction, NexusId nexusId);
 
 /// <summary>有向Nexus到達探索の実行上限。</summary>
-public sealed class DirectedNexusReachabilityOptions
+internal sealed class DirectedNexusReachabilityOptions
 {
     /// <summary>返却するVertexの最大数。seedもこの数に含む。</summary>
     public int MaxResults { get; init; } = int.MaxValue;
@@ -44,7 +44,7 @@ public sealed class DirectedNexusReachabilityOptions
 }
 
 /// <summary>最短導出探索と導出木復元の実行上限。</summary>
-public sealed class ShortestDerivationOptions
+internal sealed class ShortestDerivationOptions
 {
     /// <summary>初期化して走査するNexusの最大数。</summary>
     public int MaxNexuses { get; init; } = int.MaxValue;
@@ -57,7 +57,7 @@ public sealed class ShortestDerivationOptions
 }
 
 /// <summary>有向Nexus到達探索の結果。</summary>
-public sealed class DirectedNexusReachabilityResult
+internal sealed class DirectedNexusReachabilityResult
 {
     internal DirectedNexusReachabilityResult(
         IReadOnlyList<VertexId> vertices,
@@ -86,10 +86,10 @@ public sealed class DirectedNexusReachabilityResult
 /// <param name="VertexId">この出現が表すVertex。</param>
 /// <param name="NexusId">このVertexを導出したNexus。seedでは <see cref="Core.NexusId.Invalid"/>。</param>
 /// <param name="ParentIndex">親ノードのindex。rootでは -1。</param>
-public readonly record struct DerivationTreeNode(VertexId VertexId, NexusId NexusId, int ParentIndex);
+internal readonly record struct DerivationTreeNode(VertexId VertexId, NexusId NexusId, int ParentIndex);
 
 /// <summary>最短導出探索の結果。</summary>
-public sealed class ShortestDerivationResult
+internal sealed class ShortestDerivationResult
 {
     internal ShortestDerivationResult(
         bool isReachable,
@@ -129,7 +129,7 @@ public sealed class ShortestDerivationResult
 }
 
 /// <summary>tail/headロールで方向付けたNexusを探索するアルゴリズム。</summary>
-public static class DirectedNexusAlgorithms
+internal static class DirectedNexusAlgorithms
 {
     /// <summary>
     /// seedから、全tailが到達したNexusの全headを発火するAND到達を列挙する。

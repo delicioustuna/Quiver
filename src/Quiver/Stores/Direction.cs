@@ -1,7 +1,7 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>Edge走査の方向。</summary>
-public enum Direction : byte
+internal enum Direction : byte
 {
     /// <summary>出ていくエッジ (起点が自Vertex)。</summary>
     Outgoing = 1,

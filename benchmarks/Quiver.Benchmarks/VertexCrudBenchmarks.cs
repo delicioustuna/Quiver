@@ -58,21 +58,21 @@ public class VertexCrudBenchmarks
     }
 
     [Benchmark(Description = "CreateVertex + Commit")]
-    public VertexId InsertVertex()
+    public long InsertVertex()
     {
         using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Vertex");
         tx.Commit();
-        return id;
+        return id.Value;
     }
 
     [Benchmark(Description = "CreateVertex + SetProperty + Commit")]
-    public VertexId InsertVertexWithProperty()
+    public long InsertVertexWithProperty()
     {
         using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Vertex");
         tx.SetProperty(id, "id", PropertyValue.FromInt64(id.Value));
         tx.Commit();
-        return id;
+        return id.Value;
     }
 }

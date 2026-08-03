@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Xunit;
 using Quiver.Storage.Wal;
 using Quiver.Core;
@@ -27,6 +28,9 @@ public class WalTests : IDisposable
         ((byte)WalRecordType.PageImage).Should().Be(2);
         ((byte)WalRecordType.Commit).Should().Be(3);
         ((byte)WalRecordType.Abort).Should().Be(4);
+        ((byte)WalRecordType.CheckpointBegin).Should().Be(5);
+        ((byte)WalRecordType.CheckpointEnd).Should().Be(6);
+        ((byte)WalRecordType.FileTruncate).Should().Be(7);
     }
 
     [Fact]
@@ -131,6 +135,48 @@ public class WalTests : IDisposable
 
         Action reopen = () => new WriteAheadLog(Path.Combine(_dir, "wal"));
         reopen.Should().Throw<CorruptionException>();
+    }
+
+    [Fact]
+    public void Unknown_header_extension_is_rejected_without_rewriting_the_wal()
+    {
+        string walFile = Path.Combine(_dir, "wal");
+        using (var wal = new WriteAheadLog(walFile))
+        {
+            long lsn = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), []);
+            wal.FlushTo(lsn);
+        }
+
+        byte[] bytes = File.ReadAllBytes(walFile);
+        bytes[11] = 1;
+        File.WriteAllBytes(walFile, bytes);
+        byte[] beforeOpen = File.ReadAllBytes(walFile);
+
+        Action reopen = () => new WriteAheadLog(walFile);
+
+        reopen.Should().Throw<WalFormatMismatchException>()
+            .WithMessage("*unsupported header extension*");
+        File.ReadAllBytes(walFile).Should().Equal(beforeOpen);
+    }
+
+    [Fact]
+    public void Unknown_record_type_is_rejected_without_rewriting_the_wal()
+    {
+        string walFile = Path.Combine(_dir, "wal");
+        using (var wal = new WriteAheadLog(walFile))
+        {
+            long lsn = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), []);
+            wal.FlushTo(lsn);
+        }
+
+        RewriteFirstRecordType(walFile, 0x7F);
+        byte[] beforeOpen = File.ReadAllBytes(walFile);
+
+        Action reopen = () => new WriteAheadLog(walFile);
+
+        reopen.Should().Throw<CorruptionException>()
+            .WithMessage("*Unknown WAL record type 0x7F*");
+        File.ReadAllBytes(walFile).Should().Equal(beforeOpen);
     }
 
     [Fact]
@@ -461,5 +507,24 @@ public class WalTests : IDisposable
             0xFF, // 未知の chunk type
         };
         WalPageImageCodec.TryDecode(bad, out _, out _, out _).Should().BeFalse();
+    }
+
+    private static void RewriteFirstRecordType(string walFile, byte recordType)
+    {
+        byte[] bytes = File.ReadAllBytes(walFile);
+        int recordOffset = WalFormat.FileHeaderSize;
+        int length = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(recordOffset));
+        bytes[recordOffset + 20] = recordType;
+
+        var crc = new Crc32();
+        crc.Append(bytes.AsSpan(recordOffset, 21));
+        int payloadLength = length - WriteAheadLog.HeaderSize;
+        if (payloadLength > 0)
+            crc.Append(bytes.AsSpan(recordOffset + WriteAheadLog.HeaderSize, payloadLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bytes.AsSpan(recordOffset + 21),
+            crc.GetCurrentHashAsUInt32());
+
+        File.WriteAllBytes(walFile, bytes);
     }
 }

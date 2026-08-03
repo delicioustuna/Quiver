@@ -17,7 +17,7 @@ namespace Quiver.Logical;
 /// at-least-once 配信が必要なシンクは返却前に永続化し、起動時に自前で reconciliation を行うこと。
 /// </para>
 /// </remarks>
-public interface ILogicalMutationSink
+internal interface ILogicalMutationSink
 {
     /// <summary>
     /// コミット済みトランザクションの順序付きミューテーション一覧とともに呼び出される。

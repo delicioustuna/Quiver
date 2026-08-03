@@ -89,7 +89,12 @@ internal sealed class MigrationContext : IMigrationContext
         return ok;
     }
 
-    public void AddIndex(string indexName, string label, string propertyKey, IndexKind kind)
+    public void AddIndex(
+        string indexName,
+        string label,
+        string propertyKey,
+        IndexKind kind,
+        bool unique = false)
     {
         EnsureRollbackHook();
         // 既存索引に対する AddIndex は no-op。その場合 DropIndex undo を
@@ -98,7 +103,8 @@ internal sealed class MigrationContext : IMigrationContext
         Schema.CreateIndex(new ScalarIndexDefinition(
             indexName,
             new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, label),
-            kind));
+            kind,
+            unique));
         if (!existedBefore) _undoActions.Add(() => Schema.DropIndex(indexName));
     }
 

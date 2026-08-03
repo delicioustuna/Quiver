@@ -159,10 +159,16 @@ public abstract record IndexDefinition(string Name, PropertyTarget Target);
 /// <param name="Name">一意な index 名。</param>
 /// <param name="Target">対象プロパティ。</param>
 /// <param name="Kind">比較に使う scalar 型と検索モード。</param>
+/// <param name="Unique">
+/// 同じlabelの別Vertexに同じ文字列を許可しない場合は<c>true</c>。
+/// <see cref="PropertyOwnerKind.Vertex"/>、label scope、
+/// <see cref="IndexKind.StringEquality"/>の組合せでだけ指定できる。
+/// </param>
 public sealed record ScalarIndexDefinition(
     string Name,
     PropertyTarget Target,
-    IndexKind Kind) : IndexDefinition(Name, Target);
+    IndexKind Kind,
+    bool Unique = false) : IndexDefinition(Name, Target);
 
 /// <summary>
 /// immutable HNSW segment の構築と flat delta の統合方針。
@@ -239,4 +245,7 @@ public sealed record IndexInfo(
 
     /// <summary>scalar index の比較方法。全文とvector indexでは<c>null</c>。</summary>
     public IndexKind? Kind => (Definition as ScalarIndexDefinition)?.Kind;
+
+    /// <summary>scalar indexが一意制約を持つ場合は<c>true</c>。</summary>
+    public bool IsUnique => (Definition as ScalarIndexDefinition)?.Unique == true;
 }

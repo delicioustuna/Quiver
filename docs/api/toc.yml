@@ -2,16 +2,6 @@
   href: index.md
 - name: Getting Started
   href: getting-started.md
-- name: Graph JSON export
-  href: graph-export.md
-- name: Graph JSON import
-  href: graph-import.md
-- name: グラフ移行cookbook
-  href: migration-cookbook.md
-- name: Concepts
-  href: concepts/index.md
-- name: Tutorials
-  href: tutorials/index.md
 - name: API Reference
   href: ../api/
   homepage: ../api/index.md

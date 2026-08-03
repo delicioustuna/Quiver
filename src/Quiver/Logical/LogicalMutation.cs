@@ -14,7 +14,7 @@ namespace Quiver.Logical;
 /// トークン ID ではなく文字列で保持するため、まだそれらトークンが未登録のグラフに対しても
 /// ストリームを検査・送信・再生できる (トークン ID はソース DB とターゲット DB で異なる)。
 /// </summary>
-public readonly struct LogicalMutation
+internal readonly struct LogicalMutation
 {
     /// <summary>ミューテーションの種別。</summary>
     public LogicalMutationKind Kind { get; }

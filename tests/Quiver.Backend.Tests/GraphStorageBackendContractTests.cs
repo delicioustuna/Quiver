@@ -44,7 +44,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     /// <summary>
     /// テスト対象の factory。具象サブクラスは対応する backend factory を返す。
     /// </summary>
-    protected abstract IGraphStorageBackendFactory CreateFactory();
+    private protected abstract IGraphStorageBackendFactory CreateFactory();
 
     private IWriteTransaction BeginWrite() =>
         _backend.BeginWriteTransaction();

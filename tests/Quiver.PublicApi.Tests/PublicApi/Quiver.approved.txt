@@ -1,552 +1,55 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Backend.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Benchmarks")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Benchmarks.RecallCheck")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Client.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Codec.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.FuzzTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Hosting")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Hosting.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Index.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Mcp")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.OpenTelemetry")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Operators.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.PropertyTests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Rag")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Rag.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.SampleDbGen")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Crud")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.DirectedNexuses")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.FormalConcepts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.GraphAnnotations")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Hosting")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Match")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Migration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.MinimumHittingSet")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Nexuses")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Observability")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.PersistenceH0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.QueryPatterns")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Rag")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Signal")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.SourceGen")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Traversal")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Samples.Vector")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.SourceGen.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Stores.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Transactions.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Wal.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("QuiverSandbox")]
-namespace Quiver.Api
-{
-    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
-    public sealed class EdgeAttribute<TSource, TTarget> : System.Attribute
-    {
-        public EdgeAttribute(string? type = null) { }
-        public string? Type { get; }
-    }
-    public sealed class EdgeBuilder
-    {
-        public Quiver.Api.EdgeBuilder From(Quiver.Core.VertexId src) { }
-        public Quiver.Core.EdgeId Next() { }
-        public Quiver.Api.EdgeBuilder P(string key, bool value) { }
-        public Quiver.Api.EdgeBuilder P(string key, double value) { }
-        public Quiver.Api.EdgeBuilder P(string key, int value) { }
-        public Quiver.Api.EdgeBuilder P(string key, long value) { }
-        public Quiver.Api.EdgeBuilder P(string key, string value) { }
-        public Quiver.Api.EdgeBuilder To(Quiver.Core.VertexId dst) { }
-    }
-    public sealed class GraphMutationSource
-    {
-        public Quiver.Api.EdgeBuilder AddEdge(string type) { }
-        public Quiver.Api.NexusBuilder AddNexus(string type) { }
-        public Quiver.Api.VertexBuilder AddVertex(string label) { }
-        public void Delete<T>(Quiver.Core.VertexId id)
-            where T : Quiver.Api.IGraphVertex<T> { }
-        public Quiver.Core.VertexId Insert<T>(T entity)
-            where T : Quiver.Api.IGraphVertex<T> { }
-        public Quiver.Core.VertexId InsertIndexed<T>(T entity)
-            where T : Quiver.Api.IGraphVertex<T> { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.EdgeId, bool> MergeEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.NexusId, bool> MergeNexus(string type, System.ReadOnlySpan<Quiver.NexusMember> members) { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.VertexId, bool> MergeVertex(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue) { }
-        public void Update<T>(Quiver.Core.VertexId id, T entity)
-            where T : Quiver.Api.IGraphVertex<T> { }
-    }
-    public sealed class GraphTraversalSource
-    {
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> Edges() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> HybridSearch(string textIndex, string queryText, string vectorIndex, System.ReadOnlySpan<float> queryVector, int k) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Knn(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public T Load<T>(Quiver.Core.VertexId id)
-            where T : Quiver.Api.IGraphVertex<T> { }
-        public Quiver.Api.Match.MatchQuery Match(Quiver.Api.Match.GraphPattern pattern) { }
-        public Quiver.Api.Match.MatchQuery Match(Quiver.Api.Match.NexusPattern pattern) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NexusId> Nexus(Quiver.Core.NexusId nexusId) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NexusId> Nexuses() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Search(string indexName, string queryText, int k) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Vertex(Quiver.Core.VertexId vertexId) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Vertices() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Vertices(params Quiver.Core.VertexId[] vertexIds) { }
-        public Quiver.Api.TypedGraphTraversal<T> Vertices<T>()
-            where T : Quiver.Api.IGraphVertex<T> { }
-        public Quiver.Api.WeightedPathResult WeightedShortestPath(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string weightKey, Quiver.Storage.Records.Direction direction = 1, string? type = null, double maxDistance = Infinity) { }
-        public Quiver.Api.WeightedPathResult WeightedShortestPath(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string weightKey, System.Func<Quiver.Core.VertexId, double> heuristic, Quiver.Storage.Records.Direction direction = 1, string? type = null, double maxDistance = Infinity) { }
-        public Quiver.Api.WeightedPathResult WeightedShortestPathAStar(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string weightKey, string xKey, string yKey, Quiver.Api.HeuristicMetric metric = 0, Quiver.Storage.Records.Direction direction = 1, string? type = null, double maxDistance = Infinity) { }
-        public Quiver.Api.GraphTraversalSource WithStats(Quiver.GraphStats stats) { }
-    }
-    public sealed class GraphTraversal<T>
-    {
-        public Quiver.Api.GraphTraversal<T> And(params System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal>[] traversals) { }
-        public Quiver.Api.GraphTraversal<T> As(string label) { }
-        public Quiver.Api.ITraversalCursor<T> AsCursor() { }
-        public System.Collections.Generic.IEnumerable<T> AsEnumerable() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Both(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Both<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> BothEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> BothEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Coalesce(params System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal>[] branches) { }
-        public long Count() { }
-        public Quiver.Api.GraphTraversal<T> Dedup() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> FilterByKnn(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> FilterByText(string indexName, string queryText, int k) { }
-        public System.Collections.Generic.List<T> Fold() { }
-        public System.Collections.Generic.Dictionary<string, long> GroupCount(string key) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, Quiver.Api.PropertyPredicate pred) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, bool value) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, double value) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, int value) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, long value) { }
-        public Quiver.Api.GraphTraversal<T> Has(string key, string value) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> HasLabel(string label) { }
-        public bool HasNext() { }
-        public Quiver.Api.GraphTraversal<T> HasNot(string key) { }
-        public Quiver.Api.GraphTraversal<long> Id() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> In(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> In<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> InEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> InEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<T> IsNotNull(string key) { }
-        public Quiver.Api.GraphTraversal<T> IsNull(string key) { }
-        public Quiver.Api.GraphTraversal<string> Label() { }
-        public Quiver.Api.GraphTraversal<T> Limit(long n) { }
-        public double? Max(string key) { }
-        public double? Mean(string key) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Members(string? role = null) { }
-        public double? Min(string key) { }
-        public T Next() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NexusId> Nexuses(string? type = null, string? role = null) { }
-        public Quiver.Api.GraphTraversal<T> Not(System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal> innerTraversal) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Optional(System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal> branch) { }
-        public Quiver.Api.GraphTraversal<T> Or(params System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal>[] traversals) { }
-        public Quiver.Api.GraphTraversal<T> Order(bool descending = false) { }
-        public Quiver.Api.GraphTraversal<T> OrderBy(string key) { }
-        public Quiver.Api.GraphTraversal<T> OrderByDescending(string key) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> OtherMembers(string? role = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> OtherVertex() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Out(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Out<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> OutEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> OutEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<T> Range(long from, long to) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Repeat(System.Action<Quiver.Api.RepeatStep> step, int times, bool emit = false) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Select(string label) { }
-        public System.Collections.Generic.List<TResult> Select<TResult>(System.Func<Quiver.Api.MatchTuple, TResult> projection) { }
-        public Quiver.Api.GraphTraversal<TEntity> Select<TEntity>(string label)
-            where TEntity :  struct { }
-        public Quiver.Api.GraphTraversal<long> ShortestPathTo(Quiver.Core.VertexId target, Quiver.Storage.Records.Direction direction = 1, string? type = null, long maxDistance = 9223372036854775807) { }
-        public Quiver.Api.GraphTraversal<T> Skip(long n) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> SourceVertex() { }
-        public double Sum(string key) { }
-        public long SumLong(string key) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> TargetVertex() { }
-        public System.Collections.Generic.List<T> ToList() { }
-        public T? TryNext() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Union(params System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal>[] branches) { }
-        public Quiver.Api.GraphTraversal<string> Values(string key) { }
-        public Quiver.Api.GraphTraversal<T> Where(System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal> innerTraversal) { }
-    }
-    public readonly struct GraphVertexRef<TVertex> : System.IEquatable<Quiver.Api.GraphVertexRef<TVertex>>
-        where TVertex : Quiver.Api.IGraphVertex<TVertex>
-    {
-        public GraphVertexRef(Quiver.Core.VertexId VertexId) { }
-        public Quiver.Core.VertexId VertexId { get; init; }
-        public static Quiver.Api.GraphVertexRef<TVertex> op_Implicit(Quiver.Core.VertexId vertexId) { }
-    }
-    public enum HeuristicMetric
-    {
-        Euclidean = 0,
-        Haversine = 1,
-    }
-    public interface IGraphEdge<TSelf>
-        where TSelf : Quiver.Api.IGraphEdge<TSelf>
-    {
-        string GraphType { get; }
-        void Delete(Quiver.IWriteTransaction tx, Quiver.Core.EdgeId id);
-        Quiver.Core.EdgeId Insert(Quiver.IWriteTransaction tx, Quiver.Core.VertexId from, Quiver.Core.VertexId to, TSelf entity);
-        TSelf Load(Quiver.IReadTransaction tx, Quiver.Core.EdgeId id);
-        void Update(Quiver.IWriteTransaction tx, Quiver.Core.EdgeId id, TSelf entity);
-    }
-    public interface IGraphEdge<TSelf, TSource, TTarget> : Quiver.Api.IGraphEdge<TSelf>
-        where TSelf : Quiver.Api.IGraphEdge<TSelf, TSource, TTarget>
-        where TSource : Quiver.Api.IGraphVertex<TSource>
-        where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-    public interface IGraphNexus<TSelf>
-        where TSelf : Quiver.Api.IGraphNexus<TSelf>
-    {
-        string GraphType { get; }
-        void Delete(Quiver.IWriteTransaction tx, Quiver.Core.NexusId id);
-        Quiver.Core.NexusId Insert(Quiver.IWriteTransaction tx, TSelf entity);
-        TSelf Load(Quiver.IReadTransaction tx, Quiver.Core.NexusId id);
-        void Update(Quiver.IWriteTransaction tx, Quiver.Core.NexusId id, TSelf entity);
-    }
-    public interface IGraphVertex<TSelf>
-        where TSelf : Quiver.Api.IGraphVertex<TSelf>
-    {
-        string GraphLabel { get; }
-        void Delete(Quiver.IWriteTransaction tx, Quiver.Core.VertexId id);
-        Quiver.Core.VertexId Insert(Quiver.IWriteTransaction tx, TSelf entity);
-        Quiver.Core.VertexId InsertIndexed(Quiver.IWriteTransaction tx, TSelf entity);
-        TSelf Load(Quiver.IReadTransaction tx, Quiver.Core.VertexId id);
-        void Update(Quiver.IWriteTransaction tx, Quiver.Core.VertexId id, TSelf entity);
-    }
-    public interface ITraversalCursor<out T> : System.IDisposable
-    {
-        T Current { get; }
-        bool MoveNext();
-    }
-    [System.AttributeUsage(System.AttributeTargets.Property)]
-    public sealed class IndexedAttribute : System.Attribute
-    {
-        public IndexedAttribute(string? indexName = null) { }
-        public string? IndexName { get; }
-    }
-    public static class IsExtensions
-    {
-        public static Quiver.Api.GraphTraversal<long> Is(this Quiver.Api.GraphTraversal<long> traversal, long value) { }
-        public static Quiver.Api.GraphTraversal<string> Is(this Quiver.Api.GraphTraversal<string> traversal, string value) { }
-    }
-    public readonly struct MatchTuple
-    {
-        public bool Boolean(string alias) { }
-        public double Double(string alias) { }
-        public Quiver.Core.EdgeId Edge(string alias) { }
-        public long Int64(string alias) { }
-        public Quiver.Core.NexusId Nexus(string alias) { }
-        public string String(string alias) { }
-        public Quiver.Api.MatchValueType TypeOf(string alias) { }
-        public Quiver.Core.VertexId Vertex(string alias) { }
-    }
-    public enum MatchValueType : byte
-    {
-        Null = 0,
-        Vertex = 1,
-        Edge = 2,
-        Boolean = 3,
-        Int64 = 4,
-        Double = 5,
-        String = 6,
-        Bytes = 7,
-        Nexus = 8,
-    }
-    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
-    public sealed class NexusAttribute : System.Attribute
-    {
-        public NexusAttribute(string? type = null) { }
-        public string? Type { get; }
-    }
-    public sealed class NexusBuilder
-    {
-        public Quiver.Api.NexusBuilder Member(string role, Quiver.Core.VertexId vertexId) { }
-        public Quiver.Core.NexusId Next() { }
-        public Quiver.Api.NexusBuilder P(string key, bool value) { }
-        public Quiver.Api.NexusBuilder P(string key, double value) { }
-        public Quiver.Api.NexusBuilder P(string key, int value) { }
-        public Quiver.Api.NexusBuilder P(string key, long value) { }
-        public Quiver.Api.NexusBuilder P(string key, string value) { }
-    }
-    public static class P
-    {
-        public static Quiver.Api.PropertyPredicate And(params Quiver.Api.PropertyPredicate[] predicates) { }
-        public static Quiver.Api.PropertyPredicate Between(double from, double to) { }
-        public static Quiver.Api.PropertyPredicate Between(long from, long to) { }
-        public static Quiver.Api.PropertyPredicate Contains(string needle) { }
-        public static Quiver.Api.PropertyPredicate EndsWith(string suffix) { }
-        public static Quiver.Api.PropertyPredicate Eq(double value) { }
-        public static Quiver.Api.PropertyPredicate Eq(long value) { }
-        public static Quiver.Api.PropertyPredicate Eq(string value) { }
-        public static Quiver.Api.PropertyPredicate Gt(double value) { }
-        public static Quiver.Api.PropertyPredicate Gt(long value) { }
-        public static Quiver.Api.PropertyPredicate Gte(double value) { }
-        public static Quiver.Api.PropertyPredicate Gte(long value) { }
-        public static Quiver.Api.PropertyPredicate Lt(double value) { }
-        public static Quiver.Api.PropertyPredicate Lt(long value) { }
-        public static Quiver.Api.PropertyPredicate Lte(double value) { }
-        public static Quiver.Api.PropertyPredicate Lte(long value) { }
-        public static Quiver.Api.PropertyPredicate Not(Quiver.Api.PropertyPredicate inner) { }
-        public static Quiver.Api.PropertyPredicate Or(params Quiver.Api.PropertyPredicate[] predicates) { }
-        public static Quiver.Api.PropertyPredicate Regex(string pattern, System.Text.RegularExpressions.RegexOptions options = 0) { }
-        public static Quiver.Api.PropertyPredicate StartsWith(string prefix) { }
-        public static Quiver.Api.PropertyPredicate Within(params string[] values) { }
-        public static Quiver.Api.PropertyPredicate Without(params string[] values) { }
-    }
-    public enum PredicateKind
-    {
-        Eq = 0,
-        Gt = 1,
-        Gte = 2,
-        Lt = 3,
-        Lte = 4,
-        Between = 5,
-        Within = 6,
-        Without = 7,
-        StartsWith = 8,
-        EndsWith = 9,
-        Contains = 10,
-        Regex = 11,
-        Not = 12,
-        And = 13,
-        Or = 14,
-    }
-    [System.AttributeUsage(System.AttributeTargets.Property)]
-    public sealed class PropertyAttribute : System.Attribute
-    {
-        public PropertyAttribute(string? key = null) { }
-        public string? Key { get; }
-    }
-    public sealed class PropertyPredicate
-    {
-        public Quiver.Api.PredicateKind Kind { get; }
-        public long LongFrom { get; }
-        public long LongTo { get; }
-    }
-    public sealed class RepeatStep
-    {
-        public RepeatStep() { }
-        public Quiver.Api.RepeatStep Both(string? type = null) { }
-        public Quiver.Api.RepeatStep In(string? type = null) { }
-        public Quiver.Api.RepeatStep Out(string? type = null) { }
-    }
-    [System.AttributeUsage(System.AttributeTargets.Property)]
-    public sealed class RoleAttribute : System.Attribute
-    {
-        public RoleAttribute(string? role = null) { }
-        public string? Role { get; }
-    }
-    public sealed class SubTraversal
-    {
-        public Quiver.Api.SubTraversal Both(string? type = null) { }
-        public Quiver.Api.SubTraversal Both<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.SubTraversal Has(string key, Quiver.Api.PropertyPredicate pred) { }
-        public Quiver.Api.SubTraversal Has(string key, long value) { }
-        public Quiver.Api.SubTraversal Has(string key, string value) { }
-        public Quiver.Api.SubTraversal HasLabel(string label) { }
-        public Quiver.Api.SubTraversal In(string? type = null) { }
-        public Quiver.Api.SubTraversal In<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.SubTraversal Out(string? type = null) { }
-        public Quiver.Api.SubTraversal Out<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-    }
-    public sealed class TypedGraphNexusTraversal<TNexus>
-        where TNexus : Quiver.Api.IGraphNexus<TNexus>
-    {
-        public long Count() { }
-        public TNexus? First() { }
-        public Quiver.Api.TypedGraphNexusTraversal<TNexus> Has<TProp>(System.Linq.Expressions.Expression<System.Func<TNexus, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
-        public Quiver.Api.TypedGraphNexusTraversal<TNexus> Has<TProp>(System.Linq.Expressions.Expression<System.Func<TNexus, TProp>> selector, TProp value) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Members(string? role = null) { }
-        public Quiver.Api.TypedGraphTraversal<TVertex> MembersOf<TVertex>(string role)
-            where TVertex : Quiver.Api.IGraphVertex<TVertex> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> OtherMembers(string? role = null) { }
-        public Quiver.Api.TypedGraphTraversal<TVertex> OtherMembersOf<TVertex>(string role)
-            where TVertex : Quiver.Api.IGraphVertex<TVertex> { }
-        public System.Collections.Generic.List<Quiver.Core.NexusId> ToIdList() { }
-        public System.Collections.Generic.List<TNexus> ToList() { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Entity"})]
-        public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.NexusId, TNexus>> ToListWithIds() { }
-        public Quiver.Api.GraphTraversal<string> Values(string key) { }
-    }
-    public static class TypedGraphTraversalWriteExtensions
-    {
-        public static long AddEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        public static long AddEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        public static long AddEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets, System.Func<TSource, TTarget, TEdge> edge)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        public static long AddEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets, System.Func<TSource, TTarget, TEdge> edge)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Created",
-                "Matched"})]
-        public static System.ValueTuple<long, long> MergeEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Created",
-                "Matched"})]
-        public static System.ValueTuple<long, long> MergeEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Created",
-                "Matched"})]
-        public static System.ValueTuple<long, long> MergeEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets, System.Func<TSource, TTarget, TEdge> edge)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Created",
-                "Matched"})]
-        public static System.ValueTuple<long, long> MergeEdge<TSource, TEdge, TTarget>(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets, System.Func<TSource, TTarget, TEdge> edge)
-            where TSource : Quiver.Api.IGraphVertex<TSource>
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-    }
-    public sealed class TypedGraphTraversal<T>
-        where T : Quiver.Api.IGraphVertex<T>
-    {
-        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, Quiver.Api.GraphTraversal<float[]> b, System.Range[]? regions = null, int k = 2147483647, int? oversample = default)
-            where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
-        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, float[] b, System.Range[]? regions = null, int k = 2147483647, int? oversample = default)
-            where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Both(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Both<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> BothEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> BothEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public long Count() { }
-        public T? First() { }
-        public Quiver.Api.TypedGraphTraversal<T> Has<TElem>(System.Linq.Expressions.Expression<System.Func<T, System.Collections.Generic.List<TElem>>> selector, TElem value) { }
-        public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
-        public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, TProp value) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> In(string? type = null) { }
-        public Quiver.Api.TypedGraphTraversal<TSource> In<TEdge, TSource>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, TSource, T>
-            where TSource : Quiver.Api.IGraphVertex<TSource> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> InEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> InEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.TypedGraphNexusTraversal<TNexus> Nexuses<TNexus>(string? role = null)
-            where TNexus : Quiver.Api.IGraphNexus<TNexus> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.VertexId> Out(string? type = null) { }
-        public Quiver.Api.TypedGraphTraversal<TTarget> Out<TEdge, TTarget>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, T, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> OutEdges(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.EdgeId> OutEdges<TEdge>()
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.TypedGraphTraversal<TTarget> OutWhere<TEdge, TTarget>(System.Linq.Expressions.Expression<System.Func<TEdge, bool>> edgeFilter)
-            where TEdge : Quiver.Api.IGraphEdge<TEdge, T, TTarget>
-            where TTarget : Quiver.Api.IGraphVertex<TTarget> { }
-        public System.Collections.Generic.List<T> ToList() { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Entity"})]
-        public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.VertexId, T>> ToListWithIds() { }
-        public Quiver.Api.GraphTraversal<float[]> Values(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector) { }
-        public Quiver.Api.GraphTraversal<string> Values(string key) { }
-        public Quiver.Api.GraphTraversal<System.Collections.Generic.List<TElem>> Values<TElem>(System.Linq.Expressions.Expression<System.Func<T, System.Collections.Generic.List<TElem>>> selector) { }
-        public Quiver.Api.GraphTraversal<string> Values<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector) { }
-        public Quiver.Api.TypedGraphTraversal<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
-    }
-    [System.AttributeUsage(System.AttributeTargets.Class)]
-    public sealed class VertexAttribute : System.Attribute
-    {
-        public VertexAttribute(string? label = null) { }
-        public string? Label { get; }
-    }
-    public sealed class VertexBuilder
-    {
-        public Quiver.Core.VertexId Next() { }
-        public Quiver.Api.VertexBuilder P(string key, bool value) { }
-        public Quiver.Api.VertexBuilder P(string key, double value) { }
-        public Quiver.Api.VertexBuilder P(string key, int value) { }
-        public Quiver.Api.VertexBuilder P(string key, long value) { }
-        public Quiver.Api.VertexBuilder P(string key, string value) { }
-    }
-    public sealed class WeightedPathResult : System.IEquatable<Quiver.Api.WeightedPathResult>
-    {
-        public static readonly Quiver.Api.WeightedPathResult NotFound;
-        public WeightedPathResult(bool Found, double Distance, System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Vertices, System.Collections.Generic.IReadOnlyList<Quiver.Core.EdgeId> Edges) { }
-        public double Distance { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.EdgeId> Edges { get; init; }
-        public bool Found { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Vertices { get; init; }
-    }
-}
-namespace Quiver.Api.Match
-{
-    public sealed class GraphPattern
-    {
-        public static Quiver.Api.Match.NexusPattern Nexus(string variable, string? type = null) { }
-        public static Quiver.Api.Match.VertexPattern Vertex(string variable, string? label = null) { }
-    }
-    public sealed class MatchContext
-    {
-        public Quiver.Api.Match.MatchContextRow this[string variable] { get; }
-        public T Load<T>(string variable)
-            where T : Quiver.Api.IGraphVertex<T> { }
-        public Quiver.Core.NexusId Nexus(string variable) { }
-        public T NexusGet<T>(string variable, string key) { }
-        public Quiver.Core.VertexId Vertex(string variable) { }
-    }
-    public readonly struct MatchContextRow
-    {
-        public T Get<T>(string key) { }
-    }
-    public sealed class MatchQuery
-    {
-        public long Count() { }
-        public Quiver.Api.Match.ReturnClause<TResult> Return<TResult>(System.Func<Quiver.Api.Match.MatchContext, TResult> selector) { }
-        public Quiver.Api.Match.MatchQuery Where(string variable, string key, Quiver.Api.PropertyPredicate pred) { }
-    }
-    public sealed class NexusPattern
-    {
-        public string? Type { get; }
-        public string Variable { get; }
-        public Quiver.Api.Match.NexusPattern Member(string role, Quiver.Api.Match.VertexPattern vertex) { }
-    }
-    public sealed class ReturnClause<TResult>
-    {
-        public Quiver.Api.ITraversalCursor<TResult> AsCursor() { }
-        public System.Collections.Generic.IEnumerable<TResult> AsEnumerable() { }
-        public TResult? First() { }
-        public System.Collections.Generic.List<TResult> ToList() { }
-    }
-    public sealed class VertexPattern
-    {
-        public string? Label { get; }
-        public string Variable { get; }
-        public Quiver.Api.Match.GraphPattern In(string edgeType, Quiver.Api.Match.VertexPattern end) { }
-        public Quiver.Api.Match.GraphPattern In<TEdge>(Quiver.Api.Match.VertexPattern end)
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-        public Quiver.Api.Match.GraphPattern Out(string edgeType, Quiver.Api.Match.VertexPattern end) { }
-        public Quiver.Api.Match.GraphPattern Out<TEdge>(Quiver.Api.Match.VertexPattern end)
-            where TEdge : Quiver.Api.IGraphEdge<TEdge> { }
-    }
-}
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("RagSandbox")]
 namespace Quiver
 {
-    public sealed class ArityHistogram
+    public sealed class AdvancedGraphStore
     {
-        public ArityHistogram() { }
-        public System.Collections.Generic.IReadOnlyDictionary<int, long> Counts { get; }
-        public int MaxArity { get; }
-        public double MeanArity { get; }
-        public long TotalIncidences { get; }
-        public long TotalNexuses { get; }
-    }
-    public enum BackendKind
-    {
-        Binary = 1,
-        InMemory = 2,
+        public Quiver.GraphReadSession BeginRead() { }
+        public Quiver.GraphWriteSession BeginWrite() { }
+        public Quiver.ConsistencyReport CheckConsistency() { }
+        public void CompactAdjacency() { }
+        public void CreateSnapshot(string targetFilePath, Quiver.SnapshotOptions? options = null) { }
+        public Quiver.DatabaseStatistics GetStatistics() { }
+        public Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null) { }
     }
     public readonly struct CoMembershipRolePair : System.IEquatable<Quiver.CoMembershipRolePair>
     {
@@ -581,138 +84,15 @@ namespace Quiver
         public long VertexCount { get; init; }
         public long WalFileSize { get; init; }
     }
-    public sealed class DegreeHistogram
+    public readonly struct EdgeKey : System.IEquatable<Quiver.EdgeKey>
     {
-        public DegreeHistogram() { }
-        public System.Collections.Generic.IReadOnlyList<long> BucketCounts { get; }
-        public long MaxDegree { get; }
-        public double MeanDegree { get; }
-        public long TotalDegree { get; }
-        public long TotalVertices { get; }
-    }
-    public enum DerivationCostMode
-    {
-        Additive = 0,
-        Bottleneck = 1,
-    }
-    public readonly struct DerivationTreeNode : System.IEquatable<Quiver.DerivationTreeNode>
-    {
-        public DerivationTreeNode(Quiver.Core.VertexId VertexId, Quiver.Core.NexusId NexusId, int ParentIndex) { }
-        public Quiver.Core.NexusId NexusId { get; init; }
-        public int ParentIndex { get; init; }
-        public Quiver.Core.VertexId VertexId { get; init; }
-    }
-    public static class DirectedNexusAlgorithms
-    {
-        public static Quiver.DirectedNexusReachabilityResult FindReachableVertices(this Quiver.IReadTransaction transaction, System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> seeds, string nexusType, string tailRole, string headRole, Quiver.DirectedNexusReachabilityOptions? options = null) { }
-        public static Quiver.ShortestDerivationResult FindShortestDerivation(this Quiver.IReadTransaction transaction, System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> seeds, Quiver.Core.VertexId target, string nexusType, string tailRole, string headRole, Quiver.NexusCostSelector costSelector, Quiver.DerivationCostMode costMode, Quiver.ShortestDerivationOptions? options = null) { }
-    }
-    public sealed class DirectedNexusReachabilityOptions
-    {
-        public DirectedNexusReachabilityOptions() { }
-        public System.Threading.CancellationToken CancellationToken { get; init; }
-        public int MaxNexuses { get; init; }
-        public int MaxResults { get; init; }
-    }
-    public sealed class DirectedNexusReachabilityResult
-    {
-        public bool IsComplete { get; }
-        public Quiver.DirectedNexusTerminationReason TerminationReason { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Vertices { get; }
-        public int VisitedNexusCount { get; }
-    }
-    public enum DirectedNexusTerminationReason
-    {
-        Completed = 0,
-        MaxResultsReached = 1,
-        MaxNexusesReached = 2,
-        MaxTreeNodesReached = 3,
-    }
-    public readonly struct EdgeInfo : System.IEquatable<Quiver.EdgeInfo>
-    {
-        public EdgeInfo(Quiver.Core.EdgeId Id, Quiver.Core.VertexId Source, Quiver.Core.VertexId Target, string Type) { }
-        public Quiver.Core.EdgeId Id { get; init; }
-        public Quiver.Core.VertexId Source { get; init; }
-        public Quiver.Core.VertexId Target { get; init; }
-        public string Type { get; init; }
-    }
-    public readonly struct EdgeReplacement : System.IEquatable<Quiver.EdgeReplacement>
-    {
-        public EdgeReplacement(Quiver.Core.EdgeId OldId, Quiver.Core.EdgeId NewId) { }
-        public Quiver.Core.EdgeId NewId { get; init; }
-        public Quiver.Core.EdgeId OldId { get; init; }
-    }
-    public ref struct EntityRefEnumerator
-    {
-        public Quiver.Core.EntityRef Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public sealed class FormalConcept : System.IEquatable<Quiver.FormalConcept>
-    {
-        public FormalConcept(System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Extent, System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Intent) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Extent { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.EntityRef> Intent { get; init; }
-    }
-    public static class FormalConceptAlgorithms
-    {
-        public static Quiver.FormalConceptResult EnumerateFormalConcepts(this Quiver.IReadTransaction transaction, string nexusType, string? memberRole = null, Quiver.FormalConceptOptions? options = null, Quiver.FormalConceptContinuation? continuation = null) { }
-    }
-    public sealed class FormalConceptContinuation
-    {
-        public string AttributeOrderFingerprint { get; }
-        public string ContextFingerprint { get; }
-        public string ObjectOrderFingerprint { get; }
-        public string OptionsFingerprint { get; }
-        public Quiver.Core.TransactionId TransactionId { get; }
-        public int Version { get; }
-    }
-    public enum FormalConceptEnumerationStrategy
-    {
-        Auto = 0,
-        CloseByOne = 1,
-        NextClosure = 2,
-    }
-    public sealed class FormalConceptOptions : System.IEquatable<Quiver.FormalConceptOptions>
-    {
-        public FormalConceptOptions() { }
-        public System.Threading.CancellationToken CancellationToken { get; init; }
-        public int MaxAttributes { get; init; }
-        public long MaxClosureEvaluations { get; init; }
-        public long MaxIncidences { get; init; }
-        public int MaxObjects { get; init; }
-        public int MaxResults { get; init; }
-        public int MinExtent { get; init; }
-        public int MinIntent { get; init; }
-        public int PageSize { get; init; }
-        public Quiver.FormalConceptEnumerationStrategy Strategy { get; init; }
-        public System.TimeSpan TimeLimit { get; init; }
-    }
-    public sealed class FormalConceptResult
-    {
-        public int AttributeCount { get; }
-        public long ClosureEvaluations { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.FormalConcept> Concepts { get; }
-        public string? ContextFingerprint { get; }
-        public Quiver.FormalConceptContinuation? Continuation { get; }
-        public long IncidenceCount { get; }
-        public bool IsComplete { get; }
-        public bool IsTruncated { get; }
-        public int ObjectCount { get; }
-        public Quiver.FormalConceptTerminationReason TerminationReason { get; }
-        public Quiver.Core.TransactionId TransactionId { get; }
-    }
-    public enum FormalConceptTerminationReason
-    {
-        Completed = 0,
-        PageFull = 1,
-        MaxResultsReached = 2,
-        WorkBudget = 3,
-        TimeBudget = 4,
-        Cancelled = 5,
-        MaxObjectsReached = 6,
-        MaxAttributesReached = 7,
-        MaxIncidencesReached = 8,
+        public bool IsValid { get; }
+        public bool Equals(Quiver.EdgeKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Quiver.EdgeKey left, Quiver.EdgeKey right) { }
+        public static bool operator ==(Quiver.EdgeKey left, Quiver.EdgeKey right) { }
     }
     public sealed class FullTextIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.FullTextIndexDefinition>
     {
@@ -730,128 +110,45 @@ namespace Quiver
         public int MaximumSegments { get; init; }
         public double MaximumTombstoneRatio { get; init; }
     }
-    public static class GraphAnnotationAlgorithms
+    public sealed class GraphCallbackReentrancyException : System.InvalidOperationException { }
+    public enum GraphCheckpointPolicy
     {
-        public static Quiver.GraphAnnotationResult<long> EvaluatePathMultiplicity(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphAnnotationOptions? options = null) { }
-        public static Quiver.GraphAnnotationResult<bool> EvaluateReachability(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphAnnotationOptions? options = null) { }
-        public static Quiver.GraphAnnotationResult<double> EvaluateTropical(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphEdgeValueSelector valueSelector, Quiver.GraphAnnotationOptions? options = null) { }
-        public static Quiver.GraphAnnotationResult<double> EvaluateViterbi(this Quiver.IReadTransaction transaction, Quiver.Core.VertexId source, Quiver.GraphAnnotationPolicy policy, Quiver.GraphEdgeValueSelector valueSelector, Quiver.GraphAnnotationOptions? options = null) { }
+        Fixed = 0,
+        Adaptive = 1,
     }
-    public sealed class GraphAnnotationOptions
+    public sealed class GraphDiagnostic : System.IEquatable<Quiver.GraphDiagnostic>
     {
-        public GraphAnnotationOptions() { }
-        public System.Threading.CancellationToken CancellationToken { get; init; }
-        public string? EdgeType { get; init; }
-        public long MaxAnnotationUpdates { get; init; }
-        public int MaxEdges { get; init; }
-        public long MaxRelaxations { get; init; }
-        public int MaxResults { get; init; }
-        public int MaxVertices { get; init; }
-        public System.TimeSpan TimeLimit { get; init; }
+        public GraphDiagnostic(string Operation, string Phase, string ExceptionType, string Trace) { }
+        public string ExceptionType { get; init; }
+        public string Operation { get; init; }
+        public string Phase { get; init; }
+        public string Trace { get; init; }
     }
-    public enum GraphAnnotationPolicy
+    public enum GraphDirection
     {
-        BreadthFirst = 0,
-        LabelSetting = 1,
-        AcyclicDynamicProgramming = 2,
-        BoundedWorklist = 3,
+        Outgoing = 0,
+        Incoming = 1,
+        Both = 2,
     }
-    public sealed class GraphAnnotationResult<T>
+    public readonly struct GraphEdge : System.IEquatable<Quiver.GraphEdge>
     {
-        public long AnnotationUpdateCount { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.GraphAnnotation<T>> Annotations { get; }
-        public int EdgeCount { get; }
-        public bool IsComplete { get; }
-        public bool IsExact { get; }
-        public Quiver.GraphAnnotationPolicy Policy { get; }
-        public int QueuePeak { get; }
-        public long RelaxationCount { get; }
-        public Quiver.GraphAnnotationTerminationReason TerminationReason { get; }
-        public int? TotalAnnotationCount { get; }
-        public int VertexCount { get; }
+        public GraphEdge(Quiver.EdgeKey Key, Quiver.VertexKey Source, Quiver.VertexKey Target, string Type) { }
+        public Quiver.EdgeKey Key { get; init; }
+        public Quiver.VertexKey Source { get; init; }
+        public Quiver.VertexKey Target { get; init; }
+        public string Type { get; init; }
     }
-    public enum GraphAnnotationTerminationReason
+    public readonly struct GraphEdgeEntity<T> : System.IEquatable<Quiver.GraphEdgeEntity<T>>
+        where T : Quiver.IGraphEdgeEntity<T>
     {
-        Completed = 0,
-        SourceNotFound = 1,
-        MaxVerticesReached = 2,
-        MaxEdgesReached = 3,
-        MaxResultsReached = 4,
-        RelaxationBudgetExceeded = 5,
-        AnnotationBudgetExceeded = 6,
-        TimeLimitReached = 7,
-        Cancelled = 8,
-        CycleRejected = 9,
-        NegativeEdgeRejected = 10,
-        UnsupportedPolicyRejected = 11,
-        InvalidEdgeValueRejected = 12,
-        NumericOverflow = 13,
+        public GraphEdgeEntity(Quiver.EdgeKey Key) { }
+        public Quiver.EdgeKey Key { get; init; }
     }
-    public readonly struct GraphAnnotation<T> : System.IEquatable<Quiver.GraphAnnotation<T>>
+    public readonly struct GraphEntity<T> : System.IEquatable<Quiver.GraphEntity<T>>
+        where T : Quiver.IGraphEntity<T>
     {
-        public GraphAnnotation(Quiver.Core.VertexId VertexId, T Value) { }
-        public T Value { get; init; }
-        public Quiver.Core.VertexId VertexId { get; init; }
-    }
-    public delegate double GraphEdgeValueSelector(Quiver.IReadTransaction transaction, Quiver.Core.EdgeId edgeId);
-    public sealed class GraphJsonExportOptions
-    {
-        public GraphJsonExportOptions() { }
-        public Quiver.DatabaseInstanceId? FallbackDatabaseInstanceId { get; set; }
-        public bool IncludeBytes { get; set; }
-        public bool IncludeFloatArrays { get; set; }
-        public System.Collections.Generic.IReadOnlyCollection<string>? IncludedPropertyKeys { get; set; }
-        public bool WriteIndented { get; set; }
-    }
-    public readonly struct GraphJsonExportResult : System.IEquatable<Quiver.GraphJsonExportResult>
-    {
-        public GraphJsonExportResult(Quiver.DatabaseInstanceId SourceDatabaseId, System.Guid SnapshotId, bool UsesTemporaryDatabaseId, long VertexCount, long EdgeCount, long NexusCount) { }
-        public long EdgeCount { get; init; }
-        public long NexusCount { get; init; }
-        public System.Guid SnapshotId { get; init; }
-        public Quiver.DatabaseInstanceId SourceDatabaseId { get; init; }
-        public bool UsesTemporaryDatabaseId { get; init; }
-        public long VertexCount { get; init; }
-    }
-    public static class GraphJsonExporter
-    {
-        public static Quiver.GraphJsonExportResult Export(Quiver.QuiverDatabase database, System.IO.Stream destination, Quiver.GraphSelection? selection = null, Quiver.GraphJsonExportOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
-        public static Quiver.GraphJsonExportResult Export(Quiver.IReadTransaction transaction, System.IO.Stream destination, Quiver.DatabaseInstanceId sourceDatabaseId, Quiver.GraphSelection? selection = null, Quiver.GraphJsonExportOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
-    }
-    public sealed class GraphJsonImportException : System.Exception
-    {
-        public GraphJsonImportException(string message, int documentIndex, long? byteOffset = default, System.Exception? innerException = null) { }
-        public long? ByteOffset { get; }
-        public int DocumentIndex { get; }
-    }
-    public readonly struct GraphJsonImportMapping : System.IEquatable<Quiver.GraphJsonImportMapping>
-    {
-        public GraphJsonImportMapping(Quiver.DatabaseInstanceId SourceDatabaseId, Quiver.Core.EntityKind Kind, long SourcePackedId, long ProvisionalTargetPackedId) { }
-        public Quiver.Core.EntityKind Kind { get; init; }
-        public long ProvisionalTargetPackedId { get; init; }
-        public Quiver.DatabaseInstanceId SourceDatabaseId { get; init; }
-        public long SourcePackedId { get; init; }
-    }
-    public sealed class GraphJsonImportOptions
-    {
-        public GraphJsonImportOptions() { }
-        public System.Action<Quiver.GraphJsonImportMapping>? MappingSink { get; set; }
-        public Quiver.GraphJsonSemanticMergeOptions? SemanticMerge { get; set; }
-    }
-    public readonly struct GraphJsonImportResult : System.IEquatable<Quiver.GraphJsonImportResult>
-    {
-        public GraphJsonImportResult(int DocumentCount, long VertexCount, long EdgeCount, long NexusCount, long DuplicateEntityCount, long SemanticMatchCount) { }
-        public int DocumentCount { get; init; }
-        public long DuplicateEntityCount { get; init; }
-        public long EdgeCount { get; init; }
-        public long NexusCount { get; init; }
-        public long SemanticMatchCount { get; init; }
-        public long VertexCount { get; init; }
-    }
-    public static class GraphJsonImporter
-    {
-        public static Quiver.GraphJsonImportResult Import(Quiver.IWriteTransaction transaction, System.Collections.Generic.IEnumerable<System.IO.Stream> documents, Quiver.GraphJsonImportOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
-        public static Quiver.GraphJsonImportResult Import(Quiver.IWriteTransaction transaction, System.IO.Stream document, Quiver.GraphJsonImportOptions? options = null, System.Threading.CancellationToken cancellationToken = default) { }
+        public GraphEntity(Quiver.VertexKey Key) { }
+        public Quiver.VertexKey Key { get; init; }
     }
     public enum GraphJsonPropertyConflictPolicy
     {
@@ -871,40 +168,226 @@ namespace Quiver
         public string Label { get; init; }
         public string PropertyKey { get; init; }
     }
-    public sealed class GraphSelection
+    public sealed class GraphMatchContext
     {
-        public GraphSelection(System.Collections.Generic.IEnumerable<Quiver.Core.VertexId>? vertices = null, System.Collections.Generic.IEnumerable<Quiver.Core.EdgeId>? edges = null, System.Collections.Generic.IEnumerable<Quiver.Core.NexusId>? nexuses = null) { }
-        public static Quiver.GraphSelection All { get; }
+        public Quiver.GraphValue Get(string variable, string property) { }
+        public T Load<T>(string variable)
+            where T : Quiver.IGraphEntity<T> { }
+        public Quiver.NexusKey Nexus(string variable) { }
+        public Quiver.VertexKey Vertex(string variable) { }
     }
-    public sealed class GraphStats
+    public sealed class GraphMatchQuery
     {
-        public const int PowerVertexDegreeThreshold = 256;
-        public static readonly Quiver.GraphStats Empty;
-        public GraphStats() { }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.LabelId, Quiver.DegreeHistogram> DegreeByLabel { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.EdgeTypeId, long> EdgeTypeFrequency { get; }
-        public Quiver.DegreeHistogram GlobalDegreeHistogram { get; }
-        public Quiver.DegreeHistogram GlobalInDegree { get; }
-        public Quiver.DegreeHistogram GlobalOutDegree { get; }
-        public bool HasFastLabelIndex { get; init; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.EdgeTypeId, Quiver.DegreeHistogram> InDegreeByType { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.LabelId, long> LabelCardinality { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.NexusTypeId, Quiver.ArityHistogram> NexusArityByType { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.NexusTypeId, long> NexusTypeFrequency { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.EdgeTypeId, Quiver.DegreeHistogram> OutDegreeByType { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.VertexId, Quiver.VertexDegreeSummary> PowerVertices { get; }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.PropertyKeyId, Quiver.PropertyKeyStats> PropertyKeys { get; }
-        public long TotalEdges { get; }
-        public long TotalNexuses { get; }
-        public long TotalVertices { get; }
-        public Quiver.VertexDegreeLookup VertexDegrees { get; }
-        public long EstimateCardinality(Quiver.Core.LabelId label) { }
-        public double EstimateFanOut(Quiver.Core.LabelId? sourceLabel, Quiver.Core.EdgeTypeId? typeFilter, Quiver.Storage.Records.Direction direction) { }
-        public double EstimateMeanDegree(Quiver.Core.LabelId label) { }
-        public double EstimateSelectivity(Quiver.Core.LabelId label) { }
-        public bool IsLikelyPowerVertex(Quiver.Core.VertexId vertexId) { }
-        public bool TryGetDegree(Quiver.Core.VertexId vertexId, out long outDegree, out long inDegree) { }
-        public Quiver.GraphStats WithFastLabelIndex(bool hasFastLabelIndex) { }
+        public long Count() { }
+        public Quiver.GraphMatchResult<TResult> Return<TResult>(System.Func<Quiver.GraphMatchContext, TResult> selector) { }
+        public Quiver.GraphMatchQuery Where(string variable, string property, Quiver.Api.PropertyPredicate predicate) { }
+    }
+    public sealed class GraphMatchResult<TResult>
+    {
+        public TResult? First() { }
+        public System.Collections.Generic.IReadOnlyList<TResult> ToList() { }
+    }
+    public readonly struct GraphNexusEntity<T> : System.IEquatable<Quiver.GraphNexusEntity<T>>
+        where T : Quiver.IGraphNexusEntity<T>
+    {
+        public GraphNexusEntity(Quiver.NexusKey Key) { }
+        public Quiver.NexusKey Key { get; init; }
+    }
+    public readonly struct GraphNexusMember : System.IEquatable<Quiver.GraphNexusMember>
+    {
+        public GraphNexusMember(string Role, Quiver.VertexKey Vertex) { }
+        public string Role { get; init; }
+        public Quiver.VertexKey Vertex { get; init; }
+    }
+    public sealed class GraphOperationException : Quiver.Core.QuiverException
+    {
+        public Quiver.GraphDiagnostic Diagnostic { get; }
+    }
+    public sealed class GraphQuery
+    {
+        public Quiver.GraphVertexQuery HybridSearch(string textIndex, string queryText, string vectorIndex, System.ReadOnlySpan<float> vector, int limit) { }
+        public Quiver.GraphVertexQuery Knn(string indexName, System.ReadOnlySpan<float> vector, int limit) { }
+        public Quiver.GraphMatchQuery Match(Quiver.Api.Match.GraphPattern pattern) { }
+        public Quiver.GraphMatchQuery Match(Quiver.Api.Match.NexusPattern pattern) { }
+        public Quiver.GraphVertexQuery Search(string indexName, string queryText, int limit) { }
+        public Quiver.GraphVertexQuery Vertices() { }
+        public Quiver.GraphVertexQuery Vertices(params Quiver.VertexKey[] vertices) { }
+        public Quiver.TypedGraphQuery<T> Vertices<T>()
+            where T : Quiver.IGraphEntity<T> { }
+    }
+    public abstract class GraphReadAccess
+    {
+        public Quiver.GraphQuery Query { get; }
+        public bool Contains(Quiver.VertexKey vertex) { }
+        public Quiver.GraphValue Get(Quiver.EdgeKey edge, string property) { }
+        public Quiver.GraphValue Get(Quiver.NexusKey nexus, string property) { }
+        public Quiver.GraphValue Get(Quiver.VertexKey vertex, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphEdge> GetEdges(Quiver.VertexKey vertex, Quiver.GraphDirection direction = 2, string? type = null) { }
+        public string? GetLabel(Quiver.VertexKey vertex) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphNexusMember> GetMembers(Quiver.NexusKey nexus, string? role = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.VertexKey> GetNeighbors(Quiver.VertexKey vertex, Quiver.GraphDirection direction = 2, string? type = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.NexusKey> GetNexuses(Quiver.VertexKey vertex, string? type = null, string? role = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphValue> GetValues(Quiver.EdgeKey edge, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphValue> GetValues(Quiver.NexusKey nexus, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphValue> GetValues(Quiver.VertexKey vertex, string property) { }
+        public bool TryGet(Quiver.EdgeKey edge, string property, out Quiver.GraphValue value) { }
+        public bool TryGet(Quiver.NexusKey nexus, string property, out Quiver.GraphValue value) { }
+        public bool TryGet(Quiver.VertexKey vertex, string property, out Quiver.GraphValue value) { }
+    }
+    public delegate void GraphReadAction(Quiver.GraphReadScope scope);
+    public delegate TResult GraphReadOperation<out TResult>(Quiver.GraphReadScope scope);
+    public sealed class GraphReadScope : Quiver.GraphReadAccess { }
+    public sealed class GraphReadSession : Quiver.GraphReadAccess, System.IDisposable
+    {
+        public void Dispose() { }
+    }
+    public sealed class GraphSet<T>
+        where T : Quiver.IGraphEntity<T>
+    {
+        public string Label { get; }
+    }
+    public sealed class GraphStore : System.IDisposable
+    {
+        public Quiver.AdvancedGraphStore Advanced { get; }
+        public Quiver.GraphDiagnostic? LastDiagnostic { get; }
+        public string Path { get; }
+        public void Dispose() { }
+        public void Read(Quiver.GraphReadAction operation) { }
+        public TResult Read<TResult>(Quiver.GraphReadOperation<TResult> operation) { }
+        public void Write(Quiver.GraphWriteAction operation) { }
+        public TResult Write<TResult>(Quiver.GraphWriteOperation<TResult> operation) { }
+        public static Quiver.GraphStore Open(string filePath, Quiver.GraphStoreOptions? options = null) { }
+        public static Quiver.GraphStore OpenMemory(Quiver.GraphStoreOptions? options = null) { }
+    }
+    public sealed class GraphStoreOptions
+    {
+        public GraphStoreOptions() { }
+        public int AdaptiveSampleWindow { get; set; }
+        public bool AutoRepairOrphansOnRecovery { get; set; }
+        public bool AutoVacuum { get; set; }
+        public System.TimeSpan AutoVacuumInterval { get; set; }
+        public long BufferPoolSize { get; set; }
+        public Quiver.GraphCheckpointPolicy CheckpointPolicy { get; set; }
+        public long CheckpointThresholdBytes { get; set; }
+        public bool EnableChecksums { get; set; }
+        public long InitialFileAllocationBytes { get; set; }
+        public long MaximumCheckpointThresholdBytes { get; set; }
+        public long MaximumFileGrowthStepBytes { get; set; }
+        public long MinimumCheckpointThresholdBytes { get; set; }
+        public System.TimeSpan TargetRecoveryTime { get; set; }
+        public Quiver.GraphWriterContentionMode WriterContentionMode { get; set; }
+        public System.TimeSpan WriterWaitTimeout { get; set; }
+    }
+    public readonly struct GraphValue : System.IEquatable<Quiver.GraphValue>
+    {
+        public Quiver.GraphValueKind Kind { get; }
+        public bool AsBoolean() { }
+        public System.ReadOnlyMemory<byte> AsBytes() { }
+        public System.DateOnly AsDateOnly() { }
+        public System.DateTime AsDateTime() { }
+        public System.DateTimeOffset AsDateTimeOffset() { }
+        public double AsDouble() { }
+        public System.ReadOnlyMemory<float> AsFloatVector() { }
+        public int AsInt32() { }
+        public long AsInt64() { }
+        public string AsString() { }
+        public System.TimeOnly AsTimeOnly() { }
+        public System.TimeSpan AsTimeSpan() { }
+        public bool Equals(Quiver.GraphValue other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public static Quiver.GraphValue FromBoolean(bool value) { }
+        public static Quiver.GraphValue FromBytes(System.ReadOnlySpan<byte> value) { }
+        public static Quiver.GraphValue FromDateOnly(System.DateOnly value) { }
+        public static Quiver.GraphValue FromDateTime(System.DateTime value) { }
+        public static Quiver.GraphValue FromDateTimeOffset(System.DateTimeOffset value) { }
+        public static Quiver.GraphValue FromDouble(double value) { }
+        public static Quiver.GraphValue FromFloatVector(System.ReadOnlySpan<float> value) { }
+        public static Quiver.GraphValue FromInt32(int value) { }
+        public static Quiver.GraphValue FromInt64(long value) { }
+        public static Quiver.GraphValue FromString(string value) { }
+        public static Quiver.GraphValue FromTimeOnly(System.TimeOnly value) { }
+        public static Quiver.GraphValue FromTimeSpan(System.TimeSpan value) { }
+        public static Quiver.GraphValue op_Implicit(bool value) { }
+        public static Quiver.GraphValue op_Implicit(double value) { }
+        public static Quiver.GraphValue op_Implicit(int value) { }
+        public static Quiver.GraphValue op_Implicit(long value) { }
+        public static Quiver.GraphValue op_Implicit(string value) { }
+        public static bool operator !=(Quiver.GraphValue left, Quiver.GraphValue right) { }
+        public static bool operator ==(Quiver.GraphValue left, Quiver.GraphValue right) { }
+    }
+    public enum GraphValueKind : byte
+    {
+        Boolean = 1,
+        Int32 = 2,
+        Int64 = 3,
+        Double = 4,
+        String = 5,
+        Bytes = 6,
+        FloatVector = 7,
+    }
+    public sealed class GraphVertexQuery
+    {
+        public Quiver.GraphVertexQuery Both(string? edgeType = null) { }
+        public long Count() { }
+        public Quiver.GraphVertexQuery Deduplicate() { }
+        public Quiver.GraphVertexQuery Has(string property) { }
+        public Quiver.GraphVertexQuery Has(string property, Quiver.Api.PropertyPredicate predicate) { }
+        public Quiver.GraphVertexQuery Has(string property, Quiver.GraphValue value) { }
+        public Quiver.GraphVertexQuery HasLabel(string label) { }
+        public Quiver.GraphVertexQuery In(string? edgeType = null) { }
+        public Quiver.GraphVertexQuery Limit(long count) { }
+        public Quiver.GraphVertexQuery Out(string? edgeType = null) { }
+        public Quiver.GraphVertexQuery Skip(long count) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.VertexKey> ToList() { }
+    }
+    public sealed class GraphWorkspace : System.IDisposable
+    {
+        public Quiver.AdvancedGraphStore Advanced { get; }
+        public void Dispose() { }
+        public void Read(Quiver.TypedGraphReadAction operation) { }
+        public TResult Read<TResult>(Quiver.TypedGraphReadOperation<TResult> operation) { }
+        public void Write(Quiver.TypedGraphWriteAction operation) { }
+        public TResult Write<TResult>(Quiver.TypedGraphWriteOperation<TResult> operation) { }
+        public static Quiver.GraphWorkspace Attach(Quiver.GraphStore store) { }
+        public static Quiver.GraphWorkspace Open(string filePath, Quiver.GraphStoreOptions? options = null) { }
+        public static Quiver.GraphWorkspace OpenMemory(Quiver.GraphStoreOptions? options = null) { }
+    }
+    public abstract class GraphWriteAccess : Quiver.GraphReadAccess
+    {
+        public void AddValue(Quiver.EdgeKey edge, string property, Quiver.GraphValue value) { }
+        public void AddValue(Quiver.NexusKey nexus, string property, Quiver.GraphValue value) { }
+        public void AddValue(Quiver.VertexKey vertex, string property, Quiver.GraphValue value) { }
+        public Quiver.EdgeKey Connect(Quiver.VertexKey source, string type, Quiver.VertexKey target) { }
+        public Quiver.NexusKey CreateNexus(string type, System.Collections.Generic.IReadOnlyList<Quiver.GraphNexusMember> members) { }
+        public Quiver.VertexKey CreateVertex(string label) { }
+        public void Delete(Quiver.EdgeKey edge) { }
+        public void Delete(Quiver.NexusKey nexus) { }
+        public void Delete(Quiver.VertexKey vertex) { }
+        public void Remove(Quiver.EdgeKey edge, string property) { }
+        public void Remove(Quiver.NexusKey nexus, string property) { }
+        public void Remove(Quiver.VertexKey vertex, string property) { }
+        public void RemoveValue(Quiver.EdgeKey edge, string property, Quiver.GraphValue value) { }
+        public void RemoveValue(Quiver.NexusKey nexus, string property, Quiver.GraphValue value) { }
+        public void RemoveValue(Quiver.VertexKey vertex, string property, Quiver.GraphValue value) { }
+        public void Set(Quiver.EdgeKey edge, string property, Quiver.GraphValue value) { }
+        public void Set(Quiver.NexusKey nexus, string property, Quiver.GraphValue value) { }
+        public void Set(Quiver.VertexKey vertex, string property, Quiver.GraphValue value) { }
+        public void SetVector(Quiver.VertexKey vertex, string property, System.ReadOnlySpan<float> vector) { }
+    }
+    public delegate void GraphWriteAction(Quiver.GraphWriteScope scope);
+    public delegate TResult GraphWriteOperation<out TResult>(Quiver.GraphWriteScope scope);
+    public sealed class GraphWriteScope : Quiver.GraphWriteAccess { }
+    public sealed class GraphWriteSession : Quiver.GraphWriteAccess, System.IDisposable
+    {
+        public void Commit() { }
+        public void Dispose() { }
+        public void Rollback() { }
+    }
+    public enum GraphWriterContentionMode
+    {
+        Wait = 0,
+        FailFast = 1,
     }
     public interface IDiagnosticsApi
     {
@@ -916,56 +399,33 @@ namespace Quiver
         Quiver.IndexRepairReport RepairIndexes(Quiver.IndexRepairMode mode);
         void SetCheckpointPolicy(Quiver.Transactions.CheckpointPolicy policy, long? fixedThresholdBytes = default);
     }
-    public interface IGraphStorageBackend : System.IDisposable
+    public interface IGraphEdgeEntity<TSelf>
+        where TSelf : Quiver.IGraphEdgeEntity<TSelf>
     {
-        Quiver.IDiagnosticsApi Diagnostics { get; }
-        Quiver.IReadTransaction BeginReadTransaction();
-        Quiver.IWriteTransaction BeginWriteTransaction();
-        void CreateSnapshot(string targetDirectory, Quiver.SnapshotOptions? options = null);
-        Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null);
+        string GraphType { get; }
+        TSelf Read(Quiver.GraphReadAccess read, Quiver.EdgeKey edge);
+        void Write(Quiver.GraphWriteAccess write, Quiver.EdgeKey edge, TSelf entity);
     }
-    public interface IGraphStorageBackendFactory
+    public interface IGraphEntity<TSelf>
+        where TSelf : Quiver.IGraphEntity<TSelf>
     {
-        Quiver.IGraphStorageBackend Open(string directoryPath, Quiver.QuiverDatabaseOptions options);
+        string GraphLabel { get; }
+        TSelf Read(Quiver.GraphReadAccess read, Quiver.VertexKey vertex);
+        void Write(Quiver.GraphWriteAccess write, Quiver.VertexKey vertex, TSelf entity);
+    }
+    public interface IGraphNexusEntity<TSelf>
+        where TSelf : Quiver.IGraphNexusEntity<TSelf>
+    {
+        string GraphType { get; }
+        System.Collections.Generic.IReadOnlyList<Quiver.GraphNexusMember> GetMembers(TSelf entity);
+        TSelf Read(Quiver.GraphReadAccess read, Quiver.NexusKey nexus);
+        void Write(Quiver.GraphWriteAccess write, Quiver.NexusKey nexus, TSelf entity);
     }
     public interface IGraphVertexSchema<TSelf>
         where TSelf : Quiver.IGraphVertexSchema<TSelf>
     {
         void EnsureIndex(Quiver.ISchemaEditor schema, string propertyName, Quiver.IndexKind? kindOverride);
         void EnsureIndexes(Quiver.ISchemaEditor schema);
-    }
-    public interface IReadTransaction : System.IDisposable
-    {
-        Quiver.Core.TransactionId Id { get; }
-        Quiver.Api.GraphTraversalSource Query { get; }
-        Quiver.ISchemaCatalog Schema { get; }
-        Quiver.Transactions.TransactionState State { get; }
-        Quiver.Storage.Records.EdgeEnumerator EnumerateEdges(Quiver.Core.VertexId vertexId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null);
-        Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.EdgeId edgeId);
-        Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.NexusId nexusId);
-        Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.VertexId vertexId);
-        string? GetEdgeType(Quiver.Core.EdgeId edgeId);
-        string? GetEdgeTypeName(Quiver.Core.EdgeTypeId typeId);
-        Quiver.NexusMemberEnumerator GetMembers(Quiver.Core.NexusId nexusId, string? role = null);
-        string? GetNexusType(Quiver.Core.NexusId nexusId);
-        string? GetNexusTypeName(Quiver.Core.NexusTypeId typeId);
-        Quiver.NexusIdEnumerator GetNexuses(Quiver.Core.VertexId vertexId, string? type = null, string? role = null);
-        Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.EdgeId edgeId, string key);
-        Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NexusId nexusId, string key);
-        Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.VertexId vertexId, string key);
-        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.EdgeId edgeId, string key);
-        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NexusId nexusId, string key);
-        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.VertexId vertexId, string key);
-        string? GetVertexLabel(Quiver.Core.VertexId vertexId);
-        bool HasProperty(Quiver.Core.NexusId nexusId, string key);
-        bool HasProperty(Quiver.Core.VertexId vertexId, string key);
-        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null);
-        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null);
-        Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive);
-        Quiver.EntityRefEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key);
-        bool TryGetEdge(Quiver.Core.EdgeId edgeId, out Quiver.EdgeInfo edge);
-        bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination);
-        bool VertexExists(Quiver.Core.VertexId vertexId);
     }
     public interface ISchemaCatalog
     {
@@ -1000,54 +460,6 @@ namespace Quiver
         bool RenameLabel(string oldName, string newName);
         bool RenamePropertyKey(string oldName, string newName);
     }
-    public interface IWriteTransaction : Quiver.IReadTransaction, Quiver.Transactions.ICommitHookRegistrar, System.IDisposable
-    {
-        Quiver.ISchemaEditor EditSchema { get; }
-        Quiver.Api.GraphMutationSource Mutate { get; }
-        void AddPropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void AddPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void AddPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void Commit();
-        Quiver.Core.EdgeId CreateEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, Quiver.Core.EdgeTypeId typeId);
-        Quiver.Core.EdgeId CreateEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type);
-        Quiver.Core.NexusId CreateNexus(Quiver.Core.NexusTypeId typeId, System.ReadOnlySpan<Quiver.NexusMember> members);
-        Quiver.Core.NexusId CreateNexus(string type, System.ReadOnlySpan<Quiver.NexusMember> members);
-        Quiver.Core.VertexId CreateVertex(Quiver.Core.LabelId labelId);
-        Quiver.Core.VertexId CreateVertex(string label);
-        void DeleteEdge(Quiver.Core.EdgeId edgeId);
-        void DeleteNexus(Quiver.Core.NexusId nexusId);
-        void DeleteVertex(Quiver.Core.VertexId vertexId);
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        System.ValueTuple<Quiver.Core.EdgeId, bool> MergeEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type);
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        System.ValueTuple<Quiver.Core.NexusId, bool> MergeNexus(string type, System.ReadOnlySpan<Quiver.NexusMember> members);
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        System.ValueTuple<Quiver.Core.VertexId, bool> MergeVertex(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue);
-        void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
-        void RemoveProperty(Quiver.Core.EdgeId edgeId, string key);
-        void RemoveProperty(Quiver.Core.NexusId nexusId, string key);
-        void RemoveProperty(Quiver.Core.VertexId vertexId, string key);
-        void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void RemovePropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void RemovePropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value);
-        Quiver.EdgeReplacement ReplaceEdge(Quiver.Core.EdgeId edgeId, Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type);
-        Quiver.NexusReplacement ReplaceNexus(Quiver.Core.NexusId nexusId, string type, System.ReadOnlySpan<Quiver.NexusMember> members);
-        Quiver.VertexGraphRewriteResult ReplaceVertex(Quiver.Core.VertexId vertexId, string label);
-        Quiver.VertexGraphRewriteResult ReplaceVertices(System.Collections.Generic.IReadOnlyList<Quiver.VertexRewriteRequest> rewrites);
-        void Rollback();
-        void RollbackTo(Quiver.Transactions.SavepointId savepoint);
-        Quiver.Transactions.SavepointId Savepoint(string? name = null);
-        void SetProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void SetProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void SetProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector);
-    }
     public sealed class IndexConsistencyReport : System.IEquatable<Quiver.IndexConsistencyReport>
     {
         public IndexConsistencyReport(int IndexCount, long EntryCount, long OrphanCount, System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans, long LabelIndexOrphanCount) { }
@@ -1068,6 +480,7 @@ namespace Quiver
         public IndexInfo(Quiver.IndexDefinition Definition, Quiver.IndexLifecycleState State, long EntryCount) { }
         public Quiver.IndexDefinition Definition { get; init; }
         public long EntryCount { get; init; }
+        public bool IsUnique { get; }
         public Quiver.IndexKind? Kind { get; }
         public string Name { get; }
         public Quiver.IndexLifecycleState State { get; init; }
@@ -1099,64 +512,15 @@ namespace Quiver
         public System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans { get; init; }
         public int RemovedCount { get; init; }
     }
-    public static class MinimumHittingSetAlgorithms
+    public readonly struct NexusKey : System.IEquatable<Quiver.NexusKey>
     {
-        public static Quiver.MinimumHittingSetResult FindMinimumHittingSet(this Quiver.IReadTransaction transaction, string nexusType, string coverRole, Quiver.MinimumHittingSetOptions? options = null) { }
-        public static Quiver.MinimumHittingSetResult Solve(System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId>> facts, Quiver.MinimumHittingSetOptions? options = null) { }
-    }
-    public sealed class MinimumHittingSetOptions
-    {
-        public MinimumHittingSetOptions() { }
-        public System.Threading.CancellationToken CancellationToken { get; init; }
-        public long MaxNodes { get; init; }
-        public System.TimeSpan TimeLimit { get; init; }
-    }
-    public sealed class MinimumHittingSetResult
-    {
-        public int CandidateCount { get; }
-        public int FactCount { get; }
-        public bool HasSolution { get; }
-        public bool IsOptimal { get; }
-        public int? LowerBound { get; }
-        public int RemovedCandidateCount { get; }
-        public int RemovedFactCount { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VertexId> Solution { get; }
-        public Quiver.MinimumHittingSetTerminationReason TerminationReason { get; }
-        public int? UpperBound { get; }
-        public long VisitedNodes { get; }
-    }
-    public enum MinimumHittingSetTerminationReason
-    {
-        Optimal = 0,
-        Infeasible = 1,
-        NodeBudget = 2,
-        TimeBudget = 3,
-        Cancelled = 4,
-    }
-    public delegate double NexusCostSelector(Quiver.IReadTransaction transaction, Quiver.Core.NexusId nexusId);
-    public ref struct NexusIdEnumerator
-    {
-        public Quiver.Core.NexusId Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public readonly struct NexusMember : System.IEquatable<Quiver.NexusMember>
-    {
-        public NexusMember(string Role, Quiver.Core.VertexId VertexId) { }
-        public string Role { get; init; }
-        public Quiver.Core.VertexId VertexId { get; init; }
-    }
-    public ref struct NexusMemberEnumerator
-    {
-        public Quiver.NexusMember Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public readonly struct NexusReplacement : System.IEquatable<Quiver.NexusReplacement>
-    {
-        public NexusReplacement(Quiver.Core.NexusId OldId, Quiver.Core.NexusId NewId) { }
-        public Quiver.Core.NexusId NewId { get; init; }
-        public Quiver.Core.NexusId OldId { get; init; }
+        public bool IsValid { get; }
+        public bool Equals(Quiver.NexusKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Quiver.NexusKey left, Quiver.NexusKey right) { }
+        public static bool operator ==(Quiver.NexusKey left, Quiver.NexusKey right) { }
     }
     public sealed class OrphanIndexEntry : System.IEquatable<Quiver.OrphanIndexEntry>
     {
@@ -1171,11 +535,6 @@ namespace Quiver
         public int ClusterCount { get; init; }
         public float? SeparationScale { get; init; }
         public bool UsedDisconnectedComponents { get; init; }
-    }
-    public static class PersistenceH0Algorithms
-    {
-        public static Quiver.PersistenceH0Result Compute(Quiver.IReadTransaction transaction, string indexName, Quiver.PersistenceH0Options? options = null) { }
-        public static Quiver.PersistenceClusterEstimate EstimateClusters(Quiver.PersistenceH0Result barcode) { }
     }
     public enum PersistenceH0Filtration
     {
@@ -1233,22 +592,6 @@ namespace Quiver
         TimeBudget = 5,
         Cancelled = 6,
     }
-    public sealed class PropertyKeyStats
-    {
-        public const int DistinctTrackingCap = 4096;
-        public PropertyKeyStats() { }
-        public long Count { get; }
-        public long DistinctEstimate { get; }
-        public bool HasDoubleRange { get; }
-        public bool HasNumericRange { get; }
-        public Quiver.Core.PropertyKeyId KeyId { get; init; }
-        public double MaxDouble { get; }
-        public long MaxInt64 { get; }
-        public double MinDouble { get; }
-        public long MinInt64 { get; }
-        public long NullOrMissingCount { get; }
-        public Quiver.Core.PropertyTypeFlags ObservedTypes { get; }
-    }
     public enum PropertyOwnerKind
     {
         Vertex = 0,
@@ -1262,91 +605,11 @@ namespace Quiver
         public string PropertyKey { get; init; }
         public string? Scope { get; init; }
     }
-    public sealed class QuiverDatabase : System.IDisposable
-    {
-        public Quiver.IDiagnosticsApi Diagnostics { get; }
-        public string Path { get; }
-        public Quiver.ISchemaCatalog Schema { get; }
-        public Quiver.Storage.Records.BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false) { }
-        public Quiver.IReadTransaction BeginReadTransaction() { }
-        public Quiver.Storage.Records.StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false) { }
-        public Quiver.IWriteTransaction BeginWriteTransaction() { }
-        public Quiver.GraphStats CollectStats() { }
-        public Quiver.GraphStats CollectStats(int powerVertexThreshold) { }
-        public Quiver.GraphStats CollectStats(int powerVertexThreshold, double denseThreshold) { }
-        public void CompactAdjacency() { }
-        public void CreateSnapshot(string targetFilePath, Quiver.SnapshotOptions? options = null) { }
-        public void Dispose() { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> GetMigrationHistory() { }
-        public System.Threading.Tasks.Task<Quiver.Migrations.MigrationResult> MigrateAsync(System.Collections.Generic.IEnumerable<Quiver.Migrations.IMigration> migrations, System.Threading.CancellationToken cancellationToken = default) { }
-        public Quiver.Storage.Records.IGraphSnapshotView OpenSnapshotView() { }
-        public bool TryGetDatabaseInstanceId(out Quiver.DatabaseInstanceId databaseInstanceId) { }
-        public Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null) { }
-        public static Quiver.QuiverDatabase CreateInMemory(Quiver.QuiverDatabaseOptions? options = null) { }
-        public static Quiver.QuiverDatabase Open(string filePath, Quiver.QuiverDatabaseOptions? options = null) { }
-        public static Quiver.StorageUpgradeResult UpgradeStorage(string filePath, Quiver.StorageUpgradeOptions? options = null) { }
-    }
-    public sealed class QuiverDatabaseOptions
-    {
-        public QuiverDatabaseOptions() { }
-        public int AdaptiveSampleWindow { get; set; }
-        public bool AutoRepairOrphansOnRecovery { get; set; }
-        public bool AutoVacuum { get; set; }
-        public System.TimeSpan AutoVacuumInterval { get; set; }
-        public Quiver.BackendKind Backend { get; set; }
-        public Quiver.IGraphStorageBackendFactory? BackendFactory { get; set; }
-        public long BufferPoolSize { get; set; }
-        public Quiver.Transactions.CheckpointPolicy CheckpointPolicy { get; set; }
-        public long CheckpointThresholdBytes { get; set; }
-        public System.Collections.Generic.List<Quiver.CoMembershipRolePair> CoMembershipRolePairs { get; }
-        public bool EnableChecksums { get; set; }
-        public long InitialFileAllocationBytes { get; set; }
-        public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
-        public long MaxCheckpointThresholdBytes { get; set; }
-        public long MaximumFileGrowthStepBytes { get; set; }
-        public long MinCheckpointThresholdBytes { get; set; }
-        public System.TimeSpan TargetRecoveryTime { get; set; }
-        public Quiver.WriterContentionMode WriterContentionMode { get; set; }
-        public System.TimeSpan WriterWaitTimeout { get; set; }
-    }
-    public sealed class ReadTransaction : Quiver.IReadTransaction, System.IDisposable
-    {
-        public Quiver.Core.TransactionId Id { get; }
-        public Quiver.Api.GraphTraversalSource Query { get; }
-        public Quiver.ISchemaCatalog Schema { get; }
-        public Quiver.Transactions.TransactionState State { get; }
-        public void Dispose() { }
-        public Quiver.Storage.Records.EdgeEnumerator EnumerateEdges(Quiver.Core.VertexId vertexId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.EdgeId edgeId) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.NexusId nexusId) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.VertexId vertexId) { }
-        public string? GetEdgeType(Quiver.Core.EdgeId edgeId) { }
-        public string? GetEdgeTypeName(Quiver.Core.EdgeTypeId typeId) { }
-        public Quiver.NexusMemberEnumerator GetMembers(Quiver.Core.NexusId nexusId, string? role = null) { }
-        public string? GetNexusType(Quiver.Core.NexusId nexusId) { }
-        public string? GetNexusTypeName(Quiver.Core.NexusTypeId typeId) { }
-        public Quiver.NexusIdEnumerator GetNexuses(Quiver.Core.VertexId vertexId, string? type = null, string? role = null) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.EdgeId edgeId, string key) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.EdgeId edgeId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NexusId nexusId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.VertexId vertexId, string key) { }
-        public string? GetVertexLabel(Quiver.Core.VertexId vertexId) { }
-        public bool HasProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public bool HasProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive) { }
-        public Quiver.EntityRefEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key) { }
-        public bool TryGetEdge(Quiver.Core.EdgeId edgeId, out Quiver.EdgeInfo edge) { }
-        public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
-        public bool VertexExists(Quiver.Core.VertexId vertexId) { }
-    }
     public sealed class ScalarIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.ScalarIndexDefinition>
     {
-        public ScalarIndexDefinition(string Name, Quiver.PropertyTarget Target, Quiver.IndexKind Kind) { }
+        public ScalarIndexDefinition(string Name, Quiver.PropertyTarget Target, Quiver.IndexKind Kind, bool Unique = false) { }
         public Quiver.IndexKind Kind { get; init; }
+        public bool Unique { get; init; }
     }
     public static class SchemaEditorExtensions
     {
@@ -1354,22 +617,6 @@ namespace Quiver
             where T : Quiver.IGraphVertexSchema<T> { }
         public static void EnsureIndexes<T>(this Quiver.ISchemaEditor schema)
             where T : Quiver.IGraphVertexSchema<T> { }
-    }
-    public sealed class ShortestDerivationOptions
-    {
-        public ShortestDerivationOptions() { }
-        public System.Threading.CancellationToken CancellationToken { get; init; }
-        public int MaxNexuses { get; init; }
-        public int MaxTreeNodes { get; init; }
-    }
-    public sealed class ShortestDerivationResult
-    {
-        public double? Cost { get; }
-        public bool IsComplete { get; }
-        public bool IsReachable { get; }
-        public Quiver.DirectedNexusTerminationReason TerminationReason { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.DerivationTreeNode> Tree { get; }
-        public int VisitedNexusCount { get; }
     }
     public sealed class SnapshotOptions
     {
@@ -1410,6 +657,69 @@ namespace Quiver
         AlreadyCurrent = 0,
         Upgraded = 1,
     }
+    public sealed class TypedGraphQuery<T>
+        where T : Quiver.IGraphEntity<T>
+    {
+        public long Count() { }
+        public Quiver.TypedGraphQuery<T> Has<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> selector, Quiver.Api.PropertyPredicate predicate) { }
+        public Quiver.TypedGraphQuery<T> Has<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> selector, TProperty value) { }
+        public Quiver.TypedGraphQuery<T> Limit(long count) { }
+        public Quiver.TypedGraphQuery<TTarget> Out<TTarget>(string? edgeType = null)
+            where TTarget : Quiver.IGraphEntity<TTarget> { }
+        public System.Collections.Generic.IReadOnlyList<T> ToList() { }
+        public Quiver.TypedGraphQuery<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
+    }
+    public delegate void TypedGraphReadAction(Quiver.TypedGraphReadScope scope);
+    public delegate TResult TypedGraphReadOperation<out TResult>(Quiver.TypedGraphReadScope scope);
+    public sealed class TypedGraphReadScope
+    {
+        public Quiver.GraphReadAccess Raw { get; }
+        public bool Contains<T>(Quiver.GraphEntity<T> entity)
+            where T : Quiver.IGraphEntity<T> { }
+        public T Get<T>(Quiver.GraphEdgeEntity<T> entity)
+            where T : Quiver.IGraphEdgeEntity<T> { }
+        public T Get<T>(Quiver.GraphEntity<T> entity)
+            where T : Quiver.IGraphEntity<T> { }
+        public T Get<T>(Quiver.GraphNexusEntity<T> entity)
+            where T : Quiver.IGraphNexusEntity<T> { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.GraphEntity<TTarget>> Related<TSource, TTarget>(Quiver.GraphEntity<TSource> source, string edgeType, Quiver.GraphSet<TTarget> targetSet)
+            where TSource : Quiver.IGraphEntity<TSource>
+            where TTarget : Quiver.IGraphEntity<TTarget> { }
+        public Quiver.GraphSet<T> Set<T>()
+            where T : Quiver.IGraphEntity<T> { }
+    }
+    public delegate void TypedGraphWriteAction(Quiver.TypedGraphWriteScope scope);
+    public delegate TResult TypedGraphWriteOperation<out TResult>(Quiver.TypedGraphWriteScope scope);
+    public sealed class TypedGraphWriteScope
+    {
+        public Quiver.GraphWriteAccess Raw { get; }
+        public Quiver.GraphNexusEntity<TNexus> Add<TNexus>(TNexus entity)
+            where TNexus : Quiver.IGraphNexusEntity<TNexus> { }
+        public Quiver.GraphEntity<T> Add<T>(Quiver.GraphSet<T> set, T entity)
+            where T : Quiver.IGraphEntity<T> { }
+        public Quiver.EdgeKey Connect<TSource, TTarget>(Quiver.GraphEntity<TSource> source, string edgeType, Quiver.GraphEntity<TTarget> target)
+            where TSource : Quiver.IGraphEntity<TSource>
+            where TTarget : Quiver.IGraphEntity<TTarget> { }
+        public Quiver.GraphEdgeEntity<TEdge> Connect<TSource, TEdge, TTarget>(Quiver.GraphEntity<TSource> source, TEdge edge, Quiver.GraphEntity<TTarget> target)
+            where TSource : Quiver.IGraphEntity<TSource>
+            where TEdge : Quiver.IGraphEdgeEntity<TEdge>
+            where TTarget : Quiver.IGraphEntity<TTarget> { }
+        public void Delete<T>(Quiver.GraphEntity<T> entity)
+            where T : Quiver.IGraphEntity<T> { }
+        public T Get<T>(Quiver.GraphEntity<T> entity)
+            where T : Quiver.IGraphEntity<T> { }
+        public Quiver.GraphSet<T> Set<T>()
+            where T : Quiver.IGraphEntity<T> { }
+        public T Update<T>(Quiver.GraphEntity<T> entity, System.Func<T, T> update)
+            where T : Quiver.IGraphEntity<T> { }
+    }
+    public sealed class UniqueConstraintViolationException : Quiver.Core.QuiverException
+    {
+        public UniqueConstraintViolationException(string indexName, string scope, string propertyKey) { }
+        public string IndexName { get; }
+        public string PropertyKey { get; }
+        public string Scope { get; }
+    }
     public sealed class VectorIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.VectorIndexDefinition>
     {
         public VectorIndexDefinition(string Name, Quiver.PropertyTarget Target, int Dimensions, Quiver.Core.DistanceMetric Metric = 1, Quiver.Core.VectorElementType ElementType = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400, Quiver.VectorSegmentPolicy? SegmentPolicy = null) { }
@@ -1428,138 +738,142 @@ namespace Quiver
         public int MaximumDeltaEntries { get; init; }
         public int MaximumSegments { get; init; }
     }
-    public sealed class VertexDegreeLookup
+    public readonly struct VertexKey : System.IEquatable<Quiver.VertexKey>
     {
-        public const double DefaultDenseThreshold = 4D;
-        public static readonly Quiver.VertexDegreeLookup Empty;
-        public int DenseLength { get; }
-        public double DenseThreshold { get; }
-        public bool IsDense { get; }
-        public long MaxVertexIdObserved { get; }
-        public int PowerVertexCount { get; }
-        public long PowerVertexThreshold { get; }
-        public System.Collections.Generic.IEnumerable<Quiver.VertexDegreeSummary> EnumeratePowerVertices() { }
-        public bool IsLikelyPowerVertex(Quiver.Core.VertexId vertexId) { }
-        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.VertexId, Quiver.VertexDegreeSummary> SnapshotPowerVertices() { }
-        public bool TryGetDegree(Quiver.Core.VertexId vertexId, out long outDegree, out long inDegree) { }
-    }
-    public readonly struct VertexDegreeSummary : System.IEquatable<Quiver.VertexDegreeSummary>
-    {
-        public VertexDegreeSummary(Quiver.Core.VertexId VertexId, long OutDegree, long InDegree) { }
-        public long InDegree { get; init; }
-        public long OutDegree { get; init; }
-        public long TotalDegree { get; }
-        public Quiver.Core.VertexId VertexId { get; init; }
-    }
-    public sealed class VertexGraphRewriteResult
-    {
-        public System.Collections.Generic.IReadOnlyList<Quiver.EdgeReplacement> EdgeMappings { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.NexusReplacement> NexusMappings { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.VertexReplacement> VertexMappings { get; }
-    }
-    public ref struct VertexIdEnumerator
-    {
-        public Quiver.Core.VertexId Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public readonly struct VertexReplacement : System.IEquatable<Quiver.VertexReplacement>
-    {
-        public VertexReplacement(Quiver.Core.VertexId OldId, Quiver.Core.VertexId NewId) { }
-        public Quiver.Core.VertexId NewId { get; init; }
-        public Quiver.Core.VertexId OldId { get; init; }
-    }
-    public readonly struct VertexRewriteRequest : System.IEquatable<Quiver.VertexRewriteRequest>
-    {
-        public VertexRewriteRequest(Quiver.Core.VertexId OldId, string NewLabel) { }
-        public string NewLabel { get; init; }
-        public Quiver.Core.VertexId OldId { get; init; }
-    }
-    public sealed class WriteTransaction : Quiver.IReadTransaction, Quiver.IWriteTransaction, Quiver.Transactions.ICommitHookRegistrar, System.IDisposable
-    {
-        public Quiver.ISchemaEditor EditSchema { get; }
-        public Quiver.Core.TransactionId Id { get; }
-        public Quiver.Api.GraphMutationSource Mutate { get; }
-        public Quiver.Api.GraphTraversalSource Query { get; }
-        public Quiver.ISchemaCatalog Schema { get; }
-        public Quiver.Transactions.TransactionState State { get; }
-        public void AddPropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void AddPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void AddPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void Commit() { }
-        public Quiver.Core.EdgeId CreateEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, Quiver.Core.EdgeTypeId typeId) { }
-        public Quiver.Core.EdgeId CreateEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
-        public Quiver.Core.NexusId CreateNexus(Quiver.Core.NexusTypeId typeId, System.ReadOnlySpan<Quiver.NexusMember> members) { }
-        public Quiver.Core.NexusId CreateNexus(string type, System.ReadOnlySpan<Quiver.NexusMember> members) { }
-        public Quiver.Core.VertexId CreateVertex(Quiver.Core.LabelId labelId) { }
-        public Quiver.Core.VertexId CreateVertex(string label) { }
-        public void DeleteEdge(Quiver.Core.EdgeId edgeId) { }
-        public void DeleteNexus(Quiver.Core.NexusId nexusId) { }
-        public void DeleteVertex(Quiver.Core.VertexId vertexId) { }
-        public void Dispose() { }
-        public Quiver.Storage.Records.EdgeEnumerator EnumerateEdges(Quiver.Core.VertexId vertexId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.EdgeId edgeId) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.NexusId nexusId) { }
-        public Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.VertexId vertexId) { }
-        public string? GetEdgeType(Quiver.Core.EdgeId edgeId) { }
-        public string? GetEdgeTypeName(Quiver.Core.EdgeTypeId typeId) { }
-        public Quiver.NexusMemberEnumerator GetMembers(Quiver.Core.NexusId nexusId, string? role = null) { }
-        public string? GetNexusType(Quiver.Core.NexusId nexusId) { }
-        public string? GetNexusTypeName(Quiver.Core.NexusTypeId typeId) { }
-        public Quiver.NexusIdEnumerator GetNexuses(Quiver.Core.VertexId vertexId, string? type = null, string? role = null) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.EdgeId edgeId, string key) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.EdgeId edgeId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NexusId nexusId, string key) { }
-        public Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.VertexId vertexId, string key) { }
-        public string? GetVertexLabel(Quiver.Core.VertexId vertexId) { }
-        public bool HasProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public bool HasProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.EdgeId, bool> MergeEdge(Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.NexusId, bool> MergeNexus(string type, System.ReadOnlySpan<Quiver.NexusMember> members) { }
-        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Id",
-                "Created"})]
-        public System.ValueTuple<Quiver.Core.VertexId, bool> MergeVertex(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue) { }
-        public void OnCommitted(System.Action callback) { }
-        public void OnRolledBack(System.Action callback) { }
-        public Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive) { }
-        public void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint) { }
-        public void RemoveProperty(Quiver.Core.EdgeId edgeId, string key) { }
-        public void RemoveProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public void RemoveProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void RemovePropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void RemovePropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public Quiver.EdgeReplacement ReplaceEdge(Quiver.Core.EdgeId edgeId, Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
-        public Quiver.NexusReplacement ReplaceNexus(Quiver.Core.NexusId nexusId, string type, System.ReadOnlySpan<Quiver.NexusMember> members) { }
-        public Quiver.VertexGraphRewriteResult ReplaceVertex(Quiver.Core.VertexId vertexId, string label) { }
-        public Quiver.VertexGraphRewriteResult ReplaceVertices(System.Collections.Generic.IReadOnlyList<Quiver.VertexRewriteRequest> rewrites) { }
-        public void Rollback() { }
-        public void RollbackTo(Quiver.Transactions.SavepointId savepoint) { }
-        public Quiver.Transactions.SavepointId Savepoint(string? name = null) { }
-        public Quiver.EntityRefEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key) { }
-        public void SetProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void SetProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void SetProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector) { }
-        public bool TryGetEdge(Quiver.Core.EdgeId edgeId, out Quiver.EdgeInfo edge) { }
-        public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
-        public bool VertexExists(Quiver.Core.VertexId vertexId) { }
+        public bool IsValid { get; }
+        public bool Equals(Quiver.VertexKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Quiver.VertexKey left, Quiver.VertexKey right) { }
+        public static bool operator ==(Quiver.VertexKey left, Quiver.VertexKey right) { }
     }
     public enum WriterContentionMode
     {
         Wait = 0,
         FailFast = 1,
+    }
+}
+namespace Quiver.Api
+{
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class EdgeAttribute<TSource, TTarget> : System.Attribute
+    {
+        public EdgeAttribute(string? type = null) { }
+        public string? Type { get; }
+    }
+    public readonly struct GraphVertexRef<TVertex> : System.IEquatable<Quiver.Api.GraphVertexRef<TVertex>>
+        where TVertex : Quiver.IGraphEntity<TVertex>
+    {
+        public GraphVertexRef(Quiver.VertexKey Key) { }
+        public Quiver.VertexKey Key { get; init; }
+        public static Quiver.Api.GraphVertexRef<TVertex> op_Implicit(Quiver.GraphEntity<TVertex> entity) { }
+        public static Quiver.Api.GraphVertexRef<TVertex> op_Implicit(Quiver.VertexKey key) { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class IndexedAttribute : System.Attribute
+    {
+        public IndexedAttribute(string? indexName = null) { }
+        public string? IndexName { get; }
+        public bool Unique { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class NexusAttribute : System.Attribute
+    {
+        public NexusAttribute(string? type = null) { }
+        public string? Type { get; }
+    }
+    public static class P
+    {
+        public static Quiver.Api.PropertyPredicate And(params Quiver.Api.PropertyPredicate[] predicates) { }
+        public static Quiver.Api.PropertyPredicate Between(double from, double to) { }
+        public static Quiver.Api.PropertyPredicate Between(long from, long to) { }
+        public static Quiver.Api.PropertyPredicate Contains(string needle) { }
+        public static Quiver.Api.PropertyPredicate EndsWith(string suffix) { }
+        public static Quiver.Api.PropertyPredicate Eq(double value) { }
+        public static Quiver.Api.PropertyPredicate Eq(long value) { }
+        public static Quiver.Api.PropertyPredicate Eq(string value) { }
+        public static Quiver.Api.PropertyPredicate Gt(double value) { }
+        public static Quiver.Api.PropertyPredicate Gt(long value) { }
+        public static Quiver.Api.PropertyPredicate Gte(double value) { }
+        public static Quiver.Api.PropertyPredicate Gte(long value) { }
+        public static Quiver.Api.PropertyPredicate Lt(double value) { }
+        public static Quiver.Api.PropertyPredicate Lt(long value) { }
+        public static Quiver.Api.PropertyPredicate Lte(double value) { }
+        public static Quiver.Api.PropertyPredicate Lte(long value) { }
+        public static Quiver.Api.PropertyPredicate Not(Quiver.Api.PropertyPredicate inner) { }
+        public static Quiver.Api.PropertyPredicate Or(params Quiver.Api.PropertyPredicate[] predicates) { }
+        public static Quiver.Api.PropertyPredicate Regex(string pattern, System.Text.RegularExpressions.RegexOptions options = 0) { }
+        public static Quiver.Api.PropertyPredicate StartsWith(string prefix) { }
+        public static Quiver.Api.PropertyPredicate Within(params string[] values) { }
+        public static Quiver.Api.PropertyPredicate Without(params string[] values) { }
+    }
+    public enum PredicateKind
+    {
+        Eq = 0,
+        Gt = 1,
+        Gte = 2,
+        Lt = 3,
+        Lte = 4,
+        Between = 5,
+        Within = 6,
+        Without = 7,
+        StartsWith = 8,
+        EndsWith = 9,
+        Contains = 10,
+        Regex = 11,
+        Not = 12,
+        And = 13,
+        Or = 14,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class PropertyAttribute : System.Attribute
+    {
+        public PropertyAttribute(string? key = null) { }
+        public string? Key { get; }
+    }
+    public sealed class PropertyPredicate
+    {
+        public Quiver.Api.PredicateKind Kind { get; }
+        public long LongFrom { get; }
+        public long LongTo { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class RoleAttribute : System.Attribute
+    {
+        public RoleAttribute(string? role = null) { }
+        public string? Role { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class VertexAttribute : System.Attribute
+    {
+        public VertexAttribute(string? label = null) { }
+        public string? Label { get; }
+    }
+}
+namespace Quiver.Api.Match
+{
+    public sealed class GraphPattern
+    {
+        public static Quiver.Api.Match.NexusPattern Nexus(string variable, string? type = null) { }
+        public static Quiver.Api.Match.VertexPattern Vertex(string variable, string? label = null) { }
+    }
+    public sealed class NexusPattern
+    {
+        public string? Type { get; }
+        public string Variable { get; }
+        public Quiver.Api.Match.NexusPattern Member(string role, Quiver.Api.Match.VertexPattern vertex) { }
+    }
+    public sealed class VertexPattern
+    {
+        public string? Label { get; }
+        public string Variable { get; }
+        public Quiver.Api.Match.GraphPattern In(string edgeType, Quiver.Api.Match.VertexPattern end) { }
+        public Quiver.Api.Match.GraphPattern In<TEdge>(Quiver.Api.Match.VertexPattern end)
+            where TEdge : Quiver.IGraphEdgeEntity<TEdge> { }
+        public Quiver.Api.Match.GraphPattern Out(string edgeType, Quiver.Api.Match.VertexPattern end) { }
+        public Quiver.Api.Match.GraphPattern Out<TEdge>(Quiver.Api.Match.VertexPattern end)
+            where TEdge : Quiver.IGraphEdgeEntity<TEdge> { }
     }
 }
 namespace Quiver.Core
@@ -1593,53 +907,12 @@ namespace Quiver.Core
         public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
         public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
     }
-    public readonly struct EdgeId : System.IEquatable<Quiver.Core.EdgeId>
-    {
-        public static readonly Quiver.Core.EdgeId Invalid;
-        public EdgeId(long Value) { }
-        public int Generation { get; }
-        public bool IsValid { get; }
-        public long Sequence { get; }
-        public long Value { get; init; }
-        public bool Equals(Quiver.Core.EdgeId other) { }
-        public override int GetHashCode() { }
-        public static Quiver.Core.EdgeId Create(long sequence, int generation) { }
-    }
     public readonly struct EdgeTypeId : System.IEquatable<Quiver.Core.EdgeTypeId>
     {
         public static readonly Quiver.Core.EdgeTypeId Invalid;
         public EdgeTypeId(int Value) { }
         public bool IsValid { get; }
         public int Value { get; init; }
-    }
-    public enum EntityKind : byte
-    {
-        Vertex = 1,
-        Edge = 2,
-        Nexus = 4,
-    }
-    public readonly struct EntityRef : System.IEquatable<Quiver.Core.EntityRef>
-    {
-        public const int GenerationBits = 16;
-        public const int GenerationShift = 44;
-        public const int KindShift = 60;
-        public const int MaxGeneration = 65535;
-        public const int SequenceBits = 44;
-        public const long SequenceMask = 17592186044415;
-        public int Generation { get; }
-        public bool IsValid { get; }
-        public Quiver.Core.EntityKind Kind { get; }
-        public long Sequence { get; }
-        public long Value { get; }
-        public static Quiver.Core.EntityRef Create(Quiver.Core.EntityKind kind, long sequence, int generation) { }
-        public static Quiver.Core.EntityRef From(Quiver.Core.EdgeId id) { }
-        public static Quiver.Core.EntityRef From(Quiver.Core.NexusId id) { }
-        public static Quiver.Core.EntityRef From(Quiver.Core.VertexId id) { }
-        public static long Pack(Quiver.Core.EntityKind kind, long sequence, int generation) { }
-        public static long PackLocal(long sequence, int generation) { }
-        public static int UnpackGeneration(long packed) { }
-        public static Quiver.Core.EntityKind UnpackKind(long packed) { }
-        public static long UnpackSequence(long packed) { }
     }
     public readonly struct EuclideanDistanceOp : Quiver.Core.IDyadicOperator<float>
     {
@@ -1663,31 +936,12 @@ namespace Quiver.Core
         public bool IsValid { get; }
         public int Value { get; init; }
     }
-    public readonly struct NexusId : System.IEquatable<Quiver.Core.NexusId>
-    {
-        public static readonly Quiver.Core.NexusId Invalid;
-        public NexusId(long Value) { }
-        public int Generation { get; }
-        public bool IsValid { get; }
-        public long Sequence { get; }
-        public long Value { get; init; }
-        public bool Equals(Quiver.Core.NexusId other) { }
-        public override int GetHashCode() { }
-        public static Quiver.Core.NexusId Create(long sequence, int generation) { }
-    }
     public readonly struct NexusTypeId : System.IEquatable<Quiver.Core.NexusTypeId>
     {
         public static readonly Quiver.Core.NexusTypeId Invalid;
         public NexusTypeId(int Value) { }
         public bool IsValid { get; }
         public int Value { get; init; }
-    }
-    public readonly struct PropertyAddress : System.IEquatable<Quiver.Core.PropertyAddress>
-    {
-        public PropertyAddress(Quiver.Core.EntityRef Owner, Quiver.Core.PropertyKeyId Key) { }
-        public bool IsValid { get; }
-        public Quiver.Core.PropertyKeyId Key { get; init; }
-        public Quiver.Core.EntityRef Owner { get; init; }
     }
     public enum PropertyCardinality : byte
     {
@@ -1767,36 +1021,11 @@ namespace Quiver.Core
     {
         public VectorException(string message, System.Exception? inner = null) { }
     }
-    public abstract class VectorSearchCursor : System.IDisposable
-    {
-        protected VectorSearchCursor() { }
-        public abstract Quiver.Core.VectorSearchResult Current { get; }
-        public virtual void Dispose() { }
-        public abstract bool MoveNext();
-    }
     public sealed class VectorSearchOptions
     {
         public VectorSearchOptions() { }
         public int EfSearch { get; init; }
         public int FilteredOversampleFactor { get; init; }
-    }
-    public readonly struct VectorSearchResult : System.IEquatable<Quiver.Core.VectorSearchResult>
-    {
-        public VectorSearchResult(Quiver.Core.EntityRef Owner, float Score) { }
-        public Quiver.Core.EntityRef Owner { get; init; }
-        public float Score { get; init; }
-    }
-    public readonly struct VertexId : System.IEquatable<Quiver.Core.VertexId>
-    {
-        public static readonly Quiver.Core.VertexId Invalid;
-        public VertexId(long Value) { }
-        public int Generation { get; }
-        public bool IsValid { get; }
-        public long Sequence { get; }
-        public long Value { get; init; }
-        public bool Equals(Quiver.Core.VertexId other) { }
-        public override int GetHashCode() { }
-        public static Quiver.Core.VertexId Create(long sequence, int generation) { }
     }
     public sealed class WalFormatMismatchException : Quiver.Core.QuiverException
     {
@@ -1813,54 +1042,6 @@ namespace Quiver.Core
 }
 namespace Quiver.Logical
 {
-    public interface ILogicalMutationSink
-    {
-        void OnCommitted(Quiver.Core.TransactionId transactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> mutations);
-    }
-    public sealed class InMemoryLogicalMutationSink : Quiver.Logical.ILogicalMutationSink
-    {
-        public InMemoryLogicalMutationSink() { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Logical.InMemoryLogicalMutationSink.CommittedBatch> Batches { get; }
-        public System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> Mutations { get; }
-        public void Clear() { }
-        public void OnCommitted(Quiver.Core.TransactionId transactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> mutations) { }
-        public readonly struct CommittedBatch : System.IEquatable<Quiver.Logical.InMemoryLogicalMutationSink.CommittedBatch>
-        {
-            public CommittedBatch(Quiver.Core.TransactionId TransactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> Mutations) { }
-            public System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> Mutations { get; init; }
-            public Quiver.Core.TransactionId TransactionId { get; init; }
-        }
-    }
-    public readonly struct LogicalMutation
-    {
-        public Quiver.Core.EdgeId EdgeId { get; }
-        public Quiver.Logical.LogicalMutationKind Kind { get; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.NexusMember>? Members { get; }
-        public Quiver.Core.NexusId NexusId { get; }
-        public string? PropertyKey { get; }
-        public Quiver.Logical.LogicalPropertyValue PropertyValue { get; }
-        public Quiver.Core.VertexId TargetVertexId { get; }
-        public string? TokenName { get; }
-        public Quiver.Core.VertexId VertexId { get; }
-        public static Quiver.Logical.LogicalMutation AddEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation AddNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation AddVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation CreateEdge(Quiver.Core.EdgeId edgeId, Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
-        public static Quiver.Logical.LogicalMutation CreateNexus(Quiver.Core.NexusId nexusId, string type, System.Collections.Generic.IReadOnlyList<Quiver.NexusMember> members) { }
-        public static Quiver.Logical.LogicalMutation CreateVertex(Quiver.Core.VertexId vertexId, string label) { }
-        public static Quiver.Logical.LogicalMutation DeleteEdge(Quiver.Core.EdgeId edgeId) { }
-        public static Quiver.Logical.LogicalMutation DeleteNexus(Quiver.Core.NexusId nexusId) { }
-        public static Quiver.Logical.LogicalMutation DeleteVertex(Quiver.Core.VertexId vertexId) { }
-        public static Quiver.Logical.LogicalMutation RemoveEdgeProperty(Quiver.Core.EdgeId edgeId, string key) { }
-        public static Quiver.Logical.LogicalMutation RemoveEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation RemoveNexusProperty(Quiver.Core.NexusId nexusId, string key) { }
-        public static Quiver.Logical.LogicalMutation RemoveNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation RemoveVertexProperty(Quiver.Core.VertexId vertexId, string key) { }
-        public static Quiver.Logical.LogicalMutation RemoveVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation SetEdgeProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation SetNexusProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-        public static Quiver.Logical.LogicalMutation SetVertexProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
-    }
     public enum LogicalMutationKind : byte
     {
         CreateVertex = 1,
@@ -1881,18 +1062,6 @@ namespace Quiver.Logical
         RemoveVertexPropertyValue = 16,
         AddEdgePropertyValue = 17,
         RemoveEdgePropertyValue = 18,
-    }
-    public static class LogicalMutationReplay
-    {
-        public static void Apply(Quiver.IWriteTransaction tx, System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> mutations, System.Collections.Generic.IDictionary<long, Quiver.Core.VertexId>? vertexMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.EdgeId>? edgeMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.NexusId>? nexusMap = null) { }
-    }
-    public readonly struct LogicalPropertyValue
-    {
-        public byte[]? Bytes { get; }
-        public long Scalar { get; }
-        public Quiver.Storage.Records.PropertyValueType Type { get; }
-        public Quiver.Storage.Records.PropertyValue ToPropertyValue() { }
-        public static Quiver.Logical.LogicalPropertyValue Capture(in Quiver.Storage.Records.PropertyValue value) { }
     }
 }
 namespace Quiver.Maintenance
@@ -1949,26 +1118,6 @@ namespace Quiver.Maintenance
 }
 namespace Quiver.Migrations
 {
-    public interface IMigration
-    {
-        string Id { get; }
-        int Version { get; }
-        System.Threading.Tasks.Task ApplyAsync(Quiver.Migrations.IMigrationContext ctx);
-        System.Threading.Tasks.Task RevertAsync(Quiver.Migrations.IMigrationContext ctx);
-    }
-    public interface IMigrationContext
-    {
-        string MigrationId { get; }
-        Quiver.ISchemaEditor Schema { get; }
-        Quiver.IWriteTransaction Transaction { get; }
-        void AddIndex(string indexName, string label, string propertyKey, Quiver.IndexKind kind);
-        void DropIndex(string indexName);
-        void ForEachVertex(string label, System.Action<Quiver.Core.VertexId> action);
-        bool RenameEdgeType(string oldName, string newName);
-        bool RenameIndex(string oldName, string newName);
-        bool RenameLabel(string oldName, string newName);
-        bool RenamePropertyKey(string oldName, string newName);
-    }
     public sealed class MigrationHistoryEntry : System.IEquatable<Quiver.Migrations.MigrationHistoryEntry>
     {
         public MigrationHistoryEntry(string Id, int Version, System.DateTime AppliedAtUtc) { }
@@ -1981,154 +1130,6 @@ namespace Quiver.Migrations
         public MigrationResult(System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> Applied, System.Collections.Generic.IReadOnlyList<string> Skipped) { }
         public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> Applied { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Skipped { get; init; }
-    }
-}
-namespace Quiver.Storage.Records
-{
-    public sealed class BulkLoader : System.IDisposable
-    {
-        public void AppendEdge(Quiver.Core.EdgeId id, Quiver.Core.VertexId from, Quiver.Core.VertexId to, Quiver.Core.EdgeTypeId type) { }
-        public void AppendEdgePayload(Quiver.Core.EdgeId edgeId, Quiver.Core.PropertyKeyId key, long rawValue) { }
-        public void AppendProperty(Quiver.Core.VertexId vertexId, Quiver.Core.PropertyKeyId key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void AppendVertex(Quiver.Core.VertexId id, Quiver.Core.LabelId label) { }
-        public void Commit() { }
-        public void Dispose() { }
-        public void WithPayloadLane(Quiver.Storage.Records.PayloadLaneSpec spec) { }
-    }
-    public enum Direction : byte
-    {
-        Outgoing = 1,
-        Incoming = 2,
-        Both = 3,
-    }
-    public ref struct EdgeEnumerator
-    {
-        public Quiver.Storage.Records.EdgeReadHandle Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public readonly ref struct EdgeReadHandle
-    {
-        public Quiver.Core.EdgeId Id { get; }
-        public bool InUse { get; }
-        public Quiver.Core.VertexId Source { get; }
-        public Quiver.Core.EdgeId SourceNext { get; }
-        public Quiver.Core.EdgeId SourcePrev { get; }
-        public Quiver.Core.VertexId Target { get; }
-        public Quiver.Core.EdgeId TargetNext { get; }
-        public Quiver.Core.EdgeId TargetPrev { get; }
-        public Quiver.Core.EdgeTypeId Type { get; }
-        public void Dispose() { }
-    }
-    public static class GraphAlgorithms
-    {
-        public static double[] PageRank(Quiver.Storage.Records.IGraphSnapshotView view, double damping = 0.85, int iterations = 20) { }
-    }
-    public interface IGraphSnapshotView : System.IDisposable
-    {
-        long EdgeCount { get; }
-        long Epoch { get; }
-        bool HasWeights { get; }
-        long VertexCount { get; }
-        int InDegree(Quiver.Core.VertexId vertexId);
-        System.ReadOnlySpan<long> InEdgeIds(Quiver.Core.VertexId vertexId);
-        System.ReadOnlySpan<long> InNeighbors(Quiver.Core.VertexId vertexId);
-        int OutDegree(Quiver.Core.VertexId vertexId);
-        System.ReadOnlySpan<long> OutEdgeIds(Quiver.Core.VertexId vertexId);
-        System.ReadOnlySpan<long> OutNeighbors(Quiver.Core.VertexId vertexId);
-        System.ReadOnlySpan<long> WeightBitsOut(Quiver.Core.VertexId vertexId);
-    }
-    public enum PayloadKind : byte
-    {
-        None = 0,
-        Int64 = 1,
-        Double = 2,
-    }
-    public readonly struct PayloadLaneSpec
-    {
-        public readonly long DefaultRaw;
-        public readonly Quiver.Storage.Records.PayloadKind Kind;
-        public readonly int PropertyKeyId;
-        public PayloadLaneSpec(Quiver.Storage.Records.PayloadKind kind, int propertyKeyId, long defaultRaw) { }
-        public static Quiver.Storage.Records.PayloadLaneSpec ForDouble(int propertyKeyId, double defaultValue = 0) { }
-        public static Quiver.Storage.Records.PayloadLaneSpec ForInt64(int propertyKeyId, long defaultValue = 0) { }
-    }
-    public ref struct PropertyCursor
-    {
-        public Quiver.Storage.Records.PropertyEntry Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public readonly ref struct PropertyEntry
-    {
-        public Quiver.Core.PropertyCardinality Cardinality { get; }
-        public Quiver.Core.PropertyKeyId KeyId { get; }
-        public Quiver.Storage.Records.PropertyValue Value { get; }
-    }
-    public readonly ref struct PropertyValue
-    {
-        public bool BoolValue { get; }
-        public System.ReadOnlySpan<byte> BytesValue { get; }
-        public System.DateOnly DateOnlyValue { get; }
-        public System.DateTimeOffset DateTimeOffsetValue { get; }
-        public System.DateTime DateTimeValue { get; }
-        public double DoubleValue { get; }
-        public int EncodedSize { get; }
-        public System.ReadOnlySpan<float> FloatArrayValue { get; }
-        public int Int32Value { get; }
-        public long Int64Value { get; }
-        public System.TimeOnly TimeOnlyValue { get; }
-        public System.TimeSpan TimeSpanValue { get; }
-        public Quiver.Storage.Records.PropertyValueType Type { get; }
-        public System.ReadOnlySpan<byte> Utf8StringValue { get; }
-        public static Quiver.Storage.Records.PropertyValue FromBool(bool v) { }
-        public static Quiver.Storage.Records.PropertyValue FromBytes(System.ReadOnlySpan<byte> v) { }
-        public static Quiver.Storage.Records.PropertyValue FromDateOnly(System.DateOnly v) { }
-        public static Quiver.Storage.Records.PropertyValue FromDateTime(System.DateTime v) { }
-        public static Quiver.Storage.Records.PropertyValue FromDateTimeOffset(System.DateTimeOffset v) { }
-        public static Quiver.Storage.Records.PropertyValue FromDouble(double v) { }
-        public static Quiver.Storage.Records.PropertyValue FromFloatArray(System.ReadOnlySpan<float> v) { }
-        public static Quiver.Storage.Records.PropertyValue FromInt32(int v) { }
-        public static Quiver.Storage.Records.PropertyValue FromInt64(long v) { }
-        public static Quiver.Storage.Records.PropertyValue FromString(System.ReadOnlySpan<char> v) { }
-        public static Quiver.Storage.Records.PropertyValue FromTimeOnly(System.TimeOnly v) { }
-        public static Quiver.Storage.Records.PropertyValue FromTimeSpan(System.TimeSpan v) { }
-        public static Quiver.Storage.Records.PropertyValue FromUtf8(System.ReadOnlySpan<byte> v) { }
-    }
-    public static class PropertyValueEqualityHelper
-    {
-        public static bool AreEqual(in Quiver.Storage.Records.PropertyValue a, in Quiver.Storage.Records.PropertyValue b) { }
-    }
-    public enum PropertyValueType : byte
-    {
-        Bool = 1,
-        Int32 = 2,
-        Int64 = 3,
-        Double = 4,
-        String = 5,
-        Bytes = 6,
-        FloatArray = 7,
-    }
-    public static class PropertyValueTypeExtensions
-    {
-        public static bool IsCompatibleWith(this Quiver.Storage.Records.PropertyValueType type, Quiver.Core.PropertyTypeFlags mask) { }
-        public static Quiver.Core.PropertyTypeFlags ToFlags(this Quiver.Storage.Records.PropertyValueType type) { }
-    }
-    public ref struct PropertyValuesEnumerator
-    {
-        public Quiver.Storage.Records.PropertyValue Current { get; }
-        public void Dispose() { }
-        public bool MoveNext() { }
-    }
-    public sealed class StreamingBulkLoader : System.IDisposable
-    {
-        public void AppendEdge(Quiver.Core.EdgeId id, Quiver.Core.VertexId from, Quiver.Core.VertexId to, Quiver.Core.EdgeTypeId type) { }
-        public void AppendEdgePayload(Quiver.Core.EdgeId edgeId, Quiver.Core.PropertyKeyId key, long rawValue) { }
-        public void AppendProperty(Quiver.Core.VertexId vertexId, Quiver.Core.PropertyKeyId key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void AppendVertex(Quiver.Core.VertexId id, Quiver.Core.LabelId label) { }
-        public void Commit() { }
-        public void Dispose() { }
-        public void WithPayloadLane(Quiver.Storage.Records.PayloadLaneSpec spec) { }
     }
 }
 namespace Quiver.Telemetry
@@ -2202,6 +1203,13 @@ namespace Quiver.Text
         public JapaneseAwareNormalizer() { }
         public Quiver.Text.NormalizationFlags DefaultFlags { get; init; }
         public Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class JapaneseOrthographicVariantFilter : Quiver.Text.ITokenFilter
+    {
+        public JapaneseOrthographicVariantFilter() { }
+        public JapaneseOrthographicVariantFilter(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<char, char>> mappings) { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Quiver.Text.ITokenSink downstream) { }
     }
     public sealed class LowercaseFilter : Quiver.Text.ITokenFilter
     {

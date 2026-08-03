@@ -3,7 +3,7 @@ namespace Quiver;
 /// <summary>
 /// <see cref="QuiverDatabase"/>インスタンスが使用するストレージバックエンドの識別用列挙体
 /// </summary>
-public enum BackendKind
+internal enum BackendKind
 {
     /// <summary>独自バイナリページフォーマットを用いるネイティブバックエンド</summary>
     Binary = 1,

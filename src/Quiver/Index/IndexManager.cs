@@ -42,7 +42,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     internal const int CatalogFormatVersionOffset = 12;
     private const int CatalogMigrationCountOffset = 16;
     private const int CatalogHeaderLength = 20;
-    internal const byte CatalogFormatVersion = 5;
+    internal const byte CatalogFormatVersion = 6;
+    internal const byte MinimumReadableCatalogFormatVersion = 5;
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -614,7 +615,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                 hh.Data[CatalogMigrationCountOffset..]);
         }
         finally { hh.Dispose(); }
-        if (formatVersion != CatalogFormatVersion)
+        if (formatVersion < MinimumReadableCatalogFormatVersion
+            || formatVersion > CatalogFormatVersion)
         {
             if ((uint)formatVersion > byte.MaxValue)
             {
@@ -654,6 +656,15 @@ internal sealed class IndexManager : IIndexManager, IDisposable
 
             var ownerKind = (PropertyOwnerKind)blob[pos++];
             var state = (IndexLifecycleState)blob[pos++];
+            bool unique = false;
+            if (formatVersion >= 6)
+            {
+                byte uniqueFlag = blob[pos++];
+                if (uniqueFlag > 1)
+                    throw new CorruptionException(
+                        $"Scalar index '{indexName}' has invalid unique flag {uniqueFlag}.");
+                unique = uniqueFlag == 1;
+            }
             string scope = ReadString(blob, ref pos);
             string propertyKey = ReadString(blob, ref pos);
             IndexKind kind = IndexKindFromFlags(typeFlags);
@@ -661,7 +672,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                 ownerKind,
                 propertyKey,
                 string.IsNullOrEmpty(scope) ? null : scope);
-            var definition = new ScalarIndexDefinition(indexName, target, kind);
+            var definition = new ScalarIndexDefinition(indexName, target, kind, unique);
             _definitions[indexName] = new ScalarIndexMetadata(definition, state);
             if (ownerKind == PropertyOwnerKind.Vertex && !string.IsNullOrEmpty(scope))
             {
@@ -782,7 +793,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private void PersistCatalog()
     {
         // 1. カタログを直列化する。
-        //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes。
+        //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes、
+        //       ownerKind(1)、lifecycleState(1)、unique(1)、scope、propertyKey。
         //    全文索引セクション (件数=ftCount):
         //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)
         //       lifecycleState(1) manifest(len+utf8)。
@@ -807,6 +819,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                     IndexLifecycleState.RebuildRequired);
             blobList.Add((byte)metadata.Definition.Target.OwnerKind);
             blobList.Add((byte)metadata.State);
+            blobList.Add(metadata.Definition.Unique ? (byte)1 : (byte)0);
             WriteString(blobList, metadata.Definition.Target.Scope ?? string.Empty);
             WriteString(blobList, metadata.Definition.Target.PropertyKey);
             entryCount++;

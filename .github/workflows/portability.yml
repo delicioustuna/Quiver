@@ -1,0 +1,127 @@
+name: OS portability
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: portability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  produce:
+    name: produce (${{ matrix.origin }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: windows-linux
+            origin: windows
+            os: windows-latest
+          - lane: linux-windows
+            origin: linux
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Produce database bundle
+        run: >-
+          dotnet run --configuration Release
+          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          -- --portability-produce
+          artifacts/portability/${{ matrix.lane }}
+          ${{ matrix.origin }}
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: portability-${{ matrix.lane }}-source
+          path: artifacts/portability/${{ matrix.lane }}
+          if-no-files-found: error
+          retention-days: 3
+
+  cross-open-update:
+    name: cross-open & update (${{ matrix.lane }})
+    needs: produce
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: windows-linux
+            os: ubuntu-latest
+          - lane: linux-windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download source bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: portability-${{ matrix.lane }}-source
+          path: artifacts/portability/${{ matrix.lane }}
+
+      - name: Verify, open, and update on the other OS
+        run: >-
+          dotnet run --configuration Release
+          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          -- --portability-verify-update
+          artifacts/portability/${{ matrix.lane }}
+
+      - name: Upload updated bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: portability-${{ matrix.lane }}-updated
+          path: artifacts/portability/${{ matrix.lane }}
+          if-no-files-found: error
+          retention-days: 3
+
+  roundtrip:
+    name: roundtrip verify (${{ matrix.lane }})
+    needs: cross-open-update
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: windows-linux
+            os: windows-latest
+          - lane: linux-windows
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download updated bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: portability-${{ matrix.lane }}-updated
+          path: artifacts/portability/${{ matrix.lane }}
+
+      - name: Verify roundtrip bundle
+        run: >-
+          dotnet run --configuration Release
+          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          -- --portability-verify
+          artifacts/portability/${{ matrix.lane }}

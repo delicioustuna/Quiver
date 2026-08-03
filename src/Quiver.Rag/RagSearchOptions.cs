@@ -24,8 +24,9 @@ public sealed record RagSearchOptions
     /// <b>recall hole が起きない</b> (フィルタが大半を弾いても、条件を満たす文書が存在する限り上位
     /// <see cref="K"/> 件を返せる)。比較対象は <see cref="RagMetadata.Metadata"/> (metadataJson) のキーで、
     /// 全キーが AND 条件。<see cref="MetadataFilter"/> と併用した場合は push-down 後にさらに後段適用される。
-    /// 一致文書の解決にラベルスキャン 1 回 + チャンク列挙が要るため、文書数が極端に多い場合は
-    /// 個別 property への昇格 (索引化) を検討すること。
+    /// 対象 key に <see cref="RagStoreOptions.MetadataIndexes"/> の定義があれば scalar index seek、
+    /// なければラベルスキャン 1 回 + チャンク列挙を使う。低選択率で頻用する string key は
+    /// <see cref="RagMetadataIndex"/> へ明示昇格できる。
     /// </remarks>
     public IReadOnlyDictionary<string, string>? MetadataEquals { get; init; }
 

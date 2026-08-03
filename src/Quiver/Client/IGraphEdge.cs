@@ -7,7 +7,7 @@ namespace Quiver.Api;
 /// 型安全Edge CRUD のためのインタフェース。手動実装は通常不要。
 /// </summary>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
-public interface IGraphEdge<TSelf> where TSelf : IGraphEdge<TSelf>
+internal interface IGraphEdge<TSelf> where TSelf : IGraphEdge<TSelf>
 {
     /// <summary>Edge型名。SourceGenerator が <c>[Edge("...")]</c> から決定する。</summary>
     static abstract string GraphType { get; }
@@ -36,7 +36,7 @@ public interface IGraphEdge<TSelf> where TSelf : IGraphEdge<TSelf>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
 /// <typeparam name="TSource">始点Vertex型。</typeparam>
 /// <typeparam name="TTarget">終点Vertex型。</typeparam>
-public interface IGraphEdge<TSelf, TSource, TTarget> : IGraphEdge<TSelf>
+internal interface IGraphEdge<TSelf, TSource, TTarget> : IGraphEdge<TSelf>
     where TSelf   : IGraphEdge<TSelf, TSource, TTarget>
     where TSource : IGraphVertex<TSource>
     where TTarget : IGraphVertex<TTarget>

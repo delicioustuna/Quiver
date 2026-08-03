@@ -7,7 +7,7 @@ using Quiver.Storage.Records;
 namespace Quiver;
 
 /// <summary>graph JSON に含める entity を指定する。</summary>
-public sealed class GraphSelection
+internal sealed class GraphSelection
 {
     private GraphSelection(bool all)
     {
@@ -42,7 +42,7 @@ public sealed class GraphSelection
 }
 
 /// <summary>graph JSON export の出力オプション。</summary>
-public sealed class GraphJsonExportOptions
+internal sealed class GraphJsonExportOptions
 {
     /// <summary>インデントと改行を付けたJSONを出力する。</summary>
     public bool WriteIndented { get; set; }
@@ -72,7 +72,7 @@ public sealed class GraphJsonExportOptions
 /// <param name="VertexCount">出力したVertex数。</param>
 /// <param name="EdgeCount">出力したEdge数。</param>
 /// <param name="NexusCount">出力したNexus数。</param>
-public readonly record struct GraphJsonExportResult(
+internal readonly record struct GraphJsonExportResult(
     DatabaseInstanceId SourceDatabaseId,
     Guid SnapshotId,
     bool UsesTemporaryDatabaseId,
@@ -81,7 +81,7 @@ public readonly record struct GraphJsonExportResult(
     long NexusCount);
 
 /// <summary>Quiver graph を公開仕様のUTF-8 JSON文書へ逐次出力する。</summary>
-public static class GraphJsonExporter
+internal static class GraphJsonExporter
 {
     /// <summary>
     /// データベースの開始時snapshotを開き、graph JSON v1を出力する。

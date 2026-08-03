@@ -11,7 +11,7 @@ namespace Quiver.Migrations;
 /// <see cref="Transaction"/> を直接使うことを推奨する — context のヘルパは典型操作の
 /// shortcut にすぎず、未提供のオペレーションは tx 経由でフルアクセス可能。
 /// </remarks>
-public interface IMigrationContext
+internal interface IMigrationContext
 {
     /// <summary>このマイグレーションがバインドされた書き込みトランザクション。</summary>
     IWriteTransaction Transaction { get; }
@@ -35,7 +35,12 @@ public interface IMigrationContext
     bool RenameIndex(string oldName, string newName);
 
     /// <summary>索引を追加する shortcut。詳細は <see cref="ISchemaEditor.CreateIndex"/>。</summary>
-    void AddIndex(string indexName, string label, string propertyKey, IndexKind kind);
+    void AddIndex(
+        string indexName,
+        string label,
+        string propertyKey,
+        IndexKind kind,
+        bool unique = false);
 
     /// <summary>索引を削除する shortcut。詳細は <see cref="ISchemaEditor.DropIndex"/>。</summary>
     void DropIndex(string indexName);

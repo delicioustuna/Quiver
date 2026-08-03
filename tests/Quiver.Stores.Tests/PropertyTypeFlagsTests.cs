@@ -8,15 +8,16 @@ namespace Quiver.Storage.Records.Tests;
 public sealed class PropertyTypeFlagsTests
 {
     [Theory]
-    [InlineData(PropertyValueType.Bool,   PropertyTypeFlags.Bool)]
-    [InlineData(PropertyValueType.Int32,  PropertyTypeFlags.Int32)]
-    [InlineData(PropertyValueType.Int64,  PropertyTypeFlags.Int64)]
-    [InlineData(PropertyValueType.Double, PropertyTypeFlags.Double)]
-    [InlineData(PropertyValueType.String, PropertyTypeFlags.String)]
-    [InlineData(PropertyValueType.Bytes,  PropertyTypeFlags.Bytes)]
+    [InlineData((byte)PropertyValueType.Bool,   PropertyTypeFlags.Bool)]
+    [InlineData((byte)PropertyValueType.Int32,  PropertyTypeFlags.Int32)]
+    [InlineData((byte)PropertyValueType.Int64,  PropertyTypeFlags.Int64)]
+    [InlineData((byte)PropertyValueType.Double, PropertyTypeFlags.Double)]
+    [InlineData((byte)PropertyValueType.String, PropertyTypeFlags.String)]
+    [InlineData((byte)PropertyValueType.Bytes,  PropertyTypeFlags.Bytes)]
     public void ToFlags_maps_every_PropertyValueType_to_its_bit(
-        PropertyValueType type, PropertyTypeFlags expected)
+        byte rawType, PropertyTypeFlags expected)
     {
+        var type = (PropertyValueType)rawType;
         type.ToFlags().Should().Be(expected);
     }
 
@@ -28,15 +29,16 @@ public sealed class PropertyTypeFlagsTests
     }
 
     [Theory]
-    [InlineData(PropertyValueType.Int32,  true)]
-    [InlineData(PropertyValueType.Int64,  true)]
-    [InlineData(PropertyValueType.Double, true)]
-    [InlineData(PropertyValueType.Bool,   false)]
-    [InlineData(PropertyValueType.String, false)]
-    [InlineData(PropertyValueType.Bytes,  false)]
+    [InlineData((byte)PropertyValueType.Int32,  true)]
+    [InlineData((byte)PropertyValueType.Int64,  true)]
+    [InlineData((byte)PropertyValueType.Double, true)]
+    [InlineData((byte)PropertyValueType.Bool,   false)]
+    [InlineData((byte)PropertyValueType.String, false)]
+    [InlineData((byte)PropertyValueType.Bytes,  false)]
     public void IsCompatibleWith_Numeric_only_matches_numeric_types(
-        PropertyValueType type, bool expected)
+        byte rawType, bool expected)
     {
+        var type = (PropertyValueType)rawType;
         type.IsCompatibleWith(PropertyTypeFlags.Numeric).Should().Be(expected);
     }
 

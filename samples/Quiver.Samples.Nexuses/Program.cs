@@ -15,17 +15,18 @@ using Quiver.Samples.Nexuses;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_nexuses_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    // subject → object のロール対を co-membership の物理ビューとして登録して開く。
-    // 登録の無いロール対は incidence チェーン走査へ自動フォールバックする。
-    var options = new QuiverDatabaseOptions();
-    options.CoMembershipRolePairs.Add(new CoMembershipRolePair("subject", "object"));
-    using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"), options);
+    using var graphStore = GraphStore.Open(Path.Combine(dir, "graph.quiver"));
+    var db = graphStore.DatabaseInternal;
 
     // ── 0. Quiver.Rag で文書を取込み、出典チャンクを特定する ──
     var embedder = new HashEmbedder(dim: 16);
-    var store = new RagStore(db, new RagStoreOptions
+    var store = new RagStore(graphStore, new RagStoreOptions
     {
         EmbeddingDimensions = embedder.Dimensions,
+        IngestionProfile = new RagIngestionProfile
+        {
+            EmbeddingProfileId = embedder.ProfileId,
+        },
         Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
     });
     await store.UpsertDocumentAsync(new IngestedDocument(
@@ -55,10 +56,10 @@ try
         // 型付き Insert: ロールの型取り違え (subject に Chunk を入れる等) はコンパイルエラーになる。
         verifiedFact = Fact.Insert(tx, new Fact
         {
-            Subject = acme,
-            Objects = [quiver],
-            Source  = hit.ChunkVertexId,
-            AsOf    = y2026,
+            Subject = new GraphVertexRef<Entity>(acme),
+            Objects = [new GraphVertexRef<Entity>(quiver)],
+            Source  = new GraphVertexRef<Chunk>(hit.ChunkVertexId.ToCore()),
+            AsOf    = new GraphVertexRef<TimePoint>(y2026),
             Status  = "verified",
         });
 
@@ -68,7 +69,7 @@ try
          .Member("subject", acme)
          .Member("object", quiver)
          .Member("object", graphdb)
-         .Member("source", hit.ChunkVertexId)
+         .Member("source", hit.ChunkVertexId.ToCore())
          .P("Status", "draft")
          .Next();
 
@@ -77,7 +78,7 @@ try
     var names = new Dictionary<VertexId, string>
     {
         [acme] = "Acme", [quiver] = "Quiver", [graphdb] = "QuiverDatabase",
-        [y2026] = "2026", [hit.ChunkVertexId] = "(出典チャンク)",
+        [y2026] = "2026", [hit.ChunkVertexId.ToCore()] = "(出典チャンク)",
     };
 
     // ── 2. 型なし DSL: 1 つのオペレータツリーで object と source を同時に取る ──
@@ -159,6 +160,7 @@ finally
 // 実運用では使う埋め込みモデルに対して IChunkEmbedder を直接実装する。
 sealed class HashEmbedder(int dim) : IChunkEmbedder
 {
+    public string ProfileId => "sample-hash-embedding-v1";
     public int Dimensions { get; } = dim;
 
     public ValueTask<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)

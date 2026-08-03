@@ -66,7 +66,7 @@ public sealed class VertexPattern
         => GraphPattern.From(this, edgeType, outgoing: true, end);
 
     /// <summary>型付きの外向エッジで <paramref name="end"/> Vertexに連結する。</summary>
-    public GraphPattern Out<TEdge>(VertexPattern end) where TEdge : IGraphEdge<TEdge>
+    public GraphPattern Out<TEdge>(VertexPattern end) where TEdge : global::Quiver.IGraphEdgeEntity<TEdge>
         => GraphPattern.From(this, TEdge.GraphType, outgoing: true, end);
 
     /// <summary>内向 (Incoming) のエッジで <paramref name="end"/> Vertexに連結する。</summary>
@@ -74,7 +74,7 @@ public sealed class VertexPattern
         => GraphPattern.From(this, edgeType, outgoing: false, end);
 
     /// <summary>型付きの内向エッジで <paramref name="end"/> Vertexに連結する。</summary>
-    public GraphPattern In<TEdge>(VertexPattern end) where TEdge : IGraphEdge<TEdge>
+    public GraphPattern In<TEdge>(VertexPattern end) where TEdge : global::Quiver.IGraphEdgeEntity<TEdge>
         => GraphPattern.From(this, TEdge.GraphType, outgoing: false, end);
 }
 

@@ -9,7 +9,7 @@ using Quiver.Storage.Records;
 namespace Quiver;
 
 /// <summary>graph JSONの構文、schema、参照、または重複定義が不正な場合の例外。</summary>
-public sealed class GraphJsonImportException : Exception
+internal sealed class GraphJsonImportException : Exception
 {
     /// <summary>入力列における0始まりの文書位置。</summary>
     public int DocumentIndex { get; }
@@ -40,14 +40,14 @@ public sealed class GraphJsonImportException : Exception
 /// <param name="Kind">entity種別。</param>
 /// <param name="SourcePackedId">generationを含むsource packed ID。</param>
 /// <param name="ProvisionalTargetPackedId">commit前のimport先packed ID。rollback後は無効。</param>
-public readonly record struct GraphJsonImportMapping(
+internal readonly record struct GraphJsonImportMapping(
     DatabaseInstanceId SourceDatabaseId,
     EntityKind Kind,
     long SourcePackedId,
     long ProvisionalTargetPackedId);
 
 /// <summary>graph JSON importのオプション。</summary>
-public sealed partial class GraphJsonImportOptions
+internal sealed partial class GraphJsonImportOptions
 {
     /// <summary>
     /// source entityごとに一度呼ばれる対応通知。
@@ -70,7 +70,7 @@ public sealed partial class GraphJsonImportOptions
 /// <param name="NexusCount">新規作成したNexus数。</param>
 /// <param name="DuplicateEntityCount">同じsource identityと同じ定義として再利用したentity数。</param>
 /// <param name="SemanticMatchCount">意味的照合で既存または同operation内の先行targetを再利用したentity数。</param>
-public readonly record struct GraphJsonImportResult(
+internal readonly record struct GraphJsonImportResult(
     int DocumentCount,
     long VertexCount,
     long EdgeCount,
@@ -79,7 +79,7 @@ public readonly record struct GraphJsonImportResult(
     long SemanticMatchCount);
 
 /// <summary>公開仕様のgraph JSON v1をcaller所有のwrite transactionへ逐次importする。</summary>
-public static class GraphJsonImporter
+internal static class GraphJsonImporter
 {
     /// <summary>
     /// 単一のUTF-8 JSON文書をimportする。transactionとstreamの所有権はcallerに残る。

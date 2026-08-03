@@ -8,7 +8,7 @@ namespace Quiver.Storage.Records;
 /// <remarks>
 /// スナップショット API の検証を主目的とし、最小割り当てではなく正しさ優先の実装。
 /// </remarks>
-public static class GraphAlgorithms
+internal static class GraphAlgorithms
 {
     /// <summary>
     /// スナップショットの出辺ビューで反復 PageRank を計算する。

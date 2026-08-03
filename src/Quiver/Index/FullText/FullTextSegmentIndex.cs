@@ -663,6 +663,8 @@ internal sealed class FullTextSegmentIndex : IDisposable
         => left.Name == right.Name
             && left.Target == right.Target
             && left.TokenizerId == right.TokenizerId
+            && FullTextDefinitionCodec.EncodeFilters(left.Filters)
+                == FullTextDefinitionCodec.EncodeFilters(right.Filters)
             && left.K1 == right.K1
             && left.B == right.B
             && left.SegmentPolicy == right.SegmentPolicy;

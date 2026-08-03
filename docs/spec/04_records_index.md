@@ -1,6 +1,6 @@
 # レコード & インデックス
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
 
 ## Slotted ページモデル {#slotted-pages}
 
@@ -277,12 +277,29 @@ Property は独立 entity ではなく、public `PropertyId` を持たない。
 
 ### 統一スカラ索引定義 {#scalar-index-definition}
 
-スカラ索引は `ScalarIndexDefinition(Name, Target, Kind)` を永続定義の正本とする。
+スカラ索引は `ScalarIndexDefinition(Name, Target, Kind, Unique)` を永続定義の正本とする。
 `PropertyTarget` は所有者種別、プロパティキー名、任意のラベルまたは型スコープを明示する。
 所有者種別は Vertex、Edge、Nexus を区別し、同じ sequence 値を別種別へ誤解決しない。
 各 B+Tree value はエンティティ ID ではなく `PropertyVersionRef` を格納する。
 seek と range はプロパティキー、値、所有者種別、所有者世代、所有者の MVCC 可視性、スコープを primary record で再検証する。
 stale entry は結果から除外されるため、索引 artifact 自体を可視性の正本にしない。
+
+`Unique = true` は label scope を持つ Vertex の Single cardinality string property と
+`StringEquality` の組合せに限る。property 欠落は制約対象外であり、同じ owner への同値設定は冪等である。
+別 owner の可視 property が同じ UTF-8 文字列を持つ場合は、property mutation より前に
+`UniqueConstraintViolationException` を送出する。この例外は索引名、label scope、property key を公開するが、
+property 値はメッセージにも属性にも含めない。owner delete または property remove 後は、同じ transaction 内でも
+その値を再利用でき、savepoint rollback と transaction abort は制約上の可視性も巻き戻す。
+
+一意性は B+Tree artifact ではなく primary MVCC state の制約である。`Ready` では B+Tree candidate を primary record で
+再検証し、`Building` / `RebuildRequired` と artifact 不在時は primary scan で同じ契約を強制する。
+既存データへの定義追加は publish 前に全対象を検査し、重複または非 string 値があれば definition を残さない。
+bulk load / streaming bulk load は書込み開始前に入力全体を検査する。reopen、replay、crash recovery 後も
+永続 definition に従い、未コミット値が制約を占有することはない。
+
+index catalog format 6 は scalar definition に `Unique` flag を保存する。format 5 は後方互換入力として読み、
+全 scalar definition を `Unique = false` と解釈する。新規永続化は format 6 を使用し、未知の過去版・将来版は拒否する。
+B+Tree page format、WAL record、writer lock protocol は変更しない。
 
 ### ライフサイクルと再構築 {#scalar-index-lifecycle}
 
@@ -316,6 +333,8 @@ derived state が不足する場合は同じ snapshot の primary property scan 
 ## 全文 definition と segment {#fulltext-segment}
 
 `FullTextIndexDefinition` は `PropertyTarget`、tokenizer/filter pipeline、BM25 parameter、segment policy を統一 catalog に保存する。
+永続 filter は構成値まで definition の同一性に含む。日本語異字体展開は既定で無効であり、
+利用者が明示した `JapaneseOrthographicVariantFilter` だけを索引時と検索時の同じ pipeline へ適用する。
 
 全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
 

@@ -17,7 +17,7 @@ namespace Quiver.Core;
 /// kind ビットの有無 (cross-kind packed / kind 消去ローカル形) を問わず同じ結果を返す。
 /// Generation は slot incarnation を表し、MVCC version (xmin/xmax) とは別概念。</para>
 /// </summary>
-public readonly partial record struct EntityRef
+internal readonly partial record struct EntityRef
 {
     private EntityRef(EntityKind kind, long value)
     {

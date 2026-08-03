@@ -13,7 +13,7 @@ public sealed class IndexCatalogFormatTests : IDisposable
         "quiver_index_catalog_format_" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void Reopen_rejects_non_current_catalog_format()
+    public void Reopen_rejects_unknown_future_catalog_format()
     {
         using (var manager = IndexManager.OpenStandalone(_directory))
             _ = manager.CreateInt64Index("by_age");
@@ -28,7 +28,7 @@ public sealed class IndexCatalogFormatTests : IDisposable
             {
                 BinaryPrimitives.WriteInt32LittleEndian(
                     page.Data[IndexManager.CatalogFormatVersionOffset..],
-                    IndexManager.CatalogFormatVersion - 1);
+                    IndexManager.CatalogFormatVersion + 1);
             }
             container.Flush();
         }
@@ -41,7 +41,7 @@ public sealed class IndexCatalogFormatTests : IDisposable
         reopen.Should().Throw<StorageFormatMismatchException>()
             .Where(exception =>
                 exception.FileKind == "indexcatalog"
-                && exception.Found == IndexManager.CatalogFormatVersion - 1
+                && exception.Found == IndexManager.CatalogFormatVersion + 1
                 && exception.Expected == IndexManager.CatalogFormatVersion);
     }
 

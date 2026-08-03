@@ -1,6 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
 
 ## Primary vector property
 
@@ -35,7 +35,8 @@ definition は scalar index と同じ `IndexDefinition` catalog に参加し、`
 | `SegmentPolicy` | delta entry 数と segment 数の merge しきい値 |
 
 definition catalog は target property key と scope を明示的に保存する。
-embedding 元 property、provider、normalization profile は index definition に含めず、Embedding task metadata が保持する。
+embedding 元 property、provider、normalization profile は汎用 index definition に含めない。
+`Quiver.Rag` はこれらを `RagIngestionProfile` の corpus marker と Document の `ingestionFingerprint` に保持する。
 
 ```csharp
 using var schema = database.BeginWriteTransaction();
@@ -146,7 +147,12 @@ Quiver は埋め込みモデルを呼び出さない。
 呼び出し側は埋め込みを生成し、write transaction の `SetVectorProperty` で vector property を保存する。
 
 `Quiver.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
+`IChunkEmbedder.ProfileId` は構成済み `EmbeddingProfileId` と一致する必要がある。
+chunking、embedding model、normalization、embedding input template の profile 不一致は取込前に拒否し、
+同じ vector index に異なる意味の vector を混在させない。profile を変更するときは別コーパスを構築し、
+利用側の store handle を切り替える。現行 API は同一コーパス内の online profile switch を提供しない。
 `MetadataEquals` が指定された場合は、一致文書の chunk candidate だけを scorer へ渡してから top-k を確定する。
 候補集合を global KNN の後で絞らないため、候補外の近傍が上位を占めても該当 chunk を取りこぼさない。
+選択した metadata key に `RagMetadataIndex` があれば scalar seek の積集合を使い、なければ Document label scan を使う。
 vector-only hit は similarity を `RagHit.Score.VectorSimilarity` と `FusedScore` の両方へ返す。
 database または backend から vector store を取得する公開 API は存在しない。

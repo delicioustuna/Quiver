@@ -16,7 +16,7 @@ namespace Quiver;
 /// 切り替え可能。通常は <see cref="Open"/> で生成し、用が済んだら
 /// <see cref="Dispose"/> で破棄する。
 /// </remarks>
-public sealed class QuiverDatabase : IDisposable
+internal sealed class QuiverDatabase : IDisposable
 {
     private readonly IGraphStorageBackendInternal _backend;
     private readonly string _path;
@@ -124,7 +124,7 @@ public sealed class QuiverDatabase : IDisposable
     /// 内テナントに同居) も併せて構築し、その後の読み取り専用トランザクションから
     /// 隣接ブロックストアが利用可能になる。
     /// </param>
-    public BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
+    internal BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
     {
         var fn = _backend.BulkLoad.BeginBinaryBulkLoad
             ?? throw new NotSupportedException(
@@ -139,7 +139,7 @@ public sealed class QuiverDatabase : IDisposable
     /// <c>AppendEdge</c> は <see cref="EdgeId"/> が厳密に増加する順序で呼ぶ必要がある。
     /// 現在のバックエンドにストリーミングバルクロード経路が無い場合は <see cref="NotSupportedException"/> を投げる。
     /// </summary>
-    public StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false)
+    internal StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false)
     {
         var fn = _backend.BulkLoad.BeginStreamingBinaryBulkLoad
             ?? throw new NotSupportedException(
@@ -148,11 +148,11 @@ public sealed class QuiverDatabase : IDisposable
     }
 
     /// <summary>開始時点の snapshot を読む transaction を開く。</summary>
-    public IReadTransaction BeginReadTransaction()
+    internal IReadTransaction BeginReadTransaction()
         => _backend.BeginReadTransaction();
 
     /// <summary>single-writer lease を所有する transaction を開く。</summary>
-    public IWriteTransaction BeginWriteTransaction()
+    internal IWriteTransaction BeginWriteTransaction()
         => _backend.BeginWriteTransaction();
 
     /// <summary>
@@ -220,7 +220,7 @@ public sealed class QuiverDatabase : IDisposable
     /// 本呼び出し以降のミューテーションはスナップショットからは見えない。プール済み配列を
     /// 解放するためビューは <see cref="IDisposable.Dispose"/> で破棄すること。
     /// </remarks>
-    public IGraphSnapshotView OpenSnapshotView()
+    internal IGraphSnapshotView OpenSnapshotView()
     {
         using var tx = _backend.Transactions.BeginRead();
         return GraphSnapshotView.Build(tx.Vertices, tx.Edges, tx.AdjacencySegments);
@@ -273,7 +273,7 @@ public sealed class QuiverDatabase : IDisposable
     /// 失敗時はその tx のミューテーションだけ rollback される (schema rename は tx 境界を跨ぐ点に注意)。
     /// 既に適用済みの ID は skip される (冪等)。
     /// </summary>
-    public Task<Migrations.MigrationResult> MigrateAsync(
+    internal Task<Migrations.MigrationResult> MigrateAsync(
         IEnumerable<Migrations.IMigration> migrations,
         CancellationToken cancellationToken = default)
         => Migrations.Migrator.RunAsync(this, migrations, cancellationToken);
@@ -320,7 +320,7 @@ public enum WriterContentionMode
 /// <see cref="QuiverDatabase.Open"/> に渡す起動オプション。
 /// バッファプール、WAL、writer lease、チェックサム、バックエンド種別などを指定する。
 /// </summary>
-public sealed class QuiverDatabaseOptions
+internal sealed class QuiverDatabaseOptions
 {
     /// <summary>
     /// 新規 database file の初期物理確保量。
@@ -420,7 +420,7 @@ public sealed class QuiverDatabaseOptions
     /// 任意のファクトリ。設定すると <see cref="Backend"/> をオーバーライドする。
     /// テストからインメモリバックエンド等を注入する用途を想定。
     /// </summary>
-    public IGraphStorageBackendFactory? BackendFactory { get; set; }
+    internal IGraphStorageBackendFactory? BackendFactory { get; set; }
 
     /// <summary>
     /// null でない場合、書き込みトランザクションが
@@ -431,7 +431,7 @@ public sealed class QuiverDatabaseOptions
     /// デバッグ / 監査ログ転送・マイグレーション・将来の
     /// レプリケーション用途を想定。ロールバックされたトランザクションは届かない。
     /// </summary>
-    public ILogicalMutationSink? LogicalMutationSink { get; set; }
+    internal ILogicalMutationSink? LogicalMutationSink { get; set; }
 
     /// <summary>
     /// <c>true</c> のとき、バックエンド open 完了直後に

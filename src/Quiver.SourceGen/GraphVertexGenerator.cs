@@ -57,6 +57,7 @@ public sealed class GraphVertexGenerator : IIncrementalGenerator
 
             string? graphKey = null;
             string? indexName = null;
+            bool isUnique = false;
 
             foreach (var attr in prop.GetAttributes())
             {
@@ -77,6 +78,11 @@ public sealed class GraphVertexGenerator : IIncrementalGenerator
                                 attr.ConstructorArguments[0].Value is string { Length: > 0 } idxArg
                         ? idxArg
                         : $"idx_{label.ToLowerInvariant()}_{prop.Name.ToLowerInvariant()}";
+                    foreach (KeyValuePair<string, TypedConstant> named in attr.NamedArguments)
+                    {
+                        if (named.Key == "Unique" && named.Value.Value is true)
+                            isUnique = true;
+                    }
                 }
             }
 
@@ -103,6 +109,7 @@ public sealed class GraphVertexGenerator : IIncrementalGenerator
                 GraphKey = graphKey,
                 CSharpType = typeName,
                 IndexName = indexName,
+                IsUnique = isUnique,
                 IsMultiValued = isMultiValued,
             });
         }

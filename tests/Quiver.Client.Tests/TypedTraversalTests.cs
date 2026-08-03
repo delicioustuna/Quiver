@@ -22,9 +22,18 @@ public sealed class TypedTraversalTests : IDisposable
         using var tx = _db.BeginWriteTransaction();
         var g = tx.Query;
 
-        var alice = tx.Mutate.Insert(new PersonModel { Name = "Alice", Age = 30 });
-        var bob = tx.Mutate.Insert(new PersonModel { Name = "Bob", Age = 25 });
-        var carol = tx.Mutate.Insert(new PersonModel { Name = "Carol", Age = 35 });
+        var alice = tx.Mutate.Insert(new PersonModel
+        {
+            Name = "Alice", Age = 30, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
+        var bob = tx.Mutate.Insert(new PersonModel
+        {
+            Name = "Bob", Age = 25, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
+        var carol = tx.Mutate.Insert(new PersonModel
+        {
+            Name = "Carol", Age = 35, CreatedAt = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc),
+        });
 
         tx.CreateEdge(alice, bob, "KNOWS");
         tx.CreateEdge(bob, carol, "KNOWS");
@@ -97,6 +106,45 @@ public sealed class TypedTraversalTests : IDisposable
             .Where(p => p.Age > 28 && p.Age < 34)
             .ToList();
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
+    }
+
+    [Fact]
+    public void Where_expression_evaluates_captured_and_computed_values()
+    {
+        using var tx = _db.BeginReadTransaction();
+        int baseline = 20;
+        int offset = 8;
+
+        var result = tx.Query.Vertices<PersonModel>()
+            .Where(person => person.Age > baseline + offset)
+            .ToList();
+
+        result.Select(person => person.Name).Should().BeEquivalentTo("Alice", "Carol");
+    }
+
+    [Fact]
+    public void Where_string_method_evaluates_captured_argument()
+    {
+        using var tx = _db.BeginReadTransaction();
+        string prefix = "A";
+
+        var result = tx.Query.Vertices<PersonModel>()
+            .Where(person => person.Name.StartsWith(prefix))
+            .ToList();
+
+        result.Should().ContainSingle().Which.Name.Should().Be("Alice");
+    }
+
+    [Fact]
+    public void Where_expression_evaluates_inline_temporal_constructor()
+    {
+        using var tx = _db.BeginReadTransaction();
+
+        var result = tx.Query.Vertices<PersonModel>()
+            .Where(person => person.CreatedAt > new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc))
+            .ToList();
+
+        result.Select(person => person.Name).Should().BeEquivalentTo("Bob", "Carol");
     }
 
     // ── Values (式 selector) ─────────────────────────────────────────
@@ -247,6 +295,7 @@ public sealed class TypedTraversalTests : IDisposable
     {
         public string Name { get; set; } = "";
         public int Age { get; set; }
+        public DateTime CreatedAt { get; set; }
 
         public static string GraphLabel => "Person";
 
@@ -255,6 +304,7 @@ public sealed class TypedTraversalTests : IDisposable
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
+            tx.SetProperty(id, "CreatedAt", PropertyValue.FromDateTime(entity.CreatedAt));
             return id;
         }
 
@@ -265,12 +315,14 @@ public sealed class TypedTraversalTests : IDisposable
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Age = tx.GetProperty(id, "Age").Int32Value,
+                CreatedAt = tx.GetProperty(id, "CreatedAt").DateTimeValue,
             };
 
         public static void Update(IWriteTransaction tx, VertexId id, PersonModel entity)
         {
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
+            tx.SetProperty(id, "CreatedAt", PropertyValue.FromDateTime(entity.CreatedAt));
         }
 
         public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);

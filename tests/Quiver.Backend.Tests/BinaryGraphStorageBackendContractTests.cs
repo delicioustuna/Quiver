@@ -11,7 +11,7 @@ namespace Quiver.Backend.Tests;
 /// </summary>
 public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackendContractTests
 {
-    protected override IGraphStorageBackendFactory CreateFactory()
+    private protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
     // binary backend は単一ファイル <dir>/graph.quiver を開く。

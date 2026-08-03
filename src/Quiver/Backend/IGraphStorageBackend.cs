@@ -7,7 +7,7 @@ namespace Quiver;
 /// <summary>
 /// Quiver ストレージエンジンのバックエンド定義側コントラクト
 /// </summary>
-public interface IGraphStorageBackend : IDisposable
+internal interface IGraphStorageBackend : IDisposable
 {
     // バックエンドがこのインタフェースを実装することで、
     // <see cref="QuiverDatabase"/> は薄いファサードに留まり、ストレージレイアウトを

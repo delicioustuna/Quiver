@@ -8,6 +8,12 @@ namespace Quiver.Rag;
 public interface IChunkEmbedder
 {
     /// <summary>
+    /// 埋め込みモデル、版、量子化、task 設定を一意に表す安定した識別子。
+    /// <see cref="RagIngestionProfile.EmbeddingProfileId"/> と一致している必要がある。
+    /// </summary>
+    string ProfileId { get; }
+
+    /// <summary>
     /// 生成するベクトルの次元数。
     /// <see cref="RagStoreOptions.EmbeddingDimensions"/> と一致している必要がある (ベクトル索引は作成時に次元が固定されるため)。
     /// </summary>

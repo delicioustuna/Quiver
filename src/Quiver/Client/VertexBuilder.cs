@@ -8,7 +8,7 @@ namespace Quiver.Api;
 /// <c>.P(key, value)</c> をチェーンしてプロパティを蓄積し、最後に <see cref="Next"/> で
 /// 実際にVertexを作成・コミット (トランザクション内) する。
 /// </summary>
-public sealed class VertexBuilder
+internal sealed class VertexBuilder
 {
     private readonly IWriteTransaction _tx;
     private readonly string _label;

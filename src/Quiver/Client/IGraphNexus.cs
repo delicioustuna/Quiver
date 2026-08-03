@@ -13,7 +13,7 @@ namespace Quiver.Api;
 /// から組み立てて一度だけ書き込み、以後 <c>Update</c> では変更しない。
 /// </remarks>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
-public interface IGraphNexus<TSelf> where TSelf : IGraphNexus<TSelf>
+internal interface IGraphNexus<TSelf> where TSelf : IGraphNexus<TSelf>
 {
     /// <summary>Nexus型名。SourceGenerator が <c>[Nexus("...")]</c> から決定する。</summary>
     static abstract string GraphType { get; }

@@ -10,7 +10,10 @@ internal interface INexusSchemaResolver
     bool TryGetRoleId(string name, out RoleId id);
 }
 
-internal readonly record struct ScalarIndexBuildEntry(object Key, long PropertyVersion);
+internal readonly record struct ScalarIndexBuildEntry(
+    object Key,
+    long PropertyVersion,
+    EntityRef Owner);
 
 internal sealed record ScalarIndexBuildArtifact(
     ScalarIndexDefinition Definition,
@@ -138,6 +141,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         if (definition is not ScalarIndexDefinition scalar)
             throw new NotSupportedException(
                 $"index definition '{definition.GetType().Name}' はサポートされていません。");
+        ValidateScalarIndexDefinition(scalar);
 
         ScalarIndexMetadata existing = _indexManager.ListIndexDefinitions()
             .FirstOrDefault(x => x.Definition.Name == scalar.Name);
@@ -176,6 +180,76 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             scalar,
             owner is null ? IndexLifecycleState.Ready : IndexLifecycleState.Building);
         return true;
+    }
+
+    private void ValidateScalarIndexDefinition(ScalarIndexDefinition definition)
+    {
+        if (!definition.Unique)
+            return;
+
+        if (definition.Target.OwnerKind != PropertyOwnerKind.Vertex
+            || string.IsNullOrWhiteSpace(definition.Target.Scope)
+            || definition.Kind != IndexKind.StringEquality)
+        {
+            throw new ConstraintException(
+                $"Unique index '{definition.Name}' requires a label-scoped Vertex " +
+                "target and StringEquality kind.");
+        }
+
+        if (_propKeys.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId)
+            && _propKeys.GetCardinality(keyId) != PropertyCardinality.Single)
+        {
+            throw new ConstraintException(
+                $"Unique index '{definition.Name}' requires Single cardinality property " +
+                $"'{definition.Target.PropertyKey}'.");
+        }
+    }
+
+    private void ValidateUniqueBackfill(
+        ITransaction transaction,
+        ScalarIndexDefinition definition)
+    {
+        if (!definition.Unique)
+            return;
+
+        ValidateScalarIndexDefinition(definition);
+        var ownersByValue = new Dictionary<string, EntityRef>(StringComparer.Ordinal);
+        foreach (VertexId vertexId in transaction.Vertices.Scan())
+        {
+            VertexReadHandle vertex = transaction.Vertices.Read(vertexId);
+            if (!vertex.InUse
+                || _labels.GetName(vertex.Label) != definition.Target.Scope)
+                continue;
+
+            EntityRef owner = EntityRef.From(vertexId);
+            PropertyCursor properties = transaction.Vertices.EnumerateProperties(
+                vertexId,
+                transaction.Properties);
+            while (properties.MoveNext())
+            {
+                PropertyEntry property = properties.Current;
+                if (_propKeys.GetName(property.KeyId) != definition.Target.PropertyKey)
+                    continue;
+                PropertyValue value = property.Value;
+                if (value.Type != PropertyValueType.String)
+                {
+                    throw new ConstraintException(
+                        $"Unique index '{definition.Name}' requires string values for " +
+                        $"property '{definition.Target.PropertyKey}'.");
+                }
+
+                string text = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
+                if (ownersByValue.TryGetValue(text, out EntityRef existing)
+                    && existing != owner)
+                {
+                    throw new UniqueConstraintViolationException(
+                        definition.Name,
+                        definition.Target.Scope!,
+                        definition.Target.PropertyKey);
+                }
+                ownersByValue[text] = owner;
+            }
+        }
     }
 
     private bool CreateVectorIndex(
@@ -799,6 +873,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         public bool IndexExists(string indexName) => schema.IndexExists(indexName);
         public void CreateIndex(IndexDefinition definition)
         {
+            if (definition is ScalarIndexDefinition candidate)
+                schema.ValidateUniqueBackfill(transaction, candidate);
             if (schema.CreateIndex(definition, Owner)
                 && definition is ScalarIndexDefinition scalar)
             {
@@ -853,6 +929,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     CollectScalarEntries(
                         transaction,
                         definition,
+                        EntityRef.From(vertexId),
                         transaction.Vertices.EnumerateProperties(vertexId, transaction.Properties),
                         entries);
                 }
@@ -869,6 +946,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     CollectScalarEntries(
                         transaction,
                         definition,
+                        EntityRef.From(edgeId),
                         transaction.Edges.EnumerateProperties(edgeId, transaction.Properties),
                         entries);
                 }
@@ -885,6 +963,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     CollectScalarEntries(
                         transaction,
                         definition,
+                        EntityRef.From(nexusId),
                         transaction.Nexuses.EnumerateProperties(nexusId, transaction.Properties),
                         entries);
                 }
@@ -898,6 +977,20 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                 ? keyOrder
                 : left.PropertyVersion.CompareTo(right.PropertyVersion);
         });
+        if (definition.Unique)
+        {
+            for (int i = 1; i < entries.Count; i++)
+            {
+                if (Equals(entries[i - 1].Key, entries[i].Key)
+                    && entries[i - 1].Owner != entries[i].Owner)
+                {
+                    throw new UniqueConstraintViolationException(
+                        definition.Name,
+                        definition.Target.Scope!,
+                        definition.Target.PropertyKey);
+                }
+            }
+        }
         return new ScalarIndexBuildArtifact(
             definition,
             transaction.Snapshot.CommittedHighWater,
@@ -934,6 +1027,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     private void CollectScalarEntries(
         ITransaction transaction,
         ScalarIndexDefinition definition,
+        EntityRef owner,
         PropertyCursor properties,
         ICollection<ScalarIndexBuildEntry> entries)
     {
@@ -961,7 +1055,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             if (key is not null)
                 entries.Add(new ScalarIndexBuildEntry(
                     key,
-                    properties.CurrentVersion.Value));
+                    properties.CurrentVersion.Value,
+                    owner));
         }
     }
 

@@ -11,7 +11,7 @@ namespace Quiver.Api;
 /// 射影後フィルタを掛ける方法だと、単一パスの Volcano モデルでは UTF-8 バイト列を
 /// 汎用述語に渡し直す経路が無いため、書き換えが必要になる。
 /// </summary>
-public static class IsExtensions
+internal static class IsExtensions
 {
     /// <summary><c>.Values(key).Is(value)</c> 用の文字列等値フィルタ。</summary>
     public static GraphTraversal<string> Is(this GraphTraversal<string> traversal, string value)

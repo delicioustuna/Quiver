@@ -83,6 +83,40 @@ internal static class GraphVertexEmitter
         ["double"]  = "Quiver.IndexKind.DoubleEquality",
     };
 
+    private static readonly Dictionary<string, (string write, string read)> _publicTypeMap = new()
+    {
+        ["string"]  = ("entity.{0}", "read.Get(vertex, \"{1}\").AsString()"),
+        ["string?"] = ("entity.{0} ?? \"\"", "read.Get(vertex, \"{1}\").AsString()"),
+        ["int"]     = ("entity.{0}", "read.Get(vertex, \"{1}\").AsInt32()"),
+        ["long"]    = ("entity.{0}", "read.Get(vertex, \"{1}\").AsInt64()"),
+        ["double"]  = ("entity.{0}", "read.Get(vertex, \"{1}\").AsDouble()"),
+        ["float"]   = ("Quiver.GraphValue.FromDouble((double)entity.{0})", "(float)read.Get(vertex, \"{1}\").AsDouble()"),
+        ["Half"]    = ("Quiver.GraphValue.FromDouble((double)entity.{0})", "(System.Half)read.Get(vertex, \"{1}\").AsDouble()"),
+        ["bool"]    = ("entity.{0}", "read.Get(vertex, \"{1}\").AsBoolean()"),
+        ["DateTime"]       = ("Quiver.GraphValue.FromDateTime(entity.{0})", "read.Get(vertex, \"{1}\").AsDateTime()"),
+        ["DateTimeOffset"] = ("Quiver.GraphValue.FromDateTimeOffset(entity.{0})", "read.Get(vertex, \"{1}\").AsDateTimeOffset()"),
+        ["DateOnly"]       = ("Quiver.GraphValue.FromDateOnly(entity.{0})", "read.Get(vertex, \"{1}\").AsDateOnly()"),
+        ["TimeOnly"]       = ("Quiver.GraphValue.FromTimeOnly(entity.{0})", "read.Get(vertex, \"{1}\").AsTimeOnly()"),
+        ["TimeSpan"]       = ("Quiver.GraphValue.FromTimeSpan(entity.{0})", "read.Get(vertex, \"{1}\").AsTimeSpan()"),
+        ["float[]"]        = ("Quiver.GraphValue.FromFloatVector(entity.{0})", "read.Get(vertex, \"{1}\").AsFloatVector().ToArray()"),
+    };
+
+    private static readonly Dictionary<string, (string write, string read)> _publicMultiValueMap = new()
+    {
+        ["string"]  = ("__v", "__value.AsString()"),
+        ["int"]     = ("__v", "__value.AsInt32()"),
+        ["long"]    = ("__v", "__value.AsInt64()"),
+        ["double"]  = ("__v", "__value.AsDouble()"),
+        ["float"]   = ("Quiver.GraphValue.FromDouble((double)__v)", "(float)__value.AsDouble()"),
+        ["Half"]    = ("Quiver.GraphValue.FromDouble((double)__v)", "(System.Half)__value.AsDouble()"),
+        ["bool"]    = ("__v", "__value.AsBoolean()"),
+        ["DateTime"]       = ("Quiver.GraphValue.FromDateTime(__v)", "__value.AsDateTime()"),
+        ["DateTimeOffset"] = ("Quiver.GraphValue.FromDateTimeOffset(__v)", "__value.AsDateTimeOffset()"),
+        ["DateOnly"]       = ("Quiver.GraphValue.FromDateOnly(__v)", "__value.AsDateOnly()"),
+        ["TimeOnly"]       = ("Quiver.GraphValue.FromTimeOnly(__v)", "__value.AsTimeOnly()"),
+        ["TimeSpan"]       = ("Quiver.GraphValue.FromTimeSpan(__v)", "__value.AsTimeSpan()"),
+    };
+
     public static string Emit(GraphVertexModel model)
     {
         var sb = new StringBuilder();
@@ -104,10 +138,15 @@ internal static class GraphVertexEmitter
         var indexedProps = model.Properties.FindAll(p => p.IndexName != null);
         var multiValueProps = model.Properties.FindAll(p => p.IsMultiValued);
 
-        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphVertex<{model.ClassName}>, Quiver.IGraphVertexSchema<{model.ClassName}>");
+        sb.AppendLine("#if QUIVER_LEGACY_GENERATED_API");
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphVertex<{model.ClassName}>, Quiver.IGraphEntity<{model.ClassName}>, Quiver.IGraphVertexSchema<{model.ClassName}>");
+        sb.AppendLine("#else");
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.IGraphEntity<{model.ClassName}>, Quiver.IGraphVertexSchema<{model.ClassName}>");
+        sb.AppendLine("#endif");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphLabel => \"{model.Label}\";");
         sb.AppendLine();
+        sb.AppendLine("#if QUIVER_LEGACY_GENERATED_API");
 
         // 挿入
         sb.AppendLine($"    public static Quiver.Core.VertexId Insert(IWriteTransaction tx, {model.ClassName} entity)");
@@ -186,6 +225,9 @@ internal static class GraphVertexEmitter
 
         // 削除
         sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.VertexId id) => tx.DeleteVertex(id);");
+        sb.AppendLine("#endif");
+
+        EmitPublicMapper(sb, model, multiValueProps);
 
         // 全インデックスの作成保証
         sb.AppendLine();
@@ -194,8 +236,9 @@ internal static class GraphVertexEmitter
         foreach (var prop in indexedProps)
         {
             if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
+            string uniqueExpr = prop.IsUnique ? "true" : "false";
             sb.AppendLine(
-                $"        schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), {kindExpr}));");
+                $"        schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), {kindExpr}, {uniqueExpr}));");
         }
         sb.AppendLine("    }");
 
@@ -208,9 +251,10 @@ internal static class GraphVertexEmitter
         foreach (var prop in indexedProps)
         {
             if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
+            string uniqueExpr = prop.IsUnique ? "true" : "false";
             sb.AppendLine($"            case \"{prop.PropertyName}\":");
             sb.AppendLine(
-                $"                schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), kindOverride ?? {kindExpr}));");
+                $"                schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), kindOverride ?? {kindExpr}, {uniqueExpr}));");
             sb.AppendLine("                return;");
         }
         sb.AppendLine("            default:");
@@ -219,6 +263,7 @@ internal static class GraphVertexEmitter
         sb.AppendLine("    }");
 
         // FindBy* 検索
+        sb.AppendLine("#if QUIVER_LEGACY_GENERATED_API");
         foreach (var prop in indexedProps)
         {
             if (!_seekCallMap.TryGetValue(prop.CSharpType, out var seekExpr)) continue;
@@ -238,6 +283,7 @@ internal static class GraphVertexEmitter
             sb.AppendLine("        return results;");
             sb.AppendLine("    }");
         }
+        sb.AppendLine("#endif");
 
         sb.AppendLine("}");
         return sb.ToString();
@@ -293,6 +339,72 @@ internal static class GraphVertexEmitter
         sb.AppendLine("            }");
         sb.AppendLine($"            foreach (var __v in __old)");
         sb.AppendLine($"                tx.RemovePropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("        }");
+    }
+
+    private static void EmitPublicMapper(
+        StringBuilder sb,
+        GraphVertexModel model,
+        List<PropertyModel> multiValueProps)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"    public static {model.ClassName} Read(Quiver.GraphReadAccess read, Quiver.VertexKey vertex)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        var __entity = new {model.ClassName}");
+        sb.AppendLine("        {");
+        foreach (var prop in model.Properties)
+        {
+            if (!prop.IsMultiValued && _publicTypeMap.TryGetValue(prop.CSharpType, out var map))
+                sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+        }
+        sb.AppendLine("        };");
+        foreach (var prop in multiValueProps)
+        {
+            if (!_publicMultiValueMap.TryGetValue(prop.CSharpType, out var map)) continue;
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var __list = new System.Collections.Generic.List<{prop.CSharpType}>();");
+            sb.AppendLine($"            foreach (var __value in read.GetValues(vertex, \"{prop.GraphKey}\"))");
+            sb.AppendLine($"                __list.Add({map.read});");
+            sb.AppendLine($"            __entity.{prop.PropertyName} = __list;");
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine("        return __entity;");
+        sb.AppendLine("    }");
+
+        sb.AppendLine();
+        sb.AppendLine($"    public static void Write(Quiver.GraphWriteAccess write, Quiver.VertexKey vertex, {model.ClassName} entity)");
+        sb.AppendLine("    {");
+        foreach (var prop in model.Properties)
+        {
+            if (prop.IsMultiValued)
+            {
+                EmitPublicMultiValueWrite(sb, prop);
+            }
+            else if (_publicTypeMap.TryGetValue(prop.CSharpType, out var map))
+            {
+                sb.AppendLine($"        write.Set(vertex, \"{prop.GraphKey}\", {string.Format(map.write, prop.PropertyName, prop.GraphKey)});");
+            }
+        }
+        sb.AppendLine("    }");
+    }
+
+    private static void EmitPublicMultiValueWrite(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_publicMultiValueMap.TryGetValue(prop.CSharpType, out var map)) return;
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __old = new System.Collections.Generic.HashSet<{prop.CSharpType}>();");
+        sb.AppendLine($"            foreach (var __value in write.GetValues(vertex, \"{prop.GraphKey}\"))");
+        sb.AppendLine($"                __old.Add({map.read});");
+        sb.AppendLine($"            if (entity.{prop.PropertyName} != null)");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                foreach (var __v in entity.{prop.PropertyName})");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    if (!__old.Remove(__v))");
+        sb.AppendLine($"                        write.AddValue(vertex, \"{prop.GraphKey}\", {map.write});");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("            foreach (var __v in __old)");
+        sb.AppendLine($"                write.RemoveValue(vertex, \"{prop.GraphKey}\", {map.write});");
         sb.AppendLine("        }");
     }
 }

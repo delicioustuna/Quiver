@@ -9,7 +9,7 @@ namespace Quiver.Api.Match;
 /// Match DSL のクエリビルダ。<see cref="Where"/> で述語を蓄積し、
 /// <see cref="Return{TResult}"/> で射影クロージャを指定する。
 /// </summary>
-public sealed class MatchQuery
+internal sealed class MatchQuery
 {
     private readonly IReadTransaction _tx;
     private readonly ISchemaCatalog _schema;
@@ -70,7 +70,7 @@ public sealed class MatchQuery
 /// 結果の取得方法 (<see cref="ToList"/> / <see cref="First"/> / <see cref="AsCursor"/> /
 /// <see cref="AsEnumerable"/>) を提供する。
 /// </summary>
-public sealed class ReturnClause<TResult>
+internal sealed class ReturnClause<TResult>
 {
     private readonly IReadTransaction _tx;
     private readonly ISchemaCatalog _schema;

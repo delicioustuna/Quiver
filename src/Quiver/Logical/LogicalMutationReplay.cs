@@ -8,7 +8,7 @@ namespace Quiver.Logical;
 /// 割り当てるため、Vertex・Edge ID はオンザフライで再マッピングする。
 /// 事前シード済みマップを渡すことで複数回の再生パスを連結できる。
 /// </summary>
-public static class LogicalMutationReplay
+internal static class LogicalMutationReplay
 {
     /// <summary>
     /// <paramref name="mutations"/> を順に適用する。トランザクションの管理は呼び出し側の責務で、

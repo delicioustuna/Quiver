@@ -1,6 +1,6 @@
 # WAL とリカバリ
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
+> as-built 仕様（QUIVER-SW family version 2、2026-08-02）
 
 ## フォーマットファミリ {#format-family}
 
@@ -11,6 +11,7 @@
 
 WAL はデータファイルと同じ場所に置く単一の `*.quiver-wal` サイドカーファイルである。
 先頭 16 バイトはファイルヘッダであり、magic `QUIVER-SW`、kind `W`、family version `2` を記録する。
+byte 11～15は予約領域で0とし、非0の未知header extensionは`WalFormatMismatchException`で拒否する。
 空の WAL は open 時に現行ヘッダで初期化する。
 
 ## WAL レコード {#wal-records}
@@ -30,6 +31,8 @@ LSN は WAL 内で単調に増加する `Int64` である。
 | `FileTruncate` | 7 | ページファイルの切り詰め |
 
 上表以外の type は corruption として拒否する。
+family version 2にはrecordのrequired / ignorable識別子がないため、length prefixが妥当でも未知typeをskipしない。
+1.xでは上表のrecord集合を固定し、新しいrecovery意味論はfamily bumpなしに追加しない。
 レコードヘッダ、payload、CRC のいずれかが欠けた WAL も拒否する。
 CRC が一致しないレコードは `CorruptionException` とし、途中までを正常なログとして扱わない。
 
@@ -74,7 +77,9 @@ recovery は winner の catalog PageImage から manifest を復元し、artifac
 未参照 file は不可視 orphan であり、欠損または checksum 不一致の参照は primary corruption ではなく `RebuildRequired` とする。
 loser の物理変更は no-steal によってデータファイルへ到達しないため、winner redo だけで復旧できる。
 
-open はデータベースと WAL のヘッダ、WAL record、再生する page image を検証し、recovery と完了 checkpoint を終えてから通常 operation を受け付ける。
+open はデータベースheaderをWAL sidecarの作成より前に検証し、その後WAL header、WAL record、再生する
+page imageを検証する。非対応database / WALは元fileを書き換えずに拒否し、recoveryと完了checkpointを
+終えてから通常operationを受け付ける。
 WAL で観測した transaction のうち winner でない ID は aborted gap に復元する。
 次の transaction ID は、checkpoint 済み catalog と WAL で観測した最大 ID の後へ進める。
 

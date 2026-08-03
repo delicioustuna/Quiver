@@ -11,6 +11,8 @@ public static class RagSchema
     public const string DocumentLabel = "Document";
     /// <summary>チャンクVertexのラベル。</summary>
     public const string ChunkLabel = "Chunk";
+    /// <summary>コーパス全体の取込 profile を保持する単一 Vertex のラベル。</summary>
+    public const string IngestionProfileLabel = "RagIngestionProfile";
 
     // ── 関係型 ──
     /// <summary>Document → Chunk。文書が保持するチャンク。</summary>
@@ -23,12 +25,22 @@ public static class RagSchema
     public const string PropSourceId = "sourceId";
     /// <summary>文書タイトル。</summary>
     public const string PropTitle = "title";
-    /// <summary>Blocks の正規化ハッシュ。再取込時の no-op 判定に使う。</summary>
+    /// <summary>Blocks の正規化ハッシュ。属性だけの更新と再チャンクを区別する。</summary>
     public const string PropContentHash = "contentHash";
+    /// <summary>本文、表示属性、content revision、取込 profile を束ねた fingerprint。</summary>
+    public const string PropIngestionFingerprint = "ingestionFingerprint";
+    /// <summary>元文書側の任意 content revision。</summary>
+    public const string PropContentRevision = "contentRevision";
     /// <summary>取込時刻 (UTC ticks)。</summary>
     public const string PropIngestedAt = "ingestedAt";
     /// <summary>メタデータの JSON 直列化 (MVP)。</summary>
     public const string PropMetadataJson = "metadataJson";
+
+    // ── 取込 profile プロパティキー ──
+    /// <summary>コーパス取込 profile の fingerprint。</summary>
+    public const string PropProfileFingerprint = "profileFingerprint";
+    /// <summary>profile 不一致時の診断に使う決定的 descriptor。</summary>
+    public const string PropProfileDescriptor = "profileDescriptor";
 
     // ── Chunk プロパティキー ──
     /// <summary>

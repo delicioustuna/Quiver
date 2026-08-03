@@ -6,7 +6,7 @@ using Quiver.Storage.Records;
 namespace Quiver;
 
 /// <summary>組み込みグラフ注釈の評価順序。</summary>
-public enum GraphAnnotationPolicy
+internal enum GraphAnnotationPolicy
 {
     /// <summary>到達済みVertexを先入れ先出しで展開する。</summary>
     BreadthFirst = 0,
@@ -19,7 +19,7 @@ public enum GraphAnnotationPolicy
 }
 
 /// <summary>グラフ注釈評価が終了した理由。</summary>
-public enum GraphAnnotationTerminationReason
+internal enum GraphAnnotationTerminationReason
 {
     /// <summary>入力全体を評価し、全結果を返した。</summary>
     Completed,
@@ -56,10 +56,10 @@ public enum GraphAnnotationTerminationReason
 /// <param name="transaction">評価対象の読み取りtransaction。</param>
 /// <param name="edgeId">値を読み出すsnapshot可視Edge。</param>
 /// <returns>tropicalでは有限重み、Viterbiでは0以上1以下の有限確率。</returns>
-public delegate double GraphEdgeValueSelector(IReadTransaction transaction, EdgeId edgeId);
+internal delegate double GraphEdgeValueSelector(IReadTransaction transaction, EdgeId edgeId);
 
 /// <summary>組み込みグラフ注釈を評価するときの入力・作業・時間上限。</summary>
-public sealed class GraphAnnotationOptions
+internal sealed class GraphAnnotationOptions
 {
     /// <summary>対象にするEdge型。<c>null</c>は全型。</summary>
     public string? EdgeType { get; init; }
@@ -93,11 +93,11 @@ public sealed class GraphAnnotationOptions
 /// <typeparam name="T">組み込み評価が返す値型。</typeparam>
 /// <param name="VertexId">注釈対象のVertex。</param>
 /// <param name="Value">組み込み評価で得た値。</param>
-public readonly record struct GraphAnnotation<T>(VertexId VertexId, T Value);
+internal readonly record struct GraphAnnotation<T>(VertexId VertexId, T Value);
 
 /// <summary>組み込みグラフ注釈の評価結果。</summary>
 /// <typeparam name="T">Boolean、倍精度値、または経路多重度。</typeparam>
-public sealed class GraphAnnotationResult<T>
+internal sealed class GraphAnnotationResult<T>
 {
     internal GraphAnnotationResult(
         IReadOnlyList<GraphAnnotation<T>> annotations,
@@ -156,7 +156,7 @@ public sealed class GraphAnnotationResult<T>
 }
 
 /// <summary>transaction snapshot上で固定の組み込みグラフ注釈を評価する。</summary>
-public static class GraphAnnotationAlgorithms
+internal static class GraphAnnotationAlgorithms
 {
     /// <summary>
     /// Boolean注釈をBFSで評価する。

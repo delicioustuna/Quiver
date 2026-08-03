@@ -11,7 +11,7 @@ namespace Quiver.Api;
 /// 終端で自動的にエンティティ復元を行うヘルパを提供する。
 /// </summary>
 /// <typeparam name="T">対象Vertex型。</typeparam>
-public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
+internal sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
 {
     private readonly GraphTraversal<VertexId> _inner;
     private readonly IReadTransaction _tx;

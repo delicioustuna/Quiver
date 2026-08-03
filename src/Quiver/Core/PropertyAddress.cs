@@ -6,7 +6,7 @@ namespace Quiver.Core;
 /// </summary>
 /// <param name="Owner">プロパティを所有する Vertex、Edge、または Nexus。</param>
 /// <param name="Key">プロパティキー。</param>
-public readonly record struct PropertyAddress(EntityRef Owner, PropertyKeyId Key)
+internal readonly record struct PropertyAddress(EntityRef Owner, PropertyKeyId Key)
 {
     /// <summary>有効な所有者とキーを持つかどうか。</summary>
     public bool IsValid => Owner.IsValid && Key.IsValid;

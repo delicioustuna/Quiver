@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Quiver.Api;
 using Quiver.Core;
+using Quiver.Index.FullText;
 using Quiver.Query.Physical;
+using Quiver.Transactions;
 using Quiver.Storage.Records;
 using Xunit;
 
@@ -44,6 +46,15 @@ public sealed class Bm25ScorerTests : IDisposable
     {
         using var rtx = _db.BeginReadTransaction();
         return rtx.Query.Search(Index, query, k).ToList();
+    }
+
+    private FullTextSegmentSnapshot FullTextSnapshot()
+    {
+        using var transaction = _db.BeginReadTransaction();
+        ITransaction inner = transaction.AsInternal().Inner;
+        inner.FullTextSegments.Should().NotBeNull();
+        inner.FullTextSegments!.TryOpen(inner, Index, out var snapshot).Should().BeTrue();
+        return snapshot;
     }
 
     // ── Default parameters ──────────────────────────────────────────────
@@ -160,6 +171,25 @@ public sealed class Bm25ScorerTests : IDisposable
 
         results[0].Should().Be(longHighTf,
             "high tf should overcome length penalty at moderate length difference");
+    }
+
+    [Fact]
+    public void Japanese_document_length_uses_norm_tokens_not_utf8_bytes_or_utf16_length()
+    {
+        const string body = "東京都";
+        VertexId document = AddDoc(body);
+
+        FullTextSegmentSnapshot snapshot = FullTextSnapshot();
+        EntityRef reference = EntityRef.From(document);
+        long entity = EntityRef.Pack(
+            reference.Kind,
+            reference.Sequence,
+            reference.Generation);
+
+        snapshot.TryGetDocLength(entity, out int documentLength).Should().BeTrue();
+        documentLength.Should().Be(2, "東京都は3文字ではなく2個のCJK bigramを持つ");
+        documentLength.Should().NotBe(body.Length);
+        documentLength.Should().NotBe(System.Text.Encoding.UTF8.GetByteCount(body));
     }
 
     // ── Multi-term additive scoring ─────────────────────────────────────

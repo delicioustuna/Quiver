@@ -18,7 +18,7 @@ namespace Quiver.Api;
 /// インスタンスは不変。各ステップは新しいインスタンスを返すため、中間結果を変数に保持して
 /// 分岐させても副作用は発生しない。所属トランザクションの境界を越えて利用しないこと。
 /// </remarks>
-public sealed class GraphTraversal<T>
+internal sealed class GraphTraversal<T>
 {
     internal readonly IReadTransaction _tx;
     internal readonly ISchemaCatalog _schema;

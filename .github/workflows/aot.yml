@@ -2,7 +2,7 @@ name: AOT publish smoke
 
 # CI-1: AOT 互換性スモーク。Quiver.Samples.Crud を NativeAOT 公開し、
 # トリム / AOT 警告が出ないこと + 生成された native binary が実際に起動することを確認する。
-# PW-19 (AOT publish smoke) と連動。段階導入のため windows-latest 単独で開始する。
+# Windows / Linux の native binary をそれぞれ publish して実行する。
 on:
   push:
     branches: [main]
@@ -26,6 +26,10 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
+            binary: Quiver.Samples.Crud.exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary: Quiver.Samples.Crud
     steps:
       - uses: actions/checkout@v4
 
@@ -34,8 +38,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # NativeAOT は C++ ツールチェーンを要する。windows-latest には MSVC が
-      # プリインストールされているので追加 setup は不要。
+      # NativeAOT は C++ ツールチェーンを要する。hosted runner の Windows には
+      # MSVC、Ubuntu には clang / zlib がプリインストールされている。
       # PublishAot は Crud sample の csproj 側で有効化済み。コマンドラインで
       # -p:PublishAot=true を渡すと netstandard2.0 の P2P 参照先へ伝播して
       # NETSDK1207 になるため、ここでは渡さない。
@@ -64,7 +68,7 @@ jobs:
       - name: Run published binary (smoke)
         shell: pwsh
         run: |
-          $exe = Join-Path "artifacts/aot" "Quiver.Samples.Crud.exe"
+          $exe = Join-Path "artifacts/aot" "${{ matrix.binary }}"
           if (-not (Test-Path $exe)) { throw "published binary not found: $exe" }
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "published binary exited with $LASTEXITCODE" }

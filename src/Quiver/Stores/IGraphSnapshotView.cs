@@ -16,7 +16,7 @@ namespace Quiver.Storage.Records;
 /// <see cref="Epoch"/> は構築時点の <see cref="IAdjacencySegmentStore.Epoch"/> をそのまま反映する。
 /// 呼び出し側はこの値で compact によるキャッシュ済み計算結果の無効化を検出できる。
 /// </summary>
-public interface IGraphSnapshotView : IDisposable
+internal interface IGraphSnapshotView : IDisposable
 {
     /// <summary>スナップショット構築時にキャプチャした隣接エポック。ベースビューが無いときは 0。</summary>
     long Epoch { get; }

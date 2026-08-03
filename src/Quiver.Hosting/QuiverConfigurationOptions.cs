@@ -1,19 +1,14 @@
-using Quiver.Transactions;
-
 namespace Quiver.Hosting;
 
 /// <summary>
 /// <c>Microsoft.Extensions.Configuration</c> から bind 可能な POCO 版の Quiver 設定。
-/// <see cref="QuiverDatabaseOptions"/> のうち interface / factory / 任意デリゲートのような
-/// configuration バインダで扱えないメンバーを除いた、appsettings.json / 環境変数で表現できる
-/// サブセットを公開する。<see cref="ToQuiverDatabaseOptions"/> で実体オプションに射影する。
+/// <see cref="GraphStoreOptions"/> を appsettings.json / 環境変数で表現できる
+/// POCO として公開する。<see cref="ToGraphStoreOptions"/> で実体オプションに射影する。
 /// </summary>
 /// <remarks>
 /// セクション名は <c>"Quiver"</c> を推奨。環境変数では二重アンダースコア区切り
 /// (例: <c>Quiver__BufferPoolSize=536870912</c>) でオーバーライドできる。
-/// バックエンドファクトリ・LogicalMutationSink を差し込みたい場合は
-/// <see cref="QuiverServiceCollectionExtensions.AddQuiver(Microsoft.Extensions.DependencyInjection.IServiceCollection, Microsoft.Extensions.Configuration.IConfiguration, System.Action{QuiverDatabaseOptions}?)"/>
-/// の <c>postConfigure</c> から実体 <see cref="QuiverDatabaseOptions"/> を直接編集する。
+/// bind 後の調整は <c>AddQuiver</c> の <c>postConfigure</c> で行える。
 /// </remarks>
 public sealed class QuiverConfigurationOptions
 {
@@ -27,16 +22,16 @@ public sealed class QuiverConfigurationOptions
     public long CheckpointThresholdBytes { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>チェックポイント threshold の運用ポリシー。</summary>
-    public CheckpointPolicy CheckpointPolicy { get; set; } = CheckpointPolicy.Fixed;
+    public GraphCheckpointPolicy CheckpointPolicy { get; set; } = GraphCheckpointPolicy.Fixed;
 
     /// <summary>Adaptive 選択時の復旧時間目標。既定 5 秒。</summary>
     public TimeSpan TargetRecoveryTime { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Adaptive 計算時の threshold 下限。既定 4 MB。</summary>
-    public long MinCheckpointThresholdBytes { get; set; } = 4L * 1024 * 1024;
+    public long MinimumCheckpointThresholdBytes { get; set; } = 4L * 1024 * 1024;
 
     /// <summary>Adaptive 計算時の threshold 上限。既定 1 GB。</summary>
-    public long MaxCheckpointThresholdBytes { get; set; } = 1024L * 1024 * 1024;
+    public long MaximumCheckpointThresholdBytes { get; set; } = 1024L * 1024 * 1024;
 
     /// <summary>Adaptive 移動平均のサンプル窓 (トランザクション数)。既定 1000。</summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
@@ -45,35 +40,31 @@ public sealed class QuiverConfigurationOptions
     public TimeSpan WriterWaitTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>writer lease が使用中だった場合の動作。既定は待機。</summary>
-    public WriterContentionMode WriterContentionMode { get; set; } = WriterContentionMode.Wait;
+    public GraphWriterContentionMode WriterContentionMode { get; set; } = GraphWriterContentionMode.Wait;
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
-
-    /// <summary>使用するバックエンド種別。既定 <see cref="BackendKind.Binary"/>。</summary>
-    public BackendKind Backend { get; set; } = BackendKind.Binary;
 
     /// <summary>open 完了後に索引 orphan を自動修復するか。既定 <c>false</c>。</summary>
     public bool AutoRepairOrphansOnRecovery { get; set; }
 
     /// <summary>
-    /// 現在の設定値を <see cref="QuiverDatabaseOptions"/> に写像する。
+    /// 現在の設定値を <see cref="GraphStoreOptions"/> に写像する。
     /// </summary>
-    public QuiverDatabaseOptions ToQuiverDatabaseOptions()
+    public GraphStoreOptions ToGraphStoreOptions()
     {
-        return new QuiverDatabaseOptions
+        return new GraphStoreOptions
         {
             BufferPoolSize = BufferPoolSize,
             CheckpointThresholdBytes = CheckpointThresholdBytes,
             CheckpointPolicy = CheckpointPolicy,
             TargetRecoveryTime = TargetRecoveryTime,
-            MinCheckpointThresholdBytes = MinCheckpointThresholdBytes,
-            MaxCheckpointThresholdBytes = MaxCheckpointThresholdBytes,
+            MinimumCheckpointThresholdBytes = MinimumCheckpointThresholdBytes,
+            MaximumCheckpointThresholdBytes = MaximumCheckpointThresholdBytes,
             AdaptiveSampleWindow = AdaptiveSampleWindow,
             WriterWaitTimeout = WriterWaitTimeout,
             WriterContentionMode = WriterContentionMode,
             EnableChecksums = EnableChecksums,
-            Backend = Backend,
             AutoRepairOrphansOnRecovery = AutoRepairOrphansOnRecovery,
         };
     }

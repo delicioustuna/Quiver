@@ -6,7 +6,7 @@ namespace Quiver;
 /// </summary>
 // <see cref="QuiverDatabase"/> をサブクラス化せず、
 // テスト用のインメモリファクトリ等を呼び出し側で注入できる。
-public interface IGraphStorageBackendFactory
+internal interface IGraphStorageBackendFactory
 {
     /// <summary>指定ディレクトリとオプションでバックエンドをオープンする。 (新規作成も含む) </summary>
     IGraphStorageBackend Open(string directoryPath, QuiverDatabaseOptions options);

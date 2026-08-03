@@ -290,11 +290,13 @@ public sealed class RagSearcher
     /// <paramref name="equals"/> の全キーが一致する Document のチャンク VertexId を集める。
     /// Document ラベルスキャン (LabelVertexIndex があれば O(|Document|)) 1 回 + 各文書の HAS_CHUNK 列挙。
     /// </summary>
-    private static VertexId[] CollectCandidateChunks(
+    private VertexId[] CollectCandidateChunks(
         IReadTransaction tx, GraphTraversalSource g, IReadOnlyDictionary<string, string> equals)
     {
         var cands = new List<VertexId>();
-        foreach (var docId in g.Vertices().HasLabel(RagSchema.DocumentLabel).ToList())
+        IReadOnlyList<VertexId> documents = CollectIndexedDocuments(tx, equals)
+            ?? g.Vertices().HasLabel(RagSchema.DocumentLabel).ToList();
+        foreach (var docId in documents)
         {
             if (!tx.VertexExists(docId)) continue;
             if (!MatchesMetadataEquals(tx, docId, equals)) continue;
@@ -303,6 +305,53 @@ public sealed class RagSearcher
                 if (tx.VertexExists(e.Current.Target)) cands.Add(e.Current.Target);
         }
         return cands.ToArray();
+    }
+
+    /// <summary>
+    /// 等値条件のうち昇格済み metadata index を使えるものを seek し、Document の積集合を返す。
+    /// 一つも使えなければ <c>null</c> を返して label scan へフォールバックする。
+    /// </summary>
+    private IReadOnlyList<VertexId>? CollectIndexedDocuments(
+        IReadTransaction tx,
+        IReadOnlyDictionary<string, string> equals)
+    {
+        Dictionary<string, RagMetadataIndex> indexes = _store.Options.MetadataIndexes
+            .ToDictionary(static item => item.MetadataKey, StringComparer.Ordinal);
+        HashSet<long>? intersection = null;
+        foreach (var constraint in equals.OrderBy(static item => item.Key, StringComparer.Ordinal))
+        {
+            if (!indexes.TryGetValue(constraint.Key, out RagMetadataIndex? definition))
+                continue;
+
+            var matches = new HashSet<long>();
+            var seek = tx.SeekIndex(
+                definition.IndexName,
+                PropertyValue.FromString(constraint.Value ?? string.Empty));
+            try
+            {
+                while (seek.MoveNext())
+                {
+                    if (seek.Current.Kind != EntityKind.Vertex) continue;
+                    var document = new VertexId(seek.Current.Value);
+                    if (tx.VertexExists(document)) matches.Add(document.Value);
+                }
+            }
+            finally
+            {
+                seek.Dispose();
+            }
+
+            if (intersection is null)
+                intersection = matches;
+            else
+                intersection.IntersectWith(matches);
+            if (intersection.Count == 0) break;
+        }
+
+        return intersection?
+            .OrderBy(static value => value)
+            .Select(static value => new VertexId(value))
+            .ToArray();
     }
 
     /// <summary>文書の metadataJson が <paramref name="equals"/> の全キーを期待値で満たすか (AND)。</summary>
@@ -434,7 +483,7 @@ public sealed class RagSearcher
                     best.HeadingPath,
                     docRef,
                     best.Rank,
-                    best.Center,
+                    new VertexKey(best.Center),
                     best.Score));
             }
         }

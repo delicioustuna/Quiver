@@ -4,9 +4,10 @@
 
 [![CI](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml)
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
+[![OS portability](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml)
 
 Quiver is an embedded graph database engine for .NET with integrated vector and full-text search.
-It stores property graphs and role-aware n-ary Nexus relationships in a single file and provides type-safe CRUD through a source generator, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
+It stores property graphs and role-aware n-ary Nexus relationships in a single file and provides source-generated typed mapping, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
 
 The core engine is implemented in pure C#, has no third-party package or unmanaged dependency, and supports NativeAOT.
 
@@ -14,12 +15,12 @@ The core engine is implemented in pure C#, has no third-party package or unmanag
 
 - Embedded, in-process operation with no server process
 - Single-file property graph storage
-- Type-safe APIs generated from `[Vertex]`, `[Edge]`, and `[Property]` models
-- Role-aware n-ary Nexus relationships with generated CRUD and traversal APIs
+- Type-safe mapping generated from `[Vertex]`, `[Edge]`, `[Nexus]`, and `[Property]` models
+- Role-aware n-ary Nexus relationships with typed workspace APIs
 - Fluent graph traversal and declarative pattern matching
 - Single Writer with concurrent Snapshot Readers
 - Redo-only WAL recovery and durable commits
-- B+Tree scalar indexes
+- B+Tree scalar indexes with opt-in unique string constraints
 - KNN vector search with immutable HNSW segments
 - BM25 full-text search with immutable index segments
 - Hybrid retrieval for local RAG backends
@@ -34,7 +35,7 @@ using Quiver.Api;
 [Vertex]
 public partial class Person
 {
-    [Indexed]
+    [Indexed(Unique = true)]
     [Property]
     public string Name { get; set; } = "";
 
@@ -50,28 +51,39 @@ public partial class Knows
 }
 ```
 
-Query it through a snapshot-bound read transaction.
+Write and query it through a typed workspace. Successful write callbacks commit automatically.
 
 ```csharp
-using var tx = db.BeginReadTransaction();
+using Quiver;
 
-var known = tx.Query.Vertices<Person>()
-    .Has(p => p.Name, "Alice")
-    .Knows()
-    .Has(p => p.Age, P.Lt(30L))
-    .ToList();
+using var graph = GraphWorkspace.Open("people.quiver");
+graph.Write(write =>
+{
+    var people = write.Set<Person>();
+    var alice = write.Add(people, new Person { Name = "Alice", Age = 30 });
+    var bob = write.Add(people, new Person { Name = "Bob", Age = 25 });
+    write.Connect(alice, new Knows { Since = "2026" }, bob);
+});
+
+IReadOnlyList<Person> known = graph.Read(read =>
+    read.Raw.Query.Vertices<Person>()
+        .Has(p => p.Name, "Alice")
+        .Out<Person>(Knows.GraphType)
+        .Where(p => p.Age < 30)
+        .ToList());
 ```
 
 The `Quiver` package includes the model attributes and source generator.
 Projects with `ImplicitUsings` enabled receive the `Quiver` and `Quiver.Api` namespaces automatically.
 
-The public version is currently `0.5.0` and remains pre-1.0.
+The public version is currently `0.6.0` and remains pre-1.0.
 
 ## Local RAG
 
 `Quiver.Rag` provides Document and Chunk ingestion, chunking, re-ingestion, metadata filtering, vector and BM25 fusion, and graph expansion for surrounding context and parent documents.
 
 Embedding generation stays in the calling application and is injected through `IChunkEmbedder`.
+Corpus-level ingestion profiles prevent mixed embedding semantics, while selected metadata keys can be promoted to scalar indexes.
 
 See the [RAG sample](samples/Quiver.Samples.Rag/) and the [local RAG cookbook](docs/cookbook.md).
 
@@ -108,11 +120,7 @@ See the [known limits](docs/spec/08_known_limits.md) for the complete contract.
 | Document | Contents |
 |---|---|
 | [Getting Started](docs/api/getting-started.md) | Installation and first database |
-| [Concepts](docs/api/concepts/index.md) | Transactions, traversal, matching, indexes, and search |
-| [Tutorials](docs/api/tutorials/index.md) | Task-oriented examples |
-| [Cookbook](docs/cookbook.md) | Common graph and RAG recipes |
-| [Operations](docs/operations/README.md) | Backup, recovery, and performance tuning |
-| [Architecture](docs/architecture.md) | System structure and data flow |
+| [API reference](docs/api/) | Approved public types and members |
 | [As-built specification](docs/spec/00_overview.md) | Current storage and execution contracts |
 
 ## Samples

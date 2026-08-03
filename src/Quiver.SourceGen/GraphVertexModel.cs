@@ -15,6 +15,7 @@ internal sealed class PropertyModel
     /// <summary>スカラー型名。<see cref="IsMultiValued"/> が <c>true</c> のとき要素型を保持する。</summary>
     public string CSharpType { get; set; } = "";
     public string? IndexName { get; set; }
+    public bool IsUnique { get; set; }
     /// <summary><c>List&lt;T&gt;</c> 型プロパティで Set cardinality の多値 CRUD を emit する。</summary>
     public bool IsMultiValued { get; set; }
 }

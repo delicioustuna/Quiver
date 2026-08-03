@@ -185,7 +185,11 @@ public sealed class TypedWriteSinkTests : IDisposable
         // 各 Person について、名前の頭文字で始まる Tool だけに辺を張る相関版。
         long created = tx.Mutate.AddEdge(
             g.Vertices<PersonN>(),
-            p => g.Vertices<ToolN>().Where(t => t.Name.StartsWith(p.Name.Substring(0, 1))),
+            p =>
+            {
+                string prefix = p.Name.Substring(0, 1);
+                return g.Vertices<ToolN>().Where(t => t.Name.StartsWith(prefix));
+            },
             (p, t) => new UseEdge { Note = p.Name });
 
         // Bob → (B で始まる Tool は無し = 0) / Carol → (Cutter, Compiler = 2)

@@ -15,6 +15,10 @@ try
     var store = new RagStore(db, new RagStoreOptions
     {
         EmbeddingDimensions = embedder.Dimensions,
+        IngestionProfile = new RagIngestionProfile
+        {
+            EmbeddingProfileId = embedder.ProfileId,
+        },
         // 各段落を独立チャンクにして expansion を見せるため小さめの目標サイズ。
         Chunking = new ChunkingOptions { TargetSize = 40, Overlap = 0 },
     });
@@ -48,7 +52,7 @@ try
             $"取込 {doc.SourceId}: document={r.DocumentVertexId} chunks={r.ChunkCount} unchanged={r.Unchanged}");
     }
 
-    // 同一内容の再取込は contentHash 一致で no-op。
+    // profile・本文・属性・revision が同じ再取込は ingestion fingerprint 一致で no-op。
     var again = await store.UpsertDocumentAsync(docs[0], embedder);
     Console.WriteLine(
         $"再取込(同一) {docs[0].SourceId}: document={again.DocumentVertexId} unchanged={again.Unchanged}");
@@ -107,6 +111,7 @@ finally
 // (詳細は docs/cookbook.md「ローカル RAG」§埋め込み器)。
 sealed class HashEmbedder(int dim) : IChunkEmbedder
 {
+    public string ProfileId => "sample-hash-embedding-v1";
     public int Dimensions { get; } = dim;
 
     public ValueTask<float[][]> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)

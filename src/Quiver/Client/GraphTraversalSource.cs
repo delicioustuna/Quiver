@@ -19,7 +19,7 @@ namespace Quiver.Api;
 /// インスタンス自体はスレッドセーフではない。トランザクション境界を越えて
 /// 共有しないこと。
 /// </remarks>
-public sealed class GraphTraversalSource
+internal sealed class GraphTraversalSource
 {
     private readonly IReadTransaction _tx;
     private readonly ISchemaCatalog _schema;

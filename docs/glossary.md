@@ -10,24 +10,23 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **有向プロパティグラフ** | Vertexとエッジにプロパティ（属性）を持つ有向グラフモデル。Neo4j や JanusGraph と同じ基本モデルであり、Quiver もこれを採用する |
-| **Vertex（Vertex）** | グラフの頂点。1 つのラベルと複数のプロパティを持つ。`VertexId` で識別される |
-| **Edge（Edge）** | グラフの有向辺。1 つの型名と両端Vertex（Source、Target）、複数のプロパティを持つ。`EdgeId` で識別される |
+| **Vertex（Vertex）** | グラフの頂点。1つのラベルと複数のプロパティを持ち、公開APIでは`VertexKey`で識別する |
+| **Edge（Edge）** | グラフの有向辺。1つの型名と両端Vertex（Source、Target）、複数のプロパティを持ち、公開APIでは`EdgeKey`で識別する |
 | **Label（ラベル）** | Vertexの分類名（例: `"Person"`）。内部では `LabelId` にトークン化される |
 | **Edge Type** | Edgeの分類名（例: `"KNOWS"`）。内部では `EdgeTypeId` にトークン化される |
 | **Property（プロパティ）** | Vertex、Edge、またはNexusに付与されるキーバリュー対。値の型は `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray` |
-| **Nexus（Nexus）** | 2 つ以上の任意個のVertexを 1 つの関係として束ねる第一級エンティティ。1 つの型名とロール付きメンバー集合、複数のプロパティを持つ。`NexusId` で識別される。Edgeとは別のエンティティ種別 |
+| **Nexus（Nexus）** | 2つ以上の任意個のVertexを1つの関係として束ねる第一級エンティティ。1つの型名とロール付きメンバー集合、複数のプロパティを持ち、公開APIでは`NexusKey`で識別する。Edgeとは別のエンティティ種別 |
 | **Role（ロール）** | Nexusにおけるメンバーの位置づけ（例: `"buyer"`、`"subject"`）。無向のNexusでは方向（Out/In）の代わりにロールフィルタが方向の一般化になる |
-| **Member（メンバー）** | Nexusに属すVertex。ロールと `VertexId` の組（`NexusMember`）で表す。メンバー集合は作成時に確定し、以後変更できない（変更は削除 + 再作成） |
+| **Member（メンバー）** | Nexusに属すVertex。公開APIではロールと`VertexKey`の組（`GraphNexusMember`）で表す。メンバー集合は作成時に確定し、以後変更できない（変更は削除 + 再作成） |
 | **Arity（アリティ）** | Nexusのメンバー数。2 以上を要求する。Edgeは数学的にはアリティ 2 のNexusの特殊化にあたる |
-| **Co-membership** | 同じNexusに属すVertex同士の関係。「起点Vertex → 所属Nexus → 別ロールのメンバー」の 1 論理ホップで辿る。`QuiverDatabaseOptions.CoMembershipRolePairs` にロール対を登録すると物理ビューで高速化される |
+| **Co-membership** | 同じNexusに属すVertex同士の関係。「起点Vertex → 所属Nexus → 別ロールのメンバー」の1論理ホップで辿る |
 
 ## 識別子
 
 | 用語 | 定義 |
 |---|---|
-| **VertexId** | Vertexの識別子（`readonly record struct`）。`Value` は generation と sequence のパック値で、スロット再利用後も一貫性を保つ |
-| **EdgeId** | Edgeの識別子 |
-| **NexusId** | Nexusの識別子。VertexId と同じ generation + sequence のパック値 |
+| **VertexKey / EdgeKey / NexusKey** | 物理表現を隠す公開識別key。callbackやsessionの外へ保持できる。文字列表現や内部レイアウトに依存しない |
+| **物理ID** | generationとsequenceを保持する内部識別子。公開APIには露出しない |
 | **NexusTypeId** | インターンされたNexus型の識別子。ロール名も同様に独立空間でインターンされる |
 | **EntityId** | Vertex、Edge、Nexusを統一的に扱うための ID。`EntityId.FromVertex(id)` で変換する |
 
@@ -35,9 +34,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 
 | 用語 | 定義 |
 |---|---|
-| **QuiverDatabase** | エンジンのエントリポイント。`QuiverDatabase.Open(path)` で `*.quiver` ファイルを開く。スレッドセーフであり、プロセスのライフタイムを通じて 1 インスタンスを共有する |
-| **IReadTransaction** | snapshot 固定の読み取り、`Query`、スキーマ参照を提供する公開インタフェース |
-| **IWriteTransaction** | 読み取り能力に加えて mutation、`Mutate`、スキーマ編集、commit、rollback を提供する公開インタフェース |
+| **GraphStore** | エンジンの公開エントリポイント。`GraphStore.Open(path)`で`*.quiver`ファイルを開き、通常操作を`Read` / `Write` callbackで実行する |
+| **GraphReadAccess** | snapshot固定の読み取りと`Query`を提供する公開能力。callback scopeと明示sessionが共有する |
+| **GraphWriteAccess** | 読み取り能力に加えてmutationを提供する公開能力。callbackは自動commit、sessionは明示commitする |
 | **Commit** | WAL を `fsync` した時点で永続化が確定する。返った後はプロセスの kill や電源喪失を生き延びる |
 | **Snapshot Isolation** | Quiver の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
 | **Savepoint** | トランザクション内の中間地点。`RollbackTo(SavepointId)` でセーブポイント以降の変更だけを巻き戻せる |
@@ -69,7 +68,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **[Indexed]** | B+Tree インデックスを自動作成する属性。`[Property]` と併用すると `FindBy{PropName}` メソッドが生成される |
 | **[Nexus]** | Nexusモデルクラスに付与する属性。`Insert`、`Load`、`Update`（プロパティのみ）、`Delete` と、ロールごとの型保存トラバーサル糖衣が自動生成される |
 | **[Role]** | Nexusのロールを宣言するプロパティ属性。型は `GraphVertexRef<TVertex>`（複数メンバーは `IReadOnlyList<GraphVertexRef<TVertex>>`、省略可能ロールは nullable）で参照先Vertex型を表す |
-| **GraphVertexRef&lt;TVertex&gt;** | Vertex CLR 型を保ったまま `VertexId` を保持する参照。`VertexId` からの暗黙変換を持ち、ロールへの型不一致の代入はコンパイルエラーになる |
+| **GraphVertexRef&lt;TVertex&gt;** | Vertex CLR型を保ったまま`VertexKey`を保持する参照。`GraphEntity<T>`と`VertexKey`から変換でき、ロールへの型不一致の代入はコンパイルエラーになる |
 
 ## インデックス
 

@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>最小ヒッティング集合の探索が終了した理由。</summary>
-public enum MinimumHittingSetTerminationReason
+internal enum MinimumHittingSetTerminationReason
 {
     /// <summary>上下界が一致し、最小性を証明した。</summary>
     Optimal,
@@ -22,7 +22,7 @@ public enum MinimumHittingSetTerminationReason
 /// 最小ヒッティング集合探索の協調的な実行上限。
 /// 初回の実行可能証明書を作るための入力正規化とfallback構築は中断しない。
 /// </summary>
-public sealed class MinimumHittingSetOptions
+internal sealed class MinimumHittingSetOptions
 {
     /// <summary>訪問する分枝限定ノードの最大数。0では正規化後のfallback解と証明済み下界を返す。</summary>
     public long MaxNodes { get; init; } = 1_000_000;
@@ -41,7 +41,7 @@ public sealed class MinimumHittingSetOptions
 }
 
 /// <summary>最小ヒッティング集合探索の結果。</summary>
-public sealed class MinimumHittingSetResult
+internal sealed class MinimumHittingSetResult
 {
     internal MinimumHittingSetResult(
         bool hasSolution,
@@ -104,7 +104,7 @@ public sealed class MinimumHittingSetResult
 }
 
 /// <summary>Vertex集合族に対する最小ヒッティング集合を求めるアルゴリズム。</summary>
-public static class MinimumHittingSetAlgorithms
+internal static class MinimumHittingSetAlgorithms
 {
     /// <summary>
     /// 各内側集合を少なくとも一つのVertexで被覆する最小集合を探索する。

@@ -115,7 +115,7 @@ internal static class VectorIndexDescriptorValidator
 /// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
 /// <param name="Owner">マッチしたownerのfull typed identity。</param>
 /// <param name="Score">類似度スコア。</param>
-public readonly record struct VectorSearchResult(
+internal readonly record struct VectorSearchResult(
     EntityRef Owner,
     float Score)
 {
@@ -175,7 +175,7 @@ internal static class VectorSearchOptionsValidator
 /// 各回 <see cref="Current"/> を読む。<see cref="Current"/> は連続する <see cref="MoveNext"/>
 /// 呼び出しの間のみ有効。
 /// </summary>
-public abstract class VectorSearchCursor : IDisposable
+internal abstract class VectorSearchCursor : IDisposable
 {
     /// <summary>次の結果へ進む。結果があれば <c>true</c>、列挙完了で <c>false</c>。</summary>
     public abstract bool MoveNext();

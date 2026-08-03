@@ -24,6 +24,7 @@ public sealed class RagContractTests
         doc.Should().NotBeNull();
         doc!.SourceId.Should().Be("pdftools/report-2026.pdf");
         doc.Title.Should().Be("Annual Report 2026");
+        doc.ContentRevision.Should().Be("etag-2026-04-01");
         doc.Metadata.Should().Contain("author", "Finance Team");
         doc.Metadata.Should().Contain("lang", "en");
 
@@ -47,6 +48,7 @@ public sealed class RagContractTests
 
         doc2.SourceId.Should().Be(doc.SourceId);
         doc2.Title.Should().Be(doc.Title);
+        doc2.ContentRevision.Should().Be(doc.ContentRevision);
         doc2.Metadata.Should().BeEquivalentTo(doc.Metadata);
         doc2.Blocks.Should().HaveCount(doc.Blocks.Count);
         for (int i = 0; i < doc.Blocks.Count; i++)
@@ -68,6 +70,7 @@ public sealed class RagContractTests
         var root = parsed.RootElement;
 
         root.TryGetProperty("sourceId", out _).Should().BeTrue("camelCase プロパティ名");
+        root.GetProperty("contentRevision").GetString().Should().Be("etag-2026-04-01");
         var blocks = root.GetProperty("blocks");
         blocks[0].GetProperty("kind").GetString().Should().Be("Heading", "enum は文字列");
         // null フィールドは省略される (キー自体が現れない)。

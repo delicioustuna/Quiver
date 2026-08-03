@@ -7,13 +7,20 @@ namespace Quiver.Rag;
 /// </summary>
 /// <param name="SourceId">文書を一意に識別するキー (ファイルパス・URL 等)。再取込の同一性判定に使う。</param>
 /// <param name="Title">表示用タイトル。</param>
-/// <param name="Metadata">任意のメタデータ。MVP では <c>metadataJson</c> 文字列プロパティに直列化される。</param>
+/// <param name="Metadata">任意のメタデータ。<c>metadataJson</c> と、明示昇格された metadata property に保存される。</param>
 /// <param name="Blocks">読み順に並んだ正規化ブロック列。</param>
 public sealed record IngestedDocument(
     string SourceId,
     string Title,
     IReadOnlyDictionary<string, string> Metadata,
-    IReadOnlyList<IngestedBlock> Blocks);
+    IReadOnlyList<IngestedBlock> Blocks)
+{
+    /// <summary>
+    /// 元文書側の revision、ETag、版などの任意識別子。
+    /// Blocks が同一ならチャンクと埋め込みは再利用し、Document 属性だけを更新する。
+    /// </summary>
+    public string? ContentRevision { get; init; }
+}
 
 /// <summary>
 /// 取込側が読み順復元・正規化まで済ませた 1 ブロック。

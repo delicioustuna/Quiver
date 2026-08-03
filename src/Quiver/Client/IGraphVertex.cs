@@ -8,7 +8,7 @@ namespace Quiver.Api;
 /// 型付き API から呼び出される。手動実装は通常不要。
 /// </summary>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
-public interface IGraphVertex<TSelf> where TSelf : IGraphVertex<TSelf>
+internal interface IGraphVertex<TSelf> where TSelf : IGraphVertex<TSelf>
 {
     /// <summary>Vertexに付与するラベル名。SourceGenerator が <c>[Vertex("...")]</c> から決定する。</summary>
     static abstract string GraphLabel { get; }

@@ -7,7 +7,7 @@ namespace Quiver.Storage.Records;
 /// (NaN 同士は一致しない — Cypher 準拠)。String / Bytes はバイト列一致で比較する。
 /// 数値系と非数値系の型不一致は常にミス。
 /// </summary>
-public static class PropertyValueEqualityHelper
+internal static class PropertyValueEqualityHelper
 {
     /// <summary>2 つのプロパティ値が MERGE の意味で等しいかを判定する。</summary>
     public static bool AreEqual(in PropertyValue a, in PropertyValue b)

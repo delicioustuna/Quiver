@@ -108,11 +108,12 @@ public sealed class EntityIdTests
     }
 
     [Theory]
-    [InlineData(EntityKind.Vertex, -2L)]
-    [InlineData(EntityKind.Vertex, 1L << 60)]
-    [InlineData((EntityKind)3, 1L)]
-    public void Noncanonical_invalid_entity_id_is_not_packable(EntityKind kind, long localId)
+    [InlineData((byte)EntityKind.Vertex, -2L)]
+    [InlineData((byte)EntityKind.Vertex, 1L << 60)]
+    [InlineData((byte)3, 1L)]
+    public void Noncanonical_invalid_entity_id_is_not_packable(byte rawKind, long localId)
     {
+        var kind = (EntityKind)rawKind;
         var entity = new EntityId(kind, localId);
 
         entity.IsValid.Should().BeFalse();

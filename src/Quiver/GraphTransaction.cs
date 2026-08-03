@@ -169,6 +169,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 rewrite,
                 CaptureProperties(PropertyOwner(rewrite.OldId), vertex.FirstPropertyRef)));
         }
+        ValidateVertexRewriteUniqueConstraints(vertices);
 
         Dictionary<EdgeId, MaterializedEdgeRewrite> edges = MaterializeRewriteEdges(vertices);
         Dictionary<NexusId, MaterializedNexusRewrite> nexuses = MaterializeRewriteNexuses(vertices);
@@ -457,6 +458,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             }
         }
 
+        EnforceUniqueVertexConstraints(label, owner: null, matchKey, in matchValue);
         var newId = _inner.Vertices.Allocate(labelId);
         var newKeyId = _propKeyTokens.GetOrCreate(matchKey);
         var version = SetVertexProperty(newId, newKeyId, in matchValue);
@@ -479,6 +481,67 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 continue;
 
             InsertScalarValue(definition, in value, version.Value);
+        }
+    }
+
+    private void EnforceUniqueVertexConstraints(
+        VertexId ownerId,
+        string propertyKey,
+        in PropertyValue value)
+    {
+        VertexReadHandle vertex = _inner.Vertices.Read(ownerId);
+        if (!vertex.InUse)
+            throw new KeyNotFoundException($"Vertex {ownerId} does not exist in this transaction.");
+        EnforceUniqueVertexConstraints(
+            _labelTokens.GetName(vertex.Label),
+            PropertyOwner(ownerId),
+            propertyKey,
+            in value);
+    }
+
+    private void EnforceUniqueVertexConstraints(
+        string label,
+        EntityRef? owner,
+        string propertyKey,
+        in PropertyValue value,
+        IReadOnlySet<EntityRef>? ignoredOwners = null)
+    {
+        foreach (ScalarIndexMetadata metadata in _inner.Indexes.ListIndexDefinitions())
+        {
+            ScalarIndexDefinition definition = metadata.Definition;
+            if (!definition.Unique
+                || definition.Target.OwnerKind != PropertyOwnerKind.Vertex
+                || definition.Target.Scope != label
+                || definition.Target.PropertyKey != propertyKey)
+                continue;
+
+            if (value.Type != PropertyValueType.String)
+            {
+                throw new ConstraintException(
+                    $"Unique index '{definition.Name}' requires string values for " +
+                    $"property '{propertyKey}'.");
+            }
+
+            ScalarIndexProbe probe = ScalarIndexProbe.Equal(in value);
+            IEnumerable<long> candidates = metadata.State == IndexLifecycleState.Ready
+                ? SeekScalarValues(definition, in value)
+                : ScanScalarValues(definition, probe);
+            foreach (long propertyVersion in candidates)
+            {
+                EntityRef? candidate = ResolveScalarCandidate(
+                    definition,
+                    propertyVersion,
+                    probe);
+                if (candidate is not { } existing
+                    || owner is { } current && existing == current
+                    || ignoredOwners?.Contains(existing) == true)
+                    continue;
+
+                throw new UniqueConstraintViolationException(
+                    definition.Name,
+                    label,
+                    propertyKey);
+            }
         }
     }
 
@@ -793,6 +856,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
+        EnforceUniqueVertexConstraints(vertexId, key, in value);
         // SetVertexProperty がチェーンを変更する前にキャプチャする — value は
         // ref struct のため、ヒープコピーは LogicalPropertyValue に閉じ込める。
         if (_logicalSink != null)
@@ -1688,6 +1752,68 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     private readonly record struct MaterializedVertexRewrite(
         VertexRewriteRequest Request,
         IReadOnlyList<(PropertyKeyId KeyId, PropertyCardinality Cardinality, LogicalPropertyValue Value)> Properties);
+
+    private void ValidateVertexRewriteUniqueConstraints(
+        IReadOnlyList<MaterializedVertexRewrite> vertices)
+    {
+        var replacedOwners = vertices
+            .Select(vertex => PropertyOwner(vertex.Request.OldId))
+            .ToHashSet();
+        var futureValues = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (MaterializedVertexRewrite vertex in vertices)
+        {
+            foreach (var property in vertex.Properties)
+            {
+                string key = _propKeyTokens.GetName(property.KeyId);
+                ScalarIndexDefinition[] definitions = _inner.Indexes.ListIndexDefinitions()
+                    .Select(metadata => metadata.Definition)
+                    .Where(definition =>
+                        definition.Unique
+                        && definition.Target.OwnerKind == PropertyOwnerKind.Vertex
+                        && definition.Target.Scope == vertex.Request.NewLabel
+                        && definition.Target.PropertyKey == key)
+                    .ToArray();
+                if (definitions.Length == 0)
+                    continue;
+                if (property.Cardinality != PropertyCardinality.Single)
+                {
+                    throw new ConstraintException(
+                        $"Unique property '{key}' requires Single cardinality.");
+                }
+
+                PropertyValue value = property.Value.ToPropertyValue();
+                if (value.Type != PropertyValueType.String)
+                {
+                    throw new ConstraintException(
+                        $"Unique property '{key}' requires string values.");
+                }
+                string text = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
+                foreach (ScalarIndexDefinition definition in definitions)
+                {
+                    if (!futureValues.TryGetValue(definition.Name, out HashSet<string>? values))
+                    {
+                        values = new HashSet<string>(StringComparer.Ordinal);
+                        futureValues.Add(definition.Name, values);
+                    }
+                    if (!values.Add(text))
+                    {
+                        throw new UniqueConstraintViolationException(
+                            definition.Name,
+                            vertex.Request.NewLabel,
+                            key);
+                    }
+                }
+
+                EnforceUniqueVertexConstraints(
+                    vertex.Request.NewLabel,
+                    owner: null,
+                    key,
+                    in value,
+                    replacedOwners);
+            }
+        }
+    }
 
     private readonly record struct MaterializedEdgeRewrite(
         EdgeId Id,

@@ -13,7 +13,7 @@ namespace Quiver.Migrations;
 /// よって rename を含む migration が途中で失敗すると名前空間は中途半端な状態で残る。
 /// rename は <see cref="ApplyAsync"/> の最初に置き、データミューテーションをその後に置く構成を推奨する。
 /// </remarks>
-public interface IMigration
+internal interface IMigration
 {
     /// <summary>マイグレーション一意 ID。history テーブルでの重複検出に使う。</summary>
     string Id { get; }

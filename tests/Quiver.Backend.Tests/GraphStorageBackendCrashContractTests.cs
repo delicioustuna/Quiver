@@ -31,14 +31,14 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         Faults.TestTempCleanup.DeleteDirectoryRobust(_dir);
     }
 
-    protected abstract IGraphStorageBackendFactory CreateFactory();
+    private protected abstract IGraphStorageBackendFactory CreateFactory();
 
     /// <summary>テスト対象 DB のディレクトリ。backend 固有のパス解決用にサブクラスへ公開する。</summary>
     protected string DatabaseDirectory => _dir;
 
     protected virtual string DatabasePath => _dir;
 
-    protected IGraphStorageBackend Open()
+    private protected IGraphStorageBackend Open()
         => _factory.Open(DatabasePath, new QuiverDatabaseOptions());
 
     // ===== (a) Commit → kill → reopen でコミット済みデータを復旧 =====
@@ -90,7 +90,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     /// 書き込み途中の未コミットデータが kill 後に残らないことを検証する。
     /// 将来の backend が strict rollback 契約を本質的に満たせない場合に限り override する。
     /// </summary>
-    protected virtual void AssertUncommittedKillState(
+    private protected virtual void AssertUncommittedKillState(
         IReadTransaction tx, VertexId uncommittedVertex)
         => tx.VertexExists(uncommittedVertex).Should().BeFalse(
             "uncommitted writes must not survive a kill (strict rollback contract)");

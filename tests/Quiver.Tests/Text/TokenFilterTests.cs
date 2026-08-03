@@ -54,6 +54,70 @@ public sealed class TokenFilterTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    [Fact]
+    public void JapaneseOrthographicVariantFilter_uses_opt_in_built_in_mappings()
+    {
+        var filter = new JapaneseOrthographicVariantFilter();
+        var sink = new ListSink();
+
+        filter.Apply("渡邉".AsSpan(), sink);
+        filter.Apply("濱".AsSpan(), sink);
+
+        sink.Tokens.Should().Equal("渡邉", "渡辺", "渡邊", "濱", "浜", "濵");
+    }
+
+    [Fact]
+    public void JapaneseOrthographicVariantFilter_custom_mapping_does_not_add_defaults()
+    {
+        var filter = new JapaneseOrthographicVariantFilter(
+            new Dictionary<char, char> { ['﨑'] = '崎' });
+        var sink = new ListSink();
+
+        filter.Apply("渡邉﨑".AsSpan(), sink);
+
+        sink.Tokens.Should().Equal("渡邉﨑", "渡邉崎");
+    }
+
+    [Fact]
+    public void JapaneseOrthographicVariantFilter_expands_canonical_query_form()
+    {
+        var filter = new JapaneseOrthographicVariantFilter();
+        var sink = new ListSink();
+
+        filter.Apply("渡辺".AsSpan(), sink);
+
+        sink.Tokens.Should().Equal("渡辺", "渡邉", "渡邊");
+    }
+
+    [Fact]
+    public void JapaneseOrthographicVariantFilter_expands_each_bigram()
+    {
+        var tokenizer = new FilteredTokenizer(
+            new MixedBigramTokenizer(),
+            new JapaneseOrthographicVariantFilter());
+
+        Tokenize(tokenizer, "渡邉直美").Should().Equal(
+            "渡邉", "渡辺", "渡邊",
+            "邉直", "辺直", "邊直",
+            "直美");
+        ((INormTokenCounter)tokenizer).CountNormTokens("渡邉直美".AsSpan())
+            .Should().Be(3, "異字体の補足tokenはBM25 document lengthへ加算しない");
+    }
+
+    [Fact]
+    public void JapaneseOrthographicVariantFilter_rejects_conflicting_mapping()
+    {
+        KeyValuePair<char, char>[] mappings =
+        [
+            new('邉', '辺'),
+            new('邉', '邊'),
+        ];
+
+        var act = () => new JapaneseOrthographicVariantFilter(mappings);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
     // ---- FilteredTokenizer ----
 
     [Fact]
@@ -121,6 +185,8 @@ public sealed class TokenFilterTests
     {
         new LowercaseFilter().FilterId.Should().Be("lowercase-v1");
         new StopWordFilter([]).FilterId.Should().Be("stopwords-v1");
+        new JapaneseOrthographicVariantFilter().FilterId
+            .Should().Be("japanese-orthographic-v1");
     }
 
     // ---- helpers ----

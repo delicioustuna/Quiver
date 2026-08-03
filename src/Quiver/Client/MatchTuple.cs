@@ -10,7 +10,7 @@ namespace Quiver.Api;
 /// 未定義のエイリアスは <see cref="InvalidOperationException"/>、型不一致のアクセスは
 /// スロットの宣言型に基づき <see cref="InvalidCastException"/> を投げる。
 /// </summary>
-public readonly struct MatchTuple
+internal readonly struct MatchTuple
 {
     private readonly QueryRow _row;
     private readonly Dictionary<string, int> _aliases;

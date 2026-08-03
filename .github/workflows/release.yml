@@ -41,11 +41,10 @@ jobs:
           if ($ref -like 'refs/tags/v*') {
             $v = $ref -replace '^refs/tags/v',''
             "version=$v"          | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            "version_arg=-p:Version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             Write-Host "Releasing version $v"
           } else {
             # 手動実行: Directory.Build.props の VersionPrefix を使う
-            "version_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "version=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             Write-Host "No tag; using VersionPrefix from Directory.Build.props"
           }
 
@@ -53,11 +52,12 @@ jobs:
         run: dotnet restore Quiver.slnx
 
       - name: Pack
-        run: |
-          dotnet pack src/Quiver/Quiver.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
-          dotnet pack src/Quiver.Hosting/Quiver.Hosting.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
-          dotnet pack src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
-          dotnet pack src/Quiver.Rag/Quiver.Rag.csproj --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+        shell: pwsh
+        run: >-
+          ./scripts/pack-release.ps1
+          -Configuration Release
+          -OutputDirectory artifacts/nupkg
+          -Version "${{ steps.ver.outputs.version }}"
 
       - name: Upload packages (artifact)
         uses: actions/upload-artifact@v4
