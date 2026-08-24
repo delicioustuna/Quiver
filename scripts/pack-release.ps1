@@ -9,7 +9,6 @@ Set-StrictMode -Version Latest
 
 $projects = @(
     'src/Yatagarasu/Yatagarasu.csproj',
-    'src/Yatagarasu.SourceGen/Yatagarasu.SourceGen.csproj',
     'src/Yatagarasu.Rag/Yatagarasu.Rag.csproj',
     'src/Yatagarasu.Hosting/Yatagarasu.Hosting.csproj',
     'src/Yatagarasu.OpenTelemetry/Yatagarasu.OpenTelemetry.csproj'
