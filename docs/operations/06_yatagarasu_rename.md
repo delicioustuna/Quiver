@@ -12,7 +12,8 @@ NuGet 参照を次のように置き換える。
 | `Quiver.Hosting` | `Yatagarasu.Hosting` |
 | `Quiver.OpenTelemetry` | `Yatagarasu.OpenTelemetry` |
 | `Quiver.Rag` | `Yatagarasu.Rag` |
-| なし | `Yatagarasu.SourceGen` |
+
+`Yatagarasu.SourceGen` は `Yatagarasu` パッケージへ analyzer として同梱し、独立した NuGet パッケージとしては公開しない。
 
 ルート名前空間は `Quiver` / `Quiver.Api` から `Yatagarasu` / `Yatagarasu.Api` へ変更する。製品名を含む公開型も同じ規則で変更する。たとえば `QuiverDatabase` は `YatagarasuDatabase`、`QuiverDatabaseOptions` は `YatagarasuDatabaseOptions` となる。`GraphWorkspace`、`Vertex`、`Edge`、`Nexus`、`Property`、`Indexed` は変更しない。
 

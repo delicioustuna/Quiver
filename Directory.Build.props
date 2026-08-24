@@ -28,10 +28,10 @@
 
   <!-- NuGet パッケージ化の準備。
        既定では packable=false にして、テスト / ベンチ / サンプル / sandbox を誤って pack しない。
-       公開対象の src ライブラリ (Yatagarasu / Yatagarasu.SourceGen / Yatagarasu.Hosting /
+       公開対象の src ライブラリ (Yatagarasu / Yatagarasu.Hosting /
        Yatagarasu.OpenTelemetry / Yatagarasu.Rag) だけが
        自分の csproj で <IsPackable>true</IsPackable> を宣言して opt-in する。
-       Yatagarasu.SourceGen は単体パッケージとしても公開し、Yatagarasu パッケージにも analyzer として同梱する。 -->
+       Yatagarasu.SourceGen は Yatagarasu パッケージへ analyzer として同梱し、単体では公開しない。 -->
   <PropertyGroup>
     <IsPackable Condition="'$(IsPackable)' == ''">false</IsPackable>
     <!-- ソリューション一括 pack (dotnet pack Yatagarasu.slnx) 時、IsPackable=false の
