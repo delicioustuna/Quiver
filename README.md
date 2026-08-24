@@ -1,12 +1,12 @@
-# Quiver
+# Yatagarasu
 
 > 日本語のREADMEは [README_ja.md](README_ja.md) をご覧ください。
 
-[![CI](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml)
-[![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
-[![OS portability](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml)
+[![CI](https://github.com/delicioustuna/Yatagarasu/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/ci.yml)
+[![AOT publish smoke](https://github.com/delicioustuna/Yatagarasu/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/aot.yml)
+[![OS portability](https://github.com/delicioustuna/Yatagarasu/actions/workflows/portability.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/portability.yml)
 
-Quiver is an embedded graph database engine for .NET with integrated vector and full-text search.
+Yatagarasu is an embedded graph database engine for .NET with integrated vector and full-text search.
 It stores property graphs and role-aware n-ary Nexus relationships in a single file and provides source-generated typed mapping, fluent graph traversal, transactional persistence, KNN search, and BM25 search.
 
 The core engine is implemented in pure C#, has no third-party package or unmanaged dependency, and supports NativeAOT.
@@ -30,7 +30,7 @@ The core engine is implemented in pure C#, has no third-party package or unmanag
 Define a typed graph model.
 
 ```csharp
-using Quiver.Api;
+using Yatagarasu.Api;
 
 [Vertex]
 public partial class Person
@@ -54,9 +54,9 @@ public partial class Knows
 Write and query it through a typed workspace. Successful write callbacks commit automatically.
 
 ```csharp
-using Quiver;
+using Yatagarasu;
 
-using var graph = GraphWorkspace.Open("people.quiver");
+using var graph = GraphWorkspace.Open("people.yata");
 graph.Write(write =>
 {
     var people = write.Set<Person>();
@@ -73,19 +73,23 @@ IReadOnlyList<Person> known = graph.Read(read =>
         .ToList());
 ```
 
-The `Quiver` package includes the model attributes and source generator.
-Projects with `ImplicitUsings` enabled receive the `Quiver` and `Quiver.Api` namespaces automatically.
+The `Yatagarasu` package includes the model attributes and source generator.
+Projects with `ImplicitUsings` enabled receive the `Yatagarasu` and `Yatagarasu.Api` namespaces automatically.
 
-The public version is currently `0.6.0` and remains pre-1.0.
+The public version is currently `0.7.0` and remains pre-1.0.
+
+## Name
+
+Yatagarasu is the three-legged guiding crow of Japanese mythology. Its three legs represent the graph, vector, and full-text engines, while its role as Emperor Jimmu's guide reflects the product's purpose: guiding applications to the information they need.
 
 ## Local RAG
 
-`Quiver.Rag` provides Document and Chunk ingestion, chunking, re-ingestion, metadata filtering, vector and BM25 fusion, and graph expansion for surrounding context and parent documents.
+`Yatagarasu.Rag` provides Document and Chunk ingestion, chunking, re-ingestion, metadata filtering, vector and BM25 fusion, and graph expansion for surrounding context and parent documents.
 
 Embedding generation stays in the calling application and is injected through `IChunkEmbedder`.
 Corpus-level ingestion profiles prevent mixed embedding semantics, while selected metadata keys can be promoted to scalar indexes.
 
-See the [RAG sample](samples/Quiver.Samples.Rag/) and the [local RAG cookbook](docs/cookbook.md).
+See the [RAG sample](samples/Yatagarasu.Samples.Rag/) and the [local RAG cookbook](docs/cookbook.md).
 
 ## Reference performance
 
@@ -122,6 +126,7 @@ See the [known limits](docs/spec/08_known_limits.md) for the complete contract.
 | [Getting Started](docs/api/getting-started.md) | Installation and first database |
 | [API reference](docs/api/) | Approved public types and members |
 | [As-built specification](docs/spec/00_overview.md) | Current storage and execution contracts |
+| [0.7.0 rename guide](docs/operations/06_yatagarasu_rename.md) | Package, namespace, and `.yata` migration |
 
 ## Samples
 

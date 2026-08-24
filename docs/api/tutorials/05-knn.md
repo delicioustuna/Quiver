@@ -1,10 +1,10 @@
 # 05. KNN ベクトル検索
 
 ベクトル検索とグラフトラバーサルを同じ transaction snapshot で実行する。
-完全な例は [`samples/Quiver.Samples.Vector`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Vector) にある。
+完全な例は [`samples/Yatagarasu.Samples.Vector`](https://github.com/delicioustuna/Yatagarasu/tree/main/samples/Yatagarasu.Samples.Vector) にある。
 
 ```csharp
-using var db = QuiverDatabase.Open("./mygraph");
+using var db = YatagarasuDatabase.Open("./mygraph");
 
 using (var schema = db.BeginWriteTransaction())
 {

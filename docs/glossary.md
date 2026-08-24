@@ -1,6 +1,6 @@
-# Quiver 用語辞書
+# Yatagarasu 用語辞書
 
-Quiver の API やドキュメントに登場する用語を定義する。
+Yatagarasu の API やドキュメントに登場する用語を定義する。
 内部実装の用語と責務は[現行仕様](spec/00_overview.md)を参照。
 
 ---
@@ -9,7 +9,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 
 | 用語 | 定義 |
 |---|---|
-| **有向プロパティグラフ** | Vertexとエッジにプロパティ（属性）を持つ有向グラフモデル。Neo4j や JanusGraph と同じ基本モデルであり、Quiver もこれを採用する |
+| **有向プロパティグラフ** | Vertexとエッジにプロパティ（属性）を持つ有向グラフモデル。Neo4j や JanusGraph と同じ基本モデルであり、Yatagarasu もこれを採用する |
 | **Vertex（Vertex）** | グラフの頂点。1つのラベルと複数のプロパティを持ち、公開APIでは`VertexKey`で識別する |
 | **Edge（Edge）** | グラフの有向辺。1つの型名と両端Vertex（Source、Target）、複数のプロパティを持ち、公開APIでは`EdgeKey`で識別する |
 | **Label（ラベル）** | Vertexの分類名（例: `"Person"`）。内部では `LabelId` にトークン化される |
@@ -34,11 +34,11 @@ Quiver の API やドキュメントに登場する用語を定義する。
 
 | 用語 | 定義 |
 |---|---|
-| **GraphStore** | エンジンの公開エントリポイント。`GraphStore.Open(path)`で`*.quiver`ファイルを開き、通常操作を`Read` / `Write` callbackで実行する |
+| **GraphStore** | エンジンの公開エントリポイント。`GraphStore.Open(path)`で`*.yata`ファイルを開き、通常操作を`Read` / `Write` callbackで実行する |
 | **GraphReadAccess** | snapshot固定の読み取りと`Query`を提供する公開能力。callback scopeと明示sessionが共有する |
 | **GraphWriteAccess** | 読み取り能力に加えてmutationを提供する公開能力。callbackは自動commit、sessionは明示commitする |
 | **Commit** | WAL を `fsync` した時点で永続化が確定する。返った後はプロセスの kill や電源喪失を生き延びる |
-| **Snapshot Isolation** | Quiver の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
+| **Snapshot Isolation** | Yatagarasu の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
 | **Savepoint** | トランザクション内の中間地点。`RollbackTo(SavepointId)` でセーブポイント以降の変更だけを巻き戻せる |
 | **単一ライタ** | 書き込みトランザクションは同時に 1 つだけ進行できる。データベース内の writer gate が直列化する |
 | **同時使用不可** | 同じトランザクションハンドル、カーソル、列挙子は複数の操作フローから同時に使用できない |
@@ -86,7 +86,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **Postings** | term から文書 ID へのマッピング。転置インデックスの本体 |
 | **Norms** | 文書長の正規化値。BM25 の長さ正規化に使用する |
 | **WAND (Weighted AND)** | Top-k 検索の早期終了アルゴリズム。term ごとの寄与上限を用いて候補をスキップする |
-| **MixedBigramTokenizer** | Quiver のデフォルトトークナイザ。CJK 文字は bigram 分解し、Latin 文字は空白区切りで小文字化する。2 つのモードを持つ（下記参照） |
+| **MixedBigramTokenizer** | Yatagarasu のデフォルトトークナイザ。CJK 文字は bigram 分解し、Latin 文字は空白区切りで小文字化する。2 つのモードを持つ（下記参照） |
 | **ユニグラム併用モード** | デフォルト（`mixed-bigram-unigram-v1`）。CJK ランのバイグラムに加えて各文字のユニグラムも放出する。1 文字の CJK 検索クエリが隣接文字に関わらずヒットする |
 | **バイグラム専用モード** | `mixed-bigram-v1`。CJK はバイグラムのみ。インデックスサイズが小さい代わりに 1 文字検索はプレフィクス展開（`粉*`）で代替する。`FullTextIndexDefinition.TokenizerId` で明示指定する |
 | **RRF (Reciprocal Rank Fusion)** | 複数のランク付きリストをマージするスコア融合手法。全文検索とベクトル検索のハイブリッド結合に使用する |
@@ -96,7 +96,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **KNN (K-Nearest Neighbors)** | クエリベクトルに最も近い k 件を返す近傍探索 |
-| **HNSW (Hierarchical Navigable Small World)** | 近似最近傍探索のためのグラフベースインデックス。Quiver では read snapshot から immutable artifact を構築する |
+| **HNSW (Hierarchical Navigable Small World)** | 近似最近傍探索のためのグラフベースインデックス。Yatagarasu では read snapshot から immutable artifact を構築する |
 | **VectorMetric** | 距離関数の種類。`Euclidean`、`Cosine`、`Dot` から選択する |
 | **VectorIndexDefinition** | ベクトルインデックスの定義。対象 property、scope、次元数、metric、segment policy を指定する |
 | **graph-first ハイブリッド** | グラフフィルタ（トラバーサル）を先に評価し、絞り込んだ候補集合に対して KNN を実行するパターン |
@@ -114,27 +114,27 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **RAG** | 検索拡張生成。外部知識を検索して LLM のプロンプトに注入する手法 |
-| **RagStore** | `Quiver.Rag` のエントリポイント。文書取込（`UpsertDocumentAsync`）とハイブリッド検索（`SearchAsync`）を提供する |
+| **RagStore** | `Yatagarasu.Rag` のエントリポイント。文書取込（`UpsertDocumentAsync`）とハイブリッド検索（`SearchAsync`）を提供する |
 | **IngestedDocument** | 取込契約。`SourceId`（一意キー）、`Title`、`Metadata`、`Blocks`（正規化ブロック列）を持つ |
 | **IChunkEmbedder** | チャンクテキストからベクトル埋め込みを生成するインタフェース。実装はアプリケーション側が注入する |
-| **Graph Expansion** | ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿って前後文脈や親文書を復元する機能。ベクトル DB が返せるのはヒット単体だけだが、Quiver はグラフ走査で文脈を復元できる |
-| **n 項ファクト（Fact パターン）** | 主体（subject）、客体（object）、出典（source = Chunk）、時点（asOf）などのロールを持つNexusで知識を表す利用パターン。出典がファクトのメンバーとして構造的に付随するため、回答生成時の出典引用（grounded citation）を join なしで取れる。実例は `samples/Quiver.Samples.Nexuses/` |
+| **Graph Expansion** | ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿って前後文脈や親文書を復元する機能。ベクトル DB が返せるのはヒット単体だけだが、Yatagarasu はグラフ走査で文脈を復元できる |
+| **n 項ファクト（Fact パターン）** | 主体（subject）、客体（object）、出典（source = Chunk）、時点（asOf）などのロールを持つNexusで知識を表す利用パターン。出典がファクトのメンバーとして構造的に付随するため、回答生成時の出典引用（grounded citation）を join なしで取れる。実例は `samples/Yatagarasu.Samples.Nexuses/` |
 
 ## パッケージ
 
 | パッケージ | 役割 |
 |---|---|
-| **Quiver** | エンジン中核。全サブシステムと型付き属性（`Quiver.Api`）、Source Generator を内包する。これ 1 つの参照で型安全 CRUD まで使える |
-| **Quiver.Rag** | RAG レイヤ。Document/Chunk スキーマ、文書取込、ハイブリッド検索 + graph expansion |
-| **Quiver.Hosting** | `Microsoft.Extensions.Hosting` / DI 統合 |
-| **Quiver.OpenTelemetry** | OpenTelemetry 計装登録 |
+| **Yatagarasu** | エンジン中核。全サブシステムと型付き属性（`Yatagarasu.Api`）、Source Generator を内包する。これ 1 つの参照で型安全 CRUD まで使える |
+| **Yatagarasu.Rag** | RAG レイヤ。Document/Chunk スキーマ、文書取込、ハイブリッド検索 + graph expansion |
+| **Yatagarasu.Hosting** | `Microsoft.Extensions.Hosting` / DI 統合 |
+| **Yatagarasu.OpenTelemetry** | OpenTelemetry 計装登録 |
 
 ## ファイルとフォーマット
 
 | 用語 | 定義 |
 |---|---|
-| **\*.quiver** | Quiver のデータファイル。静止時は単一ファイルにすべてのデータが格納される |
-| **\*.quiver-wal** | WAL（Write-Ahead Log）サイドカー。稼働中にのみ存在し、クリーンシャットダウン後は空か不在になる |
+| **\*.yata** | Yatagarasu のデータファイル。静止時は単一ファイルにすべてのデータが格納される |
+| **\*.yata-wal** | WAL（Write-Ahead Log）サイドカー。稼働中にのみ存在し、クリーンシャットダウン後は空か不在になる |
 | **WAL** | データファイルへの書き込みに先立ってログを書くことで、クラッシュリカバリを保証する仕組み |
 | **QUIVER-SW family version** | データファイルと WAL が共有するオンディスク形式の世代。現在は version 2。旧 DB は `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する |
 

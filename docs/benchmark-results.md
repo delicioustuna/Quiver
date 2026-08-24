@@ -1,6 +1,6 @@
 # ベンチマーク結果
 
-本ページは、Quiver v0.3.0の性能特性を把握するための参考値を掲載する。
+本ページは、Yatagarasu v0.3.0の性能特性を把握するための参考値を掲載する。
 計測値は異なる環境での性能を保証するものではない。
 
 計測環境はAMD Ryzen 7 5700X、Windows 11、SSD、.NET 10、Releaseビルドである。
@@ -31,7 +31,7 @@
 検証コマンドは次のとおりである。
 
 ```powershell
-dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
+dotnet run -c Release --project benchmarks\Yatagarasu.Benchmarks.RecallCheck
 ```
 
 より軽い構築を優先する場合は、`VectorIndexDefinition`のHNSWパラメーターを明示的に調整する。
@@ -50,7 +50,7 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
 結果は個別検索と完全一致し、この条件では26.20倍、割り当て97.52%減だった。
 
 ```powershell
-dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --knn-batch-spike
+dotnet run -c Release --project benchmarks\Yatagarasu.Benchmarks -- --knn-batch-spike
 ```
 
 ## 索引付き書き込みのWAL増幅

@@ -1,6 +1,6 @@
-# Quiver Cookbook
+# Yatagarasu Cookbook
 
-Quiver の典型ユースケースをすぐに動かせるレシピ集。各レシピは [`samples/`](../samples/) のいずれかと対応している。
+Yatagarasu の典型ユースケースをすぐに動かせるレシピ集。各レシピは [`samples/`](../samples/) のいずれかと対応している。
 
 > **運用 (バックアップ / チューニング / 障害復旧 / 既知の制約) を探している場合は
 > [docs/operations/](operations/README.md) を参照。** こちらは API レシピ集、あちらは「どう設定すれば速いか /
@@ -198,7 +198,7 @@ WAL の PageImage replay によりコミット済みデータはクラッシュ�
 VertexId savedId;
 
 // 書き込み
-using (var db = QuiverDatabase.Open(dir))
+using (var db = YatagarasuDatabase.Open(dir))
 using (var tx = db.BeginWriteTransaction())
 {
     savedId = tx.CreateVertex("Config");
@@ -207,7 +207,7 @@ using (var tx = db.BeginWriteTransaction())
 }
 
 // 再オープン: コミット済みデータは復元される
-using (var db = QuiverDatabase.Open(dir))
+using (var db = YatagarasuDatabase.Open(dir))
 using (var tx = db.BeginWriteTransaction())
 {
     System.Diagnostics.Debug.Assert(tx.VertexExists(savedId));
@@ -237,7 +237,7 @@ if (!report.IsConsistent)
 
 ## 9. dotnet-counters でリアルタイム観測
 
-`Quiver-EventSource` は追加 NuGet 不要で公開される `EventSource`。
+`Yatagarasu-EventSource` は追加 NuGet 不要で公開される `EventSource`。
 別ターミナルから `dotnet-counters` を当てるだけで、buffer-pool、WAL、トランザクション、
 ロック、索引、vacuum の主要メトリクスを 1 秒粒度で観測できる。
 
@@ -245,14 +245,14 @@ if (!report.IsConsistent)
 # 1) インストール (初回のみ)
 dotnet tool install -g dotnet-counters
 
-# 2) Quiver を埋め込んだプロセスの PID を調べる
+# 2) Yatagarasu を埋め込んだプロセスの PID を調べる
 dotnet-counters ps
 
-# 3) Quiver の全メトリクスをリアルタイム表示
-dotnet-counters monitor -n <YourProcessName> --counters Quiver-EventSource
+# 3) Yatagarasu の全メトリクスをリアルタイム表示
+dotnet-counters monitor -n <YourProcessName> --counters Yatagarasu-EventSource
 
 # あるいは PID 指定:
-dotnet-counters monitor -p <pid> --counters Quiver-EventSource
+dotnet-counters monitor -p <pid> --counters Yatagarasu-EventSource
 ```
 
 公開メトリクス (一部抜粋):
@@ -278,18 +278,18 @@ dotnet-counters monitor -p <pid> --counters Quiver-EventSource
 | `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) |
 | `crash-recovery-count` | rate | crash recovery 起動回数 (通常 0) |
 
-`Quiver-EventSource` を有効化しない限り PollingCounter は生成されないので、
+`Yatagarasu-EventSource` を有効化しない限り PollingCounter は生成されないので、
 本機能の overhead は実質ゼロ。OpenTelemetry 経由でメトリクスを送りたい場合は
-`Quiver.OpenTelemetry` パッケージの `AddQuiverInstrumentation()` を使う。
+`Yatagarasu.OpenTelemetry` パッケージの `AddYatagarasuInstrumentation()` を使う。
 
 ---
 
-## 10. ローカル RAG (Quiver.Rag)
+## 10. ローカル RAG (Yatagarasu.Rag)
 
-別アセンブリ `Quiver.Rag` は、文書からチャンクへの格納、取込/再取込、ハイブリッド検索、
-graph expansion の定型を 1 API で提供する。エンジン本体 (`Quiver`) のみに依存し、埋め込み生成は
+別アセンブリ `Yatagarasu.Rag` は、文書からチャンクへの格納、取込/再取込、ハイブリッド検索、
+graph expansion の定型を 1 API で提供する。エンジン本体 (`Yatagarasu`) のみに依存し、埋め込み生成は
 呼び出し側が `IChunkEmbedder` を注入する。サンプルは
-[`samples/Quiver.Samples.Rag`](../samples/Quiver.Samples.Rag/)。
+[`samples/Yatagarasu.Samples.Rag`](../samples/Yatagarasu.Samples.Rag/)。
 
 ### 埋め込み器 (`IChunkEmbedder`) の用意
 
@@ -309,10 +309,10 @@ sealed class MyEmbedder(MyModel model) : IChunkEmbedder
 ```
 
 ```csharp
-using Quiver;
-using Quiver.Rag;
+using Yatagarasu;
+using Yatagarasu.Rag;
 
-using var db = QuiverDatabase.Open("rag.quiver");
+using var db = YatagarasuDatabase.Open("rag.yata");
 
 // 索引 (sourceId / ベクトル / 全文) はコンストラクタで冪等作成される。
 var store = new RagStore(db, new RagStoreOptions
@@ -415,7 +415,7 @@ store.DeleteDocument("docs/intro.md");
 ## 11. 工夫された読み取りクエリ
 
 `Coalesce` / `Optional` / `Union` / `As` + `Select` を組み合わせた典型パターン。
-実行可能なサンプルは [`samples/Quiver.Samples.QueryPatterns`](../samples/Quiver.Samples.QueryPatterns/)。
+実行可能なサンプルは [`samples/Yatagarasu.Samples.QueryPatterns`](../samples/Yatagarasu.Samples.QueryPatterns/)。
 
 ### Coalesce — 最初にマッチした分岐だけ
 
@@ -473,7 +473,7 @@ var result = g.Vertices<Person>()
 制約でコンパイル時に強制される。
 
 > **Coalesce / Optional ブランチ内での変異 (upsert) は非対応。**
-> Quiver のブランチは読み取り専用で、`fold` / `unfold` / `constant` も非対応のため、
+> Yatagarasu のブランチは読み取り専用で、`fold` / `unfold` / `constant` も非対応のため、
 > Gremlin の `coalesce(V().has(...), addV(...))` パターンは成立しない。
 > 代替として `MergeVertex` / `MergeEdge` + C# `if` を使う (§2 / §6 参照)。
 

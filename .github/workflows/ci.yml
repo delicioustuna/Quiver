@@ -32,14 +32,14 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore Quiver.slnx
+        run: dotnet restore Yatagarasu.slnx
 
       - name: Build
-        run: dotnet build Quiver.slnx --configuration Release --no-restore
+        run: dotnet build Yatagarasu.slnx --configuration Release --no-restore
 
       - name: Verify zero-dependency core package
         shell: pwsh
         run: ./scripts/verify-zero-dependency.ps1 -Configuration Release
 
       - name: Test
-        run: dotnet test Quiver.slnx --configuration Release --no-build --verbosity normal
+        run: dotnet test Yatagarasu.slnx --configuration Release --no-build --verbosity normal

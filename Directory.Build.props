@@ -1,56 +1,57 @@
 <Project>
-  <!-- FT-14: 公開 API の XML doc 生成を全プロジェクトで一括有効化する -->
+  <!-- 公開 API の XML doc 生成を全プロジェクトで一括有効化する。 -->
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- CS1591: 公開メンバーに XML コメントがない場合の警告。段階導入のため抑制する。 -->
     <!-- CS1573: パラメータの XML コメントがない場合の警告。同じ理由で抑制する。 -->
     <!-- CS1574 / CS1734 / CS0419: cref 参照解決失敗 / paramref 名不一致 / オーバーロードあいまい。docfx 側で個別対応する想定で抑制。 -->
-    <!-- QUIVER001: experimental API (SSN ベースの Serializable 分離, docs/api-stability.md §5)。
+    <!-- YATAGARASU001: experimental API (SSN ベースの Serializable 分離, docs/api-stability.md §5)。
          ライブラリ自身の src/tests/benchmarks/samples は内部利用なのでソリューション全体で抑制する。
          この NoWarn は当ソリューション内のビルドにのみ効き、公開 NuGet を取り込む外部利用者には
-         QUIVER001 診断がそのまま出る (=experimental の opt-in が機能する)。 -->
-    <NoWarn>$(NoWarn);1591;1573;1574;1734;0419;QUIVER001</NoWarn>
+         YATAGARASU001 診断がそのまま出る (=experimental の opt-in が機能する)。 -->
+    <NoWarn>$(NoWarn);1591;1573;1574;1734;0419;YATAGARASU001</NoWarn>
   </PropertyGroup>
 
-  <!-- DOC-2: API 安定性ポリシー (docs/api-stability.md)。SemVer の正本となるバージョンを一元管理する。
+  <!-- API 安定性ポリシー (docs/api-stability.md)。SemVer の正本となるバージョンを一元管理する。
        0.x 系は pre-1.0 で安定性の保証対象外。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
   <PropertyGroup>
-    <VersionPrefix>0.6.0</VersionPrefix>
-    <!-- pre-release を付ける場合はビルド時に -p:VersionSuffix=rc.1 等で指定する (例: 0.6.0-rc.1)。 -->
+    <VersionPrefix>0.7.0</VersionPrefix>
+    <!-- pre-release を付ける場合はビルド時に -p:VersionSuffix=rc.1 等で指定する (例: 0.7.0-rc.1)。 -->
   </PropertyGroup>
 
-  <!-- DOC-2: NuGet パッケージ生成 (dotnet pack) 時に直前リリースとの public API 差分を検出し、
+  <!-- NuGet パッケージ生成 (dotnet pack) 時に直前リリースとの public API 差分を検出し、
        breaking change をパック時エラーにする。pack 時のみ走り、通常の build/test には影響しない。
        PackageValidationBaselineVersion は最初の GA (1.0.0) 公開後に設定する。 -->
   <PropertyGroup>
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
-  <!-- PKG-1: NuGet パッケージ化の準備。
+  <!-- NuGet パッケージ化の準備。
        既定では packable=false にして、テスト / ベンチ / サンプル / sandbox を誤って pack しない。
-       公開対象の src ライブラリ (Quiver / Quiver.Hosting / Quiver.OpenTelemetry / Quiver.Rag) だけが
+       公開対象の src ライブラリ (Yatagarasu / Yatagarasu.SourceGen / Yatagarasu.Hosting /
+       Yatagarasu.OpenTelemetry / Yatagarasu.Rag) だけが
        自分の csproj で <IsPackable>true</IsPackable> を宣言して opt-in する。
-       Quiver.SourceGen は単体公開せず Quiver パッケージへ analyzer として同梱する (=packable のまま false)。 -->
+       Yatagarasu.SourceGen は単体パッケージとしても公開し、Yatagarasu パッケージにも analyzer として同梱する。 -->
   <PropertyGroup>
     <IsPackable Condition="'$(IsPackable)' == ''">false</IsPackable>
-    <!-- ソリューション一括 pack (dotnet pack Quiver.slnx) 時、IsPackable=false の
+    <!-- ソリューション一括 pack (dotnet pack Yatagarasu.slnx) 時、IsPackable=false の
          テスト/サンプル/ベンチ/sandbox 各プロジェクトが出す「パッケージ化が無効」警告を抑制する。
          公開対象 (=IsPackable=true) だけがパッケージ化され、それ以外は静かにスキップされる。 -->
     <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
   </PropertyGroup>
 
-  <!-- PKG-1: 全パッケージ共通のメタデータ。個別の PackageId / Description / PackageTags は各 csproj で指定する。 -->
+  <!-- 全パッケージ共通のメタデータ。個別の PackageId / Description / PackageTags は各 csproj で指定する。 -->
   <PropertyGroup>
     <Authors>delicioustuna</Authors>
     <Company>delicioustuna</Company>
-    <Product>Quiver</Product>
+    <Product>Yatagarasu</Product>
     <Copyright>Copyright © 2026 delicioustuna</Copyright>
-    <PackageProjectUrl>https://github.com/delicioustuna/Quiver</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/delicioustuna/Quiver</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/delicioustuna/Yatagarasu</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/delicioustuna/Yatagarasu</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>See https://github.com/delicioustuna/Quiver/releases</PackageReleaseNotes>
+    <PackageReleaseNotes>See https://github.com/delicioustuna/Yatagarasu/releases</PackageReleaseNotes>
     <!-- 共通タグ。各パッケージはこれに固有タグを足す ($(PackageTags) を継承)。 -->
     <PackageTags>graph;database;embedded;graph-database;dotnet;csharp</PackageTags>
   </PropertyGroup>
@@ -60,7 +61,7 @@
     <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 
-  <!-- PKG-1: 再現可能ビルド + Source Link + symbol package。SourceLink は .NET SDK に同梱されているため
+  <!-- 再現可能ビルド + Source Link + symbol package。SourceLink は .NET SDK に同梱されているため
        追加 PackageReference は不要 (PublishRepositoryUrl + EmbedUntrackedSources で有効化)。 -->
   <PropertyGroup>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

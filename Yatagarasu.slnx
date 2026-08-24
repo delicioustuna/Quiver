@@ -1,0 +1,55 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Yatagarasu/Yatagarasu.csproj" />
+    <Project Path="src/Yatagarasu.SourceGen/Yatagarasu.SourceGen.csproj" />
+    <Project Path="src/Yatagarasu.Hosting/Yatagarasu.Hosting.csproj" />
+    <Project Path="src/Yatagarasu.OpenTelemetry/Yatagarasu.OpenTelemetry.csproj" />
+    <Project Path="src/Yatagarasu.Rag/Yatagarasu.Rag.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Yatagarasu.Benchmarks/Yatagarasu.Benchmarks.csproj" />
+    <Project Path="benchmarks/Yatagarasu.Benchmarks.RegressionCheck/Yatagarasu.Benchmarks.RegressionCheck.csproj" />
+    <Project Path="benchmarks/Yatagarasu.Benchmarks.RecallCheck/Yatagarasu.Benchmarks.RecallCheck.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Yatagarasu.SampleDbGen/Yatagarasu.SampleDbGen.csproj" />
+    <Project Path="tools/Yatagarasu.Mcp/Yatagarasu.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Yatagarasu.Samples.Crud/Yatagarasu.Samples.Crud.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Traversal/Yatagarasu.Samples.Traversal.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Match/Yatagarasu.Samples.Match.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.SourceGen/Yatagarasu.Samples.SourceGen.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Vector/Yatagarasu.Samples.Vector.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Hosting/Yatagarasu.Samples.Hosting.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Observability/Yatagarasu.Samples.Observability.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Migration/Yatagarasu.Samples.Migration.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Rag/Yatagarasu.Samples.Rag.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.QueryPatterns/Yatagarasu.Samples.QueryPatterns.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Signal/Yatagarasu.Samples.Signal.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.Nexuses/Yatagarasu.Samples.Nexuses.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.DirectedNexuses/Yatagarasu.Samples.DirectedNexuses.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.MinimumHittingSet/Yatagarasu.Samples.MinimumHittingSet.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.PersistenceH0/Yatagarasu.Samples.PersistenceH0.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.FormalConcepts/Yatagarasu.Samples.FormalConcepts.csproj" />
+    <Project Path="samples/Yatagarasu.Samples.GraphAnnotations/Yatagarasu.Samples.GraphAnnotations.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Yatagarasu.Storage.Tests/Yatagarasu.Storage.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Operators.Tests/Yatagarasu.Operators.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Tests/Yatagarasu.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Transactions.Tests/Yatagarasu.Transactions.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Codec.Tests/Yatagarasu.Codec.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Wal.Tests/Yatagarasu.Wal.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Stores.Tests/Yatagarasu.Stores.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Index.Tests/Yatagarasu.Index.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Client.Tests/Yatagarasu.Client.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.SourceGen.Tests/Yatagarasu.SourceGen.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Backend.Tests/Yatagarasu.Backend.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Hosting.Tests/Yatagarasu.Hosting.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.PropertyTests/Yatagarasu.PropertyTests.csproj" />
+    <Project Path="tests/Yatagarasu.FuzzTests/Yatagarasu.FuzzTests.csproj" />
+    <Project Path="tests/Yatagarasu.PublicApi.Tests/Yatagarasu.PublicApi.Tests.csproj" />
+    <Project Path="tests/Yatagarasu.Rag.Tests/Yatagarasu.Rag.Tests.csproj" />
+  </Folder>
+</Solution>

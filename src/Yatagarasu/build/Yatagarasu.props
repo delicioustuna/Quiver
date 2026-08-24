@@ -1,0 +1,9 @@
+<Project>
+  <!-- Yatagarasu パッケージを参照しただけで `using` を書かずに使えるようにする
+       (ドロップイン体験)。ImplicitUsings 有効時のみ global using を注入する。
+       不要なら利用者側で <Using Remove="Yatagarasu.Api" /> 等で opt-out できる。 -->
+  <ItemGroup Condition="'$(ImplicitUsings)' == 'enable' Or '$(ImplicitUsings)' == 'true'">
+    <Using Include="Yatagarasu" />
+    <Using Include="Yatagarasu.Api" />
+  </ItemGroup>
+</Project>

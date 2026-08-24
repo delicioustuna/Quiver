@@ -9,11 +9,11 @@
 
 長時間snapshotと明示transactionは`GraphStore.Advanced.BeginRead()` / `BeginWrite()`からsessionとして開く。`GraphWriteSession`は`Commit`または`Rollback`を明示し、未完了の`Dispose`はrollbackする。`GraphWorkspace`は同じcallback能力上にSource Generatorのtyped mapperを重ねる。
 
-公開境界は`VertexKey`、`EdgeKey`、`NexusKey`と所有権付き`GraphValue`を返す。内部transaction interface、`Quiver.Storage.*`、借用`ref struct`、物理ID、backend SPIは公開しない。queryは各accessの`Query`から開始する。
+公開境界は`VertexKey`、`EdgeKey`、`NexusKey`と所有権付き`GraphValue`を返す。内部transaction interface、`Yatagarasu.Storage.*`、借用`ref struct`、物理ID、backend SPIは公開しない。queryは各accessの`Query`から開始する。
 
 ## 分離レベル {#isolation}
 
-Quiver は snapshot isolation を提供する。
+Yatagarasu は snapshot isolation を提供する。
 データベースインスタンスごとの `TransactionManager` は、一つの `WriterLease` と `SnapshotRegistry` を所有する。
 書き込みトランザクションは同じ lease で直列化し、読み取りトランザクションは writer を待たずに開始する。
 読み取り開始時の状態は `Snapshot(CommittedHighWater, AbortedGaps, ActiveWriterId?)` として固定する。

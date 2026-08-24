@@ -1,6 +1,6 @@
-# Quiver アーキテクチャ概要
+# Yatagarasu アーキテクチャ概要
 
-Quiver の全体構成、データの流れ、デプロイモデル、運用上の注意をまとめる。
+Yatagarasu の全体構成、データの流れ、デプロイモデル、運用上の注意をまとめる。
 ストレージと実行契約の詳細は[現行仕様](spec/00_overview.md)を参照。
 
 ---
@@ -17,19 +17,19 @@ Quiver の全体構成、データの流れ、デプロイモデル、運用上�
 
 ## レイヤ構成
 
-エンジン中核は単一アセンブリ `Quiver` に集約される。
-オプションパッケージ（`Quiver.Rag` 等）はエンジンに依存するが、エンジンはそれらに依存しない。
+エンジン中核は単一アセンブリ `Yatagarasu` に集約される。
+オプションパッケージ（`Yatagarasu.Rag` 等）はエンジンに依存するが、エンジンはそれらに依存しない。
 
 ```
 アプリケーション
   │
-  ├─ Quiver.Rag           RAG 高レベル API（取込、検索）
-  ├─ Quiver.Hosting        DI 統合
-  ├─ Quiver.OpenTelemetry  計装
+  ├─ Yatagarasu.Rag           RAG 高レベル API（取込、検索）
+  ├─ Yatagarasu.Hosting        DI 統合
+  ├─ Yatagarasu.OpenTelemetry  計装
   │
   ▼
-Quiver（エンジン中核）
-  ├─ QuiverDatabase         ファサード
+Yatagarasu（エンジン中核）
+  ├─ YatagarasuDatabase         ファサード
   ├─ GraphTransaction      CRUD、走査、インデックス操作
   ├─ Query Engine          論理 IR → 最適化 → 物理オペレータ
   ├─ Transaction Manager   MVCC、ロック、リカバリ、チェックポイント
@@ -39,32 +39,32 @@ Quiver（エンジン中核）
   └─ Storage               ページ管理、バッファプール
        │
        ▼
-   *.quiver + *.quiver-wal
+   *.yata + *.yata-wal
 ```
 
 ## ファイルレイアウト
 
-静止時は `*.quiver` 1 ファイルにすべてのデータが格納される。
-稼働中は WAL サイドカー `*.quiver-wal` が隣に存在する。
+静止時は `*.yata` 1 ファイルにすべてのデータが格納される。
+稼働中は WAL サイドカー `*.yata-wal` が隣に存在する。
 クリーンシャットダウン後は WAL は空になるか存在しない。
 
 ## デプロイモデル
 
-Quiver は in-process の組み込み DB であり、サーバプロセスは存在しない。
+Yatagarasu は in-process の組み込み DB であり、サーバプロセスは存在しない。
 
 ```
 ┌──────────────────────────────┐
 │  ホストアプリケーション        │
-│    ├─ QuiverDatabase.Open()   │
+│    ├─ YatagarasuDatabase.Open()   │
 │    ├─ ビジネスロジック         │
 │    └─ db.Dispose()           │
 │                              │
-│  *.quiver + *.quiver-wal     │
+│  *.yata + *.yata-wal     │
 │  (ローカルファイルシステム)     │
 └──────────────────────────────┘
 ```
 
-`*.quiver` ファイルは排他ロック（`FileShare.None`）で開かれるため、同一ファイルを複数プロセスから同時に開くことはできない。
+`*.yata` ファイルは排他ロック（`FileShare.None`）で開かれるため、同一ファイルを複数プロセスから同時に開くことはできない。
 マルチプロセスが必要な場合は、上位に gRPC や HTTP のラッパを配置する。
 
 NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:PublishAot=true` で単一バイナリとして配布できる。
@@ -98,7 +98,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 4. ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿り、前後文脈と親文書を付与する
 5. BM25 score、vector similarity、融合後 score、融合方式と定数を `RagHit.Score` で返す
 
-手順 4 の graph expansion が、ベクトル DB にはない Quiver の差別化ポイントである。
+手順 4 の graph expansion が、ベクトル DB にはない Yatagarasu の差別化ポイントである。
 
 ## 運用上の注意
 
@@ -120,7 +120,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ### トランザクションの利用規約
 
-- `QuiverDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
+- `YatagarasuDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
 - 同じトランザクションハンドルは複数の操作フローから同時に使用しない
 - `Begin` と `Commit` の間で `await` しない
 - 書き込みはデータベース内の writer gate が直列化する
@@ -129,17 +129,17 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 ### バックアップ
 
 稼働中でもライブスナップショットを取得できる。
-`Dispose()` 後のコールドコピー（`*.quiver` をコピー）も可能。
+`Dispose()` 後のコールドコピー（`*.yata` をコピー）も可能。
 詳細は [バックアップと復元](operations/02_backup_restore.md) を参照。
 
 ### 障害復旧
 
-クラッシュ後の `QuiverDatabase.Open()` で 2 フェーズリカバリが自動実行される。
+クラッシュ後の `YatagarasuDatabase.Open()` で 2 フェーズリカバリが自動実行される。
 コミット済みの変更は復元され、未コミットの変更は巻き戻される。
 詳細は [リカバリとトラブルシュート](operations/04_recovery_troubleshoot.md) を参照。
 
 ## 計測と監視
 
 core は `ActivitySource`、`Meter`、`EventSource` で trace、metrics、構造化イベントを発行する。
-`Quiver.OpenTelemetry` は trace と metrics を OpenTelemetry へ登録し、
-`Quiver.Hosting` は EventSource イベントを `ILogger` へ転送する。
+`Yatagarasu.OpenTelemetry` は trace と metrics を OpenTelemetry へ登録し、
+`Yatagarasu.Hosting` は EventSource イベントを `ILogger` へ転送する。

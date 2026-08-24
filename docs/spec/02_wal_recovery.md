@@ -9,7 +9,7 @@
 旧データベースと旧 WAL は読み替えず、open 時に拒否する。
 データファイルの不一致は `StorageFormatMismatchException`、WAL の不一致は `WalFormatMismatchException` で通知する。
 
-WAL はデータファイルと同じ場所に置く単一の `*.quiver-wal` サイドカーファイルである。
+WAL はデータファイルと同じ場所に置く単一の `*.yata-wal` サイドカーファイルである。
 先頭 16 バイトはファイルヘッダであり、magic `QUIVER-SW`、kind `W`、family version `2` を記録する。
 byte 11～15は予約領域で0とし、非0の未知header extensionは`WalFormatMismatchException`で拒否する。
 空の WAL は open 時に現行ヘッダで初期化する。

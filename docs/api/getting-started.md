@@ -7,10 +7,10 @@
 
 ## インストール
 
-`Quiver`パッケージには、コアエンジン、モデル属性、Source Generatorが含まれます。
+`Yatagarasu`パッケージには、コアエンジン、モデル属性、Source Generatorが含まれます。
 
 ```bash
-dotnet add package Quiver --version 0.6.0
+dotnet add package Yatagarasu --version 0.7.0
 ```
 
 ## はじめてのグラフ
@@ -18,9 +18,9 @@ dotnet add package Quiver --version 0.6.0
 `GraphStore`は通常操作を同期callbackへ閉じ込めます。write callbackが正常終了すればcommitし、例外ならrollbackします。
 
 ```csharp
-using Quiver;
+using Yatagarasu;
 
-using var store = GraphStore.Open("./mygraph.quiver");
+using var store = GraphStore.Open("./mygraph.yata");
 
 (VertexKey Alice, VertexKey Bob) people = store.Write(write =>
 {
@@ -42,6 +42,6 @@ IReadOnlyList<VertexKey> known = store.Read(read =>
 
 ## 次のステップ
 
-- [API surface snapshot](https://github.com/delicioustuna/Quiver/blob/main/tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt) — 承認済みの公開API一覧
-- [as-built仕様](https://github.com/delicioustuna/Quiver/blob/main/docs/spec/00_overview.md) — ストレージと実行契約
-- [開発ガイド](https://github.com/delicioustuna/Quiver/blob/main/docs/design/development.md) — アーキテクチャ、ビルド、テスト
+- [API surface snapshot](https://github.com/delicioustuna/Yatagarasu/blob/main/tests/Yatagarasu.PublicApi.Tests/PublicApi/Yatagarasu.approved.txt) — 承認済みの公開API一覧
+- [as-built仕様](https://github.com/delicioustuna/Yatagarasu/blob/main/docs/spec/00_overview.md) — ストレージと実行契約
+- [開発ガイド](https://github.com/delicioustuna/Yatagarasu/blob/main/docs/design/development.md) — アーキテクチャ、ビルド、テスト

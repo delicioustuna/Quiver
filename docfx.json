@@ -5,10 +5,10 @@
       "src": [
         {
           "files": [
-            "src/Quiver/**/*.csproj",
-            "src/Quiver.Rag/**/*.csproj",
-            "src/Quiver.Hosting/**/*.csproj",
-            "src/Quiver.OpenTelemetry/**/*.csproj"
+            "src/Yatagarasu/**/*.csproj",
+            "src/Yatagarasu.Rag/**/*.csproj",
+            "src/Yatagarasu.Hosting/**/*.csproj",
+            "src/Yatagarasu.OpenTelemetry/**/*.csproj"
           ],
           "src": "."
         }
@@ -45,8 +45,8 @@
     ],
     "output": "docs/api/_site",
     "globalMetadata": {
-      "_appName": "Quiver",
-      "_appTitle": "Quiver — Pure C# Graph Database",
+      "_appName": "Yatagarasu",
+      "_appTitle": "Yatagarasu — Pure C# Graph Database",
       "_enableSearch": true,
       "pdf": false,
       "_lang": "ja"

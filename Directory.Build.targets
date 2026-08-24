@@ -1,5 +1,5 @@
 <Project>
-  <!-- PKG-1: NuGet パッケージへ同梱する README / アイコンを取り込む。
+  <!-- NuGet パッケージへ同梱する README / アイコンを取り込む。
        Directory.Build.props ではなく targets 側で行う理由: README/icon の取り込みは
        各 csproj が設定する <IsPackable> の最終値で分岐したい。props は csproj 本文より前に
        import されるため IsPackable がまだ既定値 (false) のままになる。targets は csproj 本文の

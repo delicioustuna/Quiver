@@ -39,7 +39,7 @@ jobs:
       - name: Produce database bundle
         run: >-
           dotnet run --configuration Release
-          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          --project tools/Yatagarasu.SampleDbGen/Yatagarasu.SampleDbGen.csproj
           -- --portability-produce
           artifacts/portability/${{ matrix.lane }}
           ${{ matrix.origin }}
@@ -81,7 +81,7 @@ jobs:
       - name: Verify, open, and update on the other OS
         run: >-
           dotnet run --configuration Release
-          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          --project tools/Yatagarasu.SampleDbGen/Yatagarasu.SampleDbGen.csproj
           -- --portability-verify-update
           artifacts/portability/${{ matrix.lane }}
 
@@ -122,6 +122,6 @@ jobs:
       - name: Verify roundtrip bundle
         run: >-
           dotnet run --configuration Release
-          --project tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj
+          --project tools/Yatagarasu.SampleDbGen/Yatagarasu.SampleDbGen.csproj
           -- --portability-verify
           artifacts/portability/${{ matrix.lane }}

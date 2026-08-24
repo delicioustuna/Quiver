@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- : 公開ライブラリは XML doc 欠落 (CS1591) を抑制せず、欠落ゼロを維持する。
+         Directory.Build.props は段階導入のため 1591 を全体抑制しているが、コアアセンブリだけは
+         1591 を外して再有効化する (他の抑制 1573/1574/1734/0419/YATAGARASU001 は踏襲)。
+         テスト / ベンチ / サンプルは引き続き全体抑制のまま。 -->
+    <NoWarn>1573;1574;1734;0419;YATAGARASU001</NoWarn>
+  </PropertyGroup>
+
+  <!-- NuGet メインパッケージ。型付きエンティティ属性 ([Vertex]/[Edge]/[Property]/
+       [Indexed]) は本アセンブリに同梱 (Client/*Attribute.cs)。Source Generator (Yatagarasu.SourceGen) は
+       analyzer として同梱する。利用者は Yatagarasu 参照だけで属性 + CRUD/トラバーサル生成が使える。 -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Yatagarasu</PackageId>
+    <Description>依存パッケージゼロのPure C#組み込みグラフ、ベクトル、全文検索データベース。</Description>
+    <PackageTags>$(PackageTags);vector-search;knn;full-text-search;rag;nativeaot;source-generator;traversal;wal;embedded-database</PackageTags>
+    <!-- 同梱する analyzer を明示パックする (下の target)。 -->
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_YatagarasuAddBundledAnalyzer</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+  <!-- Core / Codec / Wal / Storage / Stores / Index / Transactions / Operators / Client は
+       単一アセンブリへ統合し、フォルダと名前空間でサブ領域を分離する。 -->
+  <ItemGroup>
+    <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。
+         PrivateAssets=all: パッケージ依存にせず、DLL を analyzers/dotnet/cs に同梱する (下の target)。 -->
+    <ProjectReference Include="..\Yatagarasu.SourceGen\Yatagarasu.SourceGen.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- パッケージ参照だけで using なしドロップインにするための global using props を同梱する。
+       build/ と buildTransitive/ の両方へ置き、直接/推移どちらの利用者にも効かせる。 -->
+  <ItemGroup>
+    <None Include="build\Yatagarasu.props" Pack="true" PackagePath="build\Yatagarasu.props;buildTransitive\Yatagarasu.props" />
+  </ItemGroup>
+
+  <!-- Source Generator DLL を analyzers/dotnet/cs に同梱する。
+       @(Analyzer) には自前の Yatagarasu.SourceGen.dll に加え SDK 組み込みの NetAnalyzers も入る
+       (どちらも NuGetPackageId が空)。同梱したいのは自前の generator だけなのでファイル名で限定する。 -->
+  <Target Name="_YatagarasuAddBundledAnalyzer" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(Analyzer)" Condition="'%(Filename)' == 'Yatagarasu.SourceGen'">
+        <PackagePath>analyzers/dotnet/cs/%(Filename)%(Extension)</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+</Project>

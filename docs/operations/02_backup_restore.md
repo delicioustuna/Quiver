@@ -1,25 +1,25 @@
 # 02. バックアップとリストア
 
-> **いつ読むか** — 同じ Quiver ストレージ形式へ復旧するためのバックアップを設計するとき。
-> 別 DB への移行やサブグラフの受け渡しには Graph JSON、Quiver の物理形式を更新するときは
+> **いつ読むか** — 同じ Yatagarasu ストレージ形式へ復旧するためのバックアップを設計するとき。
+> 別 DB への移行やサブグラフの受け渡しには Graph JSON、Yatagarasu の物理形式を更新するときは
 > 明示的な storage upgrade、アプリケーションモデルを変更するときは `IMigration` を使う。
 
 ## DB を構成するファイル
 
-バイナリバックエンドの正本は、`QuiverDatabase.Open` に渡す単一の primary file である。
-たとえば `C:\data\graph.quiver` を開いた場合、同じ DB に属する物理ファイルは次の名前になる。
+バイナリバックエンドの正本は、`YatagarasuDatabase.Open` に渡す単一の primary file である。
+たとえば `C:\data\graph.yata` を開いた場合、同じ DB に属する物理ファイルは次の名前になる。
 
 | パス | 役割 | 存在する時期 |
 |---|---|---|
-| `graph.quiver` | コアレコード、schema、token、隣接情報、scalar/vector index、migration historyを格納するprimary file | 常時 |
-| `graph.quiver-wal` | active WAL sidecar | DBを開いている間、または異常終了後。clean closeでは通常削除される |
-| `graph.quiver-ftseg\*.qfts` | manifest参照用のimmutable全文segment body。vacuum前の未参照artifactを含みうる | 全文indexを利用している場合 |
+| `graph.yata` | コアレコード、schema、token、隣接情報、scalar/vector index、migration historyを格納するprimary file | 常時 |
+| `graph.yata-wal` | active WAL sidecar | DBを開いている間、または異常終了後。clean closeでは通常削除される |
+| `graph.yata-ftseg\*.qfts` | manifest参照用のimmutable全文segment body。vacuum前の未参照artifactを含みうる | 全文indexを利用している場合 |
 
 旧レイアウトのようなVertex、Edge、property、B+Treeごとのdata/index fileは存在しない。
 `SnapshotOptions.IncludeIndexes`は別backendとの互換オプションであり、現行binary backendでは
 scalar/vector indexがprimary fileに同居するため実質的にno-opである。
 
-`*.quiver-upgrade` marker、一時target、`*.pre-upgrade-vN.bak`はstorage upgradeの作業物であり、
+`*.yata-upgrade` marker、一時target、`*.pre-upgrade-vN.bak`はstorage upgradeの作業物であり、
 通常のopen中に使うDB構成ではない。upgrade中のファイルを個別に移動せず、完了または再開によって
 markerを解決してからバックアップする。
 
@@ -28,15 +28,15 @@ markerを解決してからバックアップする。
 `CreateSnapshot`にはディレクトリではなく、コピー先primary fileのパスを渡す。
 
 ```csharp
-using var db = QuiverDatabase.Open(@"C:\data\graph.quiver");
-db.CreateSnapshot(@"D:\backup\graph-20260729.quiver");
+using var db = YatagarasuDatabase.Open(@"C:\data\graph.yata");
+db.CreateSnapshot(@"D:\backup\graph-20260729.yata");
 ```
 
 binary backendは同じベース名で次の一式を作る。
 
-- `D:\backup\graph-20260729.quiver`
-- snapshot時点でWALがあれば`D:\backup\graph-20260729.quiver-wal`
-- 全文segmentがあれば`D:\backup\graph-20260729.quiver-ftseg\*.qfts`
+- `D:\backup\graph-20260729.yata`
+- snapshot時点でWALがあれば`D:\backup\graph-20260729.yata-wal`
+- 全文segmentがあれば`D:\backup\graph-20260729.yata-ftseg\*.qfts`
 
 内部ではsharp checkpoint後にprimary fileをpage単位でコピーし、WALをflushしてコピーし、
 最後にimmutable全文artifact directoryをコピーする。manifestが参照しない余分なartifactは可視にならない。
@@ -57,8 +57,8 @@ OSのファイルコピーで複製できる。clean close後は通常、primary
 異常終了後などWALが残っている場合は、`*-wal`も同じ時点の一式としてコピーする。
 
 ```powershell
-$source = "C:\data\graph.quiver"
-$target = "D:\backup\graph-20260729.quiver"
+$source = "C:\data\graph.yata"
+$target = "D:\backup\graph-20260729.yata"
 
 Copy-Item -LiteralPath $source -Destination $target
 
@@ -81,7 +81,7 @@ DBを開いたままOSコピーしてはいけない。primary、WAL、全文art
 物理snapshotまたはcold copyは、コピー先primary fileを`Open`するだけで復元できる。
 
 ```csharp
-using var restored = QuiverDatabase.Open(@"D:\restore\graph.quiver");
+using var restored = YatagarasuDatabase.Open(@"D:\restore\graph.yata");
 var report = restored.Diagnostics.CheckConsistency();
 if (!report.IsConsistent)
     throw new InvalidOperationException(string.Join(Environment.NewLine, report.Issues));
@@ -104,7 +104,7 @@ if (!report.IsConsistent)
 論理exchange formatである。importではtarget側のVertex、Edge、Nexus IDを新規採番し、
 WAL、MVCC history、derived index artifactは復元しない。障害復旧の代わりには使わない。
 
-`QuiverDatabase.UpgradeStorage(path)`は、閉じたDBの物理形式を現行familyへ明示的に移すoffline operationである。
+`YatagarasuDatabase.UpgradeStorage(path)`は、閉じたDBの物理形式を現行familyへ明示的に移すoffline operationである。
 通常のversion移行をJSON経由で行うAPIではなく、`Open`も暗黙upgradeをしない。
 v0.5.0のcurrent familyはv0.4.0と同じversion 2なので、現行ファイルには
 `StorageUpgradeStatus.AlreadyCurrent`を返し、ファイルを書き換えない。このbuildに登録された実変換stepのない
@@ -117,8 +117,8 @@ v0.5.0のcurrent familyはv0.4.0と同じversion 2なので、現行ファイル
 
 | 目的 | 使う機能 |
 |---|---|
-| 同じQuiver形式へ障害復旧する | `CreateSnapshot`、または停止後のcold copy |
-| Quiverの物理familyを更新する | DBを閉じて`UpgradeStorage` |
+| 同じYatagarasu形式へ障害復旧する | `CreateSnapshot`、または停止後のcold copy |
+| Yatagarasuの物理familyを更新する | DBを閉じて`UpgradeStorage` |
 | 別DBへ移行・subgraph共有・内容確認 | `GraphJsonExporter` / `GraphJsonImporter` |
 | 同じDB内でapplication schema/dataを変更する | `IMigration` + `Update` / `Replace*` |
 

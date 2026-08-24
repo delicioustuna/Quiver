@@ -1,14 +1,14 @@
 # API 安定性ポリシー (API Stability Policy)
 
-> **いつ読むか**: Quiver を依存ライブラリとして取り込むアプリ/ライブラリの作者が「どのバージョンまで安全にアップグレードできるか」を判断するとき、または Quiver の public API を変更する PR を出す前に「この変更が breaking かどうか」を確認するときに読む。
+> **いつ読むか**: Yatagarasu を依存ライブラリとして取り込むアプリ/ライブラリの作者が「どのバージョンまで安全にアップグレードできるか」を判断するとき、または Yatagarasu の public API を変更する PR を出す前に「この変更が breaking かどうか」を確認するときに読む。
 
-このドキュメントは Quiver の public API・ファイル/WAL フォーマット・設定について、バージョン間でどこまで互換性を保証するかを定義する。1.0-rc 以降、ここに書かれた約束に反する変更は原則として禁止する。
+このドキュメントは Yatagarasu の public API・ファイル/WAL フォーマット・設定について、バージョン間でどこまで互換性を保証するかを定義する。1.0-rc 以降、ここに書かれた約束に反する変更は原則として禁止する。
 
 ---
 
 ## 1. Semantic Versioning の解釈
 
-Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINOR.PATCH`) に従う。
+Yatagarasu は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINOR.PATCH`) に従う。
 
 | 区分 | 上がる条件 | 互換性の約束 |
 |---|---|---|
@@ -42,26 +42,26 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 ## 2. public API の定義 (安定性の対象範囲)
 
-安定性を保証する **public API surface** は `Quiver` アセンブリ内の以下の名前空間の `public` 型・メンバーに限る:
+安定性を保証する **public API surface** は `Yatagarasu` アセンブリ内の以下の名前空間の `public` 型・メンバーに限る:
 
 | 名前空間 | 対象 | 備考 |
 |---|---|---|
-| `Quiver` | ✅ 対象 | `GraphStore`、`GraphWorkspace`、不透明key、owned value、query/session |
-| `Quiver.Api` | ✅ 対象 | Match DSL、モデル属性、生成mapperの型付き参照 |
-| `Quiver.Core` | ✅ 対象 | 検索オプション、例外、演算子など承認baselineに残る基礎型 |
-| `Quiver.Rag` | ✅ 対象 | `GraphStore`上のDocument/Chunk取込と検索結果 |
+| `Yatagarasu` | ✅ 対象 | `GraphStore`、`GraphWorkspace`、不透明key、owned value、query/session |
+| `Yatagarasu.Api` | ✅ 対象 | Match DSL、モデル属性、生成mapperの型付き参照 |
+| `Yatagarasu.Core` | ✅ 対象 | 検索オプション、例外、演算子など承認baselineに残る基礎型 |
+| `Yatagarasu.Rag` | ✅ 対象 | `GraphStore`上のDocument/Chunk取込と検索結果 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:
 
 - すべての `internal` 型・メンバー (`InternalsVisibleTo` 経由で見えるものを含む)
-- `Quiver.SourceGen` (Roslyn generator本体。生成される公開mapper契約はapprovalとconsumer gateで管理)
-- `Quiver.Storage.*`、backend SPI、物理ID、内部transaction / traversal実装
-- `Quiver.Hosting` / `Quiver.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
+- `Yatagarasu.SourceGen` (Roslyn generator本体。生成される公開mapper契約はapprovalとconsumer gateで管理)
+- `Yatagarasu.Storage.*`、backend SPI、物理ID、内部transaction / traversal実装
+- `Yatagarasu.Hosting` / `Yatagarasu.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
 - `[Experimental]` 属性付きのすべての API (§5 参照)
 
 > リポジトリ内の回帰テストとサンプルは`InternalsVisibleTo`で旧実装を検査する場合がある。packされた利用者コードからは参照できず、互換性の対象にも含めない。
 
-このリストは [`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) のapprovalと、pack済み独立consumerで機械的に固定される (§6)。
+このリストは [`tests/Yatagarasu.PublicApi.Tests/`](../tests/Yatagarasu.PublicApi.Tests/) のapprovalと、pack済み独立consumerで機械的に固定される (§6)。
 
 ---
 
@@ -106,10 +106,10 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 ## 5. experimental API
 
-まだ安定化していない API には `[System.Diagnostics.CodeAnalysis.Experimental("QUIVERxxx")]` 属性を付ける。
+まだ安定化していない API には `[System.Diagnostics.CodeAnalysis.Experimental("YATAGARASUxxx")]` 属性を付ける。
 
 - `[Experimental]` 付きの API は **SemVer の対象外**。MINOR / PATCH でも予告なくシグネチャ変更・削除しうる。
-- 利用するには診断 ID (`QUIVER001` 等) を明示的に suppress する必要があり、「これは不安定」と利用側が意識的に opt-in する形になる。
+- 利用するには診断 ID (`YATAGARASU001` 等) を明示的に suppress する必要があり、「これは不安定」と利用側が意識的に opt-in する形になる。
 - 安定化したら `[Experimental]` を外す。これは API 追加扱い (MINOR) であり breaking ではない。
 
 診断 ID の割り当て一覧:
@@ -126,7 +126,7 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 ### 6.1 public API approval test
 
-[`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、`Quiver` と `Quiver.Rag` アセンブリの public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
+[`tests/Yatagarasu.PublicApi.Tests/`](../tests/Yatagarasu.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、`Yatagarasu` と `Yatagarasu.Rag` アセンブリの public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
 
 - public API に差分が出ると test が **fail** し、`*.received.txt` を出力する。
 - 意図した変更なら `*.received.txt` を `*.approved.txt` に上書きコミットする = **明示承認**。これにより「気づかないうちの breaking change」を PR diff として可視化する。
@@ -136,9 +136,9 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 ```bash
 # 1. 差分を確認
-dotnet test tests/Quiver.PublicApi.Tests
+dotnet test tests/Yatagarasu.PublicApi.Tests
 # 2. 意図通りなら received を approved に反映 (PowerShell)
-Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Object {
+Get-ChildItem tests/Yatagarasu.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Object {
     Move-Item $_ ($_ -replace '\.received\.txt$', '.approved.txt') -Force
 }
 # 3. approved.txt の diff をコミット
@@ -182,8 +182,8 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ### 7.4 依存関係
 
-- Quiver コアアセンブリは 1.x 内で外部 NuGet 依存を追加しない（ゼロ依存を維持）。
-- `Quiver.Rag` / `Quiver.Hosting` / `Quiver.OpenTelemetry` 等の add-on は最小限の依存を持ちうるが、
+- Yatagarasu コアアセンブリは 1.x 内で外部 NuGet 依存を追加しない（ゼロ依存を維持）。
+- `Yatagarasu.Rag` / `Yatagarasu.Hosting` / `Yatagarasu.OpenTelemetry` 等の add-on は最小限の依存を持ちうるが、
   MINOR 内での依存の追加・メジャーバージョンアップは行わない。
 
 ---

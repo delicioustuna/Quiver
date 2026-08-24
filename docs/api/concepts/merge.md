@@ -28,7 +28,7 @@ else
 業務キーで MERGE を多用する場合は、データベース起動直後に一度だけインデックスを作成する:
 
 ```csharp
-using var db = QuiverDatabase.Open("./mygraph");
+using var db = YatagarasuDatabase.Open("./mygraph");
 using (var schemaTx = db.BeginWriteTransaction())
 {
     schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(

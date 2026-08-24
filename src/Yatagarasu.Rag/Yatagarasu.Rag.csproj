@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>Yatagarasu.Rag</PackageId>
+    <Description>Yatagarasu 上のローカル RAG スキーマ層。文書取込・チャンキング・再取込・ハイブリッド検索 (ベクトル + BM25 全文検索) + グラフ展開を提供し、外部依存なし・単一ファイルでローカル RAG バックエンドを構築できる。</Description>
+    <PackageTags>$(PackageTags);rag;retrieval-augmented-generation;vector-search;full-text-search;bm25;chunking;hybrid-search</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 埋め込みモデルは IChunkEmbedder を通じて呼び出し側から注入する。 -->
+    <ProjectReference Include="..\Yatagarasu\Yatagarasu.csproj" />
+  </ItemGroup>
+</Project>

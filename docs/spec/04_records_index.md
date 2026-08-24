@@ -10,7 +10,7 @@ Property version、incidence、primary vector payload は Sequence から固定 
 
 ## Vertex ストア {#vertex-store}
 
-`VersionedVertexStore` (`src/Quiver/Stores/VersionedVertexStore.cs`)。
+`VersionedVertexStore` (`src/Yatagarasu/Stores/VersionedVertexStore.cs`)。
 
 **Vertex payload**（15 バイト、version header の後ろ）:
 
@@ -27,7 +27,7 @@ Property version、incidence、primary vector payload は Sequence から固定 
 
 ## Edge ストア {#rel-store}
 
-`VersionedEdgeStore` (`src/Quiver/Stores/VersionedEdgeStore.cs`) は 45 バイト payload を `VersionedRecordHeap` に格納する。
+`VersionedEdgeStore` (`src/Yatagarasu/Stores/VersionedEdgeStore.cs`) は 45 バイト payload を `VersionedRecordHeap` に格納する。
 payload は flags、source、target、type、両端の prev/next、`FirstPropertyRef` で構成する。
 xmin/xmax は version header、Generation は `EntityVersionMeta` sidecar に置く。
 
@@ -49,7 +49,7 @@ descriptor version 2 の `KindSegment` だけを受理し、payload lane がな�
 
 ## Nexus ストア {#nexus-store}
 
-`VersionedNexusStore` (`src/Quiver/Stores/VersionedNexusStore.cs`)。
+`VersionedNexusStore` (`src/Yatagarasu/Stores/VersionedNexusStore.cs`)。
 **Nexus**は 1 つの型とロール付きメンバー集合（アリティ 2 以上）を持つ第一級エンティティであり、
 Edgeとは別の `EntityKind` として格納される。
 header レコードが MVCC 可視性の正本になる。
@@ -103,7 +103,7 @@ target modelが宣言するpropertyを生成`Update`と同じ規則で上書き�
 
 ## Incidence ストア {#incidence-store}
 
-`IncidenceStore` (`src/Quiver/Stores/IncidenceStore.cs`)。
+`IncidenceStore` (`src/Yatagarasu/Stores/IncidenceStore.cs`)。
 **incidence** は「どのVertexが、どのロールで、どのNexusに属すか」を表す vertex-nexus 対
 （内部表現）であり、独立した MVCC エンティティではない。
 可視性は参照先の nexus header に従う。
@@ -136,7 +136,7 @@ undo（abort / savepoint）とクラッシュリカバリは物理 page image �
 
 ## Vertex incidence head {#vertex-incidence-head}
 
-`VertexIncidenceHeadStore` (`src/Quiver/Stores/VertexIncidenceHeadStore.cs`)。
+`VertexIncidenceHeadStore` (`src/Yatagarasu/Stores/VertexIncidenceHeadStore.cs`)。
 vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incidence（6 バイト Int48）を保持する
 固定長 sidecar。head をVertexレコード本体に持たせないのは、Nexusを使わない
 ワークロードのVertex読み取り帯域を増やさないためである（インライン案との実測比較で採用）。
@@ -167,7 +167,7 @@ derived index entry を先に退役させ、primary property version とその v
 
 ## Property ストア {#property-store}
 
-`PropertyVersionStore` (`src/Quiver/Stores/PropertyVersionStore.cs`) は owner-bound property version を格納する。
+`PropertyVersionStore` (`src/Yatagarasu/Stores/PropertyVersionStore.cs`) は owner-bound property version を格納する。
 Property は独立 entity ではなく、public `PropertyId` を持たない。
 論理アドレスは `PropertyAddress(Owner: EntityRef, Key: PropertyKeyId)` である。
 
@@ -200,7 +200,7 @@ Property は独立 entity ではなく、public `PropertyId` を持たない。
 
 ## EntityRef (ID パッキング) {#entity-ref}
 
-`EntityRef` (`src/Quiver/Core/EntityRef.cs`) は、エンティティの同一性を単一の `long` にパックする。
+`EntityRef` (`src/Yatagarasu/Core/EntityRef.cs`) は、エンティティの同一性を単一の `long` にパックする。
 
 ```
 ビットレイアウト (MSB → LSB):
@@ -239,7 +239,7 @@ Property は独立 entity ではなく、public `PropertyId` を持たない。
 
 ## B+Tree インデックス {#btree}
 
-`BTreeIndex` (`src/Quiver/Index/BTreeIndex.cs`) はディスク常駐の B+Tree を実装する。
+`BTreeIndex` (`src/Yatagarasu/Index/BTreeIndex.cs`) はディスク常駐の B+Tree を実装する。
 
 ### リーフページレイアウト {#btree-leaf}
 
@@ -338,7 +338,7 @@ derived state が不足する場合は同じ snapshot の primary property scan 
 
 全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
 
-artifact file は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg/` に保持する。
+artifact file は entry metadata、term dictionary、sorted postings、document length と checksum を `*.yata-ftseg/` に保持する。
 catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact ID/length/checksum、lifecycle state を保持する。
 
 検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
@@ -347,7 +347,7 @@ catalog manifest は generation、`xmin/xmax`、source committed high-water、ar
 ## Graph JSON export {#graph-json-export}
 
 `GraphJsonExporter` は一つのread transaction snapshotをUTF-8の単一JSON objectへ出力する。
-top-levelは `format: "quiver-graph"`、`version: 1`、`source`、`schema`、`vertices`、
+top-levelは `format: "yatagarasu-graph"`、`version: 1`、`source`、`schema`、`vertices`、
 `edges`、`nexuses` で構成し、各entity配列は `Utf8JsonWriter` へ逐次書き込む。
 
 source packed IDと `Int64` propertyは10進文字列、`Bytes`はBase64、`FloatArray`は

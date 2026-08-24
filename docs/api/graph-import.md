@@ -7,7 +7,7 @@
 ## 単一文書
 
 ```csharp
-using var db = QuiverDatabase.Open("target.quiver");
+using var db = YatagarasuDatabase.Open("target.yata");
 using IWriteTransaction tx = db.BeginWriteTransaction();
 using var input = File.OpenRead("graph.json");
 

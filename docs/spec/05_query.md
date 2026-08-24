@@ -9,7 +9,7 @@
 
 ## GraphKernel {#graph-kernel}
 
-`GraphKernel` (`src/Quiver/Operators/GraphKernel.cs`) は、コアとなるグラフ走査の抽象を提供する。
+`GraphKernel` (`src/Yatagarasu/Operators/GraphKernel.cs`) は、コアとなるグラフ走査の抽象を提供する。
 `IGraphAccessMethods.Expand()` をラップすることで、異なるストレージアクセスパスをまたいで
 同一のアルゴリズム本体が動作する。
 
@@ -71,7 +71,7 @@ interface IGraphKernel<TState>
 
 co-membership（起点Vertex → 所属Nexus → 別ロールのメンバー、という 1 論理ホップ）は
 既定では incidence チェーンの 2 段展開で評価される。
-`QuiverDatabaseOptions.CoMembershipRolePairs` にロール対（例: `subject` → `object`）を登録すると、
+`YatagarasuDatabaseOptions.CoMembershipRolePairs` にロール対（例: `subject` → `object`）を登録すると、
 その対だけを物理化したメモリ内ブロックが open 時と vacuum 後に header / incidence から再構築され、
 該当する走査がブロック読みに切り替わる。
 
@@ -118,7 +118,7 @@ segment candidate は primary property で owner generation、property visibilit
 
 ## Traversal DSL {#traversal-dsl}
 
-`GraphTraversalSource` (`Quiver.Api`) は Gremlin 風の読み取り専用走査 API を提供する。
+`GraphTraversalSource` (`Yatagarasu.Api`) は Gremlin 風の読み取り専用走査 API を提供する。
 `IReadTransaction.Query` と `IWriteTransaction.Query` は、それぞれのトランザクションに束縛された source を返す。
 
 ```csharp
@@ -144,7 +144,7 @@ Nexusは無向でロール付きのため、方向動詞（`Out` / `In`）は使
 using var write = db.BeginWriteTransaction();
 var factId = write.Mutate.AddNexus("Fact")
     .Member("subject", alice)
-    .Member("object", quiver)
+    .Member("object", yatagarasu)
     .Member("source", chunk)
     .P("status", "verified")
     .Next();

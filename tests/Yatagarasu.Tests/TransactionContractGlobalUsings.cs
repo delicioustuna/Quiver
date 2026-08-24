@@ -1,0 +1,1 @@
+global using Yatagarasu.Tests;

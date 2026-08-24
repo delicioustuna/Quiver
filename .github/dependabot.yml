@@ -1,6 +1,6 @@
 version: 2
 
-# CI-1: NuGet 依存と GitHub Actions の週次更新。
+# NuGet 依存と GitHub Actions の週次更新。
 updates:
   - package-ecosystem: nuget
     directory: "/"
