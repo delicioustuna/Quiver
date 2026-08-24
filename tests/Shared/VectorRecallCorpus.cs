@@ -1,4 +1,4 @@
-namespace Quiver.Testing;
+namespace Yatagarasu.Testing;
 
 /// <summary>
 /// recall ゲートと payload cache 計測が共有する決定的な RAG 向けベクトルコーパス定義。

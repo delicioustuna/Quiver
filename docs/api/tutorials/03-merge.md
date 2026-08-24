@@ -1,9 +1,9 @@
 # 03. MERGE / UPSERT
 
-Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON MATCH の分岐を書く。完全コードは [`samples/Quiver.Samples.Match`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Match)。
+Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON MATCH の分岐を書く。完全コードは [`samples/Yatagarasu.Samples.Match`](https://github.com/delicioustuna/Yatagarasu/tree/main/samples/Yatagarasu.Samples.Match)。
 
 ```csharp
-using var db = QuiverDatabase.Open("./mygraph");
+using var db = YatagarasuDatabase.Open("./mygraph");
 
 // MergeVertex を高速化するため、起動時に一度だけインデックスを作成する。
 // 未作成の場合はフルスキャン経路に落ち、初回呼び出しで Trace 警告が出る。

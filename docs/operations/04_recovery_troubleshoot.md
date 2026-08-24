@@ -1,14 +1,14 @@
 # 04. リカバリとトラブルシュート
 
 > **いつ読むか** — クラッシュ後に DB が起動できない、データが想定と合わない、索引が壊れて
-> いる気がする、ログに警告が出ている、というとき。まず「Quiver の復旧は何を保証するか」を
+> いる気がする、ログに警告が出ている、というとき。まず「Yatagarasu の復旧は何を保証するか」を
 > 押さえてから、症状別の対処に進む。
 
 ---
 
 ## 前提: クラッシュ復旧が保証すること
 
-Quiver は QUIVER-SW family の page-image WAL で durability を担保する。
+Yatagarasu は QUIVER-SW family の page-image WAL で durability を担保する。
 
 - **明示的な `Commit` が WAL へ永続化されたデータは、プロセスを強制終了しても再 open で復元される。**
 - **commit record を持たない transaction の `PageImage` は再生しない。**
@@ -17,10 +17,10 @@ Quiver は QUIVER-SW family の page-image WAL で durability を担保する。
 - 旧 DB、旧 WAL、未知header extension、unknown record、truncation、checksum corruption は fail-fast で拒否する。
 
 つまり「再オープンすれば、最後に成功した commit の直後の整合状態に戻る」のが基本契約。
-再オープンは特別な操作ではなく、ただ `QuiverDatabase.Open(dir)` を呼ぶだけで recovery が自動で走る。
+再オープンは特別な操作ではなく、ただ `YatagarasuDatabase.Open(dir)` を呼ぶだけで recovery が自動で走る。
 
 ```csharp
-using var db = QuiverDatabase.Open(dir);   // ← ここで WAL replay (recovery) が実行される
+using var db = YatagarasuDatabase.Open(dir);   // ← ここで WAL replay (recovery) が実行される
 ```
 
 復旧が走った回数は `dotnet-counters` の `crash-recovery-count` で観測できる。通常運用では 0。
@@ -65,17 +65,17 @@ using var db = QuiverDatabase.Open(dir);   // ← ここで WAL replay (recovery
 **対処**:
 
 1. DB を開いている全プロセスを停止する。
-2. `QuiverDatabase.UpgradeStorage(path)` を `Open` より前に明示的に呼ぶ。
+2. `YatagarasuDatabase.UpgradeStorage(path)` を `Open` より前に明示的に呼ぶ。
 3. `StorageUpgradeNotSupportedException` なら、対応する旧 build の論理 export または元データから
    現行 DB を新規構築する。
 4. 旧ファイルの magic や version を書き換えない。
 5. WAL だけを削除して起動しない。
 
 ```csharp
-StorageUpgradeResult result = QuiverDatabase.UpgradeStorage(path);
+StorageUpgradeResult result = YatagarasuDatabase.UpgradeStorage(path);
 Console.WriteLine($"storage={result.Status}, {result.SourceVersion} -> {result.TargetVersion}");
 
-using var db = QuiverDatabase.Open(path);
+using var db = YatagarasuDatabase.Open(path);
 ```
 
 現行 family version 2 なら `AlreadyCurrent` となり、database file は変更されない。
@@ -113,7 +113,7 @@ Console.WriteLine($"除去した orphan = {applied.RemovedCount}, " +
 
 - `Apply` は B+Tree の orphan を生キー削除し、`LabelVertexIndex` は orphan があれば invalidate して
   次回 lookup で再構築する。
-- **起動時に自動修復したい** 場合は `QuiverDatabaseOptions.AutoRepairOrphansOnRecovery = true` を設定すると、
+- **起動時に自動修復したい** 場合は `YatagarasuDatabaseOptions.AutoRepairOrphansOnRecovery = true` を設定すると、
   open 完了直後に `RepairIndexes(Apply)` が自動実行される (既定 false)。常に整合を優先したい運用向け。
 
 ### E. ディスク使用量が想定より大きい / 削除したのに減らない
@@ -141,25 +141,25 @@ else
   最古 snapshot の visibility horizon より前だけを回収し、reader が参照できる version は残す。
 - `GetSnapshotDiagnostics()` の `OldestAge` が長い場合は、不要な read transaction が開いたままになっていないか確認する。
 - 物理 truncate (ページファイル縮小) にも対応済み (`TruncatedPages` に削減ページ数が出る)。
-- 自動で回したい場合は `QuiverDatabaseOptions.AutoVacuum = true` と `AutoVacuumInterval` を設定する。
+- 自動で回したい場合は `YatagarasuDatabaseOptions.AutoVacuum = true` と `AutoVacuumInterval` を設定する。
 
 ### F. 「DB が開けない / 既にロックされている」
 
-**原因**: Quiver は **単一プロセス embedded** 前提。同じディレクトリを 2 つのプロセス
+**原因**: Yatagarasu は **単一プロセス embedded** 前提。同じディレクトリを 2 つのプロセス
 (または同一プロセス内で 2 回 `Open`) から同時に開くことはできない。
 
 **対処**:
 
 - 前のプロセスが本当に終了しているか確認 (ゾンビプロセス、テストの後始末漏れ)。
-- 1 プロセス内では `QuiverDatabase` を **singleton** として共有する (DI なら `AddQuiver` が singleton 登録)。
-  複数スレッドからの同時アクセスは `QuiverDatabase` インスタンスを共有すれば安全。
+- 1 プロセス内では `YatagarasuDatabase` を **singleton** として共有する (DI なら `AddYatagarasu` が singleton 登録)。
+  複数スレッドからの同時アクセスは `YatagarasuDatabase` インスタンスを共有すれば安全。
 
 ---
 
 ## ログの読み方
 
-core は `Quiver-EventSource` から transaction、query、checkpoint、WAL flush の構造化イベントを出す。
-`Quiver.Hosting` 利用時はこれらがホストの `ILoggerFactory` へ自動転送される。
+core は `Yatagarasu-EventSource` から transaction、query、checkpoint、WAL flush の構造化イベントを出す。
+`Yatagarasu.Hosting` 利用時はこれらがホストの `ILoggerFactory` へ自動転送される。
 Hosting を使わない場合は `dotnet-trace` または独自の `EventListener` で購読する。
 
 - **起動時**: recovery が再生した LSN 範囲と winner transaction を確認する。
@@ -170,7 +170,7 @@ Hosting を使わない場合は `dotnet-trace` または独自の `EventListene
   `db.Diagnostics.GetSnapshotDiagnostics()` から最古 snapshot の開始位置と high-water も取得できる。
 - **checkpoint**: 頻度が高すぎ/低すぎなら threshold を調整。
 
-ライブ観測は `dotnet-counters ... --counters Quiver-EventSource` ([docs/cookbook.md](../cookbook.md) §9)。
+ライブ観測は `dotnet-counters ... --counters Yatagarasu-EventSource` ([docs/cookbook.md](../cookbook.md) §9)。
 `crash-recovery-count` / `index-orphan-count` / `writer-contention-count` /
 `oldest-snapshot-age-seconds` / `vacuum-progress-percent` が
 トラブルシュートの主要シグナル。
@@ -183,7 +183,7 @@ Hosting を使わない場合は `dotnet-trace` または独自の `EventListene
 アプリ起動シーケンスに以下のような軽量ヘルスチェックを挟むのが有効:
 
 ```csharp
-static void StartupHealthCheck(QuiverDatabase db, ILogger log)
+static void StartupHealthCheck(YatagarasuDatabase db, ILogger log)
 {
     var stats = db.Diagnostics.GetStatistics();
     log.LogInformation("起動: vertices={Vertices}, edges={Edges}", stats.VertexCount, stats.EdgeCount);
@@ -210,7 +210,7 @@ open 直後に自動修復させる。
 
 1. **退避** — `graph` を `graph.incident-20260530` にリネームしてオリジナルを保全。
    調査の証拠を消さないことが最優先。
-2. **再オープンを試す** — 別パスでなく退避コピーに対して `QuiverDatabase.Open` を試し、
+2. **再オープンを試す** — 別パスでなく退避コピーに対して `YatagarasuDatabase.Open` を試し、
    recovery log の replay LSN 範囲を確認する。
 3. **開けた場合**:
    - `GetStatistics()` で件数が想定どおりか確認。

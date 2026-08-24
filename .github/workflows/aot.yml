@@ -1,6 +1,6 @@
 name: AOT publish smoke
 
-# CI-1: AOT 互換性スモーク。Quiver.Samples.Crud を NativeAOT 公開し、
+# AOT 互換性スモーク。Yatagarasu.Samples.Crud を NativeAOT 公開し、
 # トリム / AOT 警告が出ないこと + 生成された native binary が実際に起動することを確認する。
 # Windows / Linux の native binary をそれぞれ publish して実行する。
 on:
@@ -26,10 +26,10 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-            binary: Quiver.Samples.Crud.exe
+            binary: Yatagarasu.Samples.Crud.exe
           - os: ubuntu-latest
             rid: linux-x64
-            binary: Quiver.Samples.Crud
+            binary: Yatagarasu.Samples.Crud
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
       - name: Publish (NativeAOT)
         shell: pwsh
         run: |
-          dotnet publish samples/Quiver.Samples.Crud/Quiver.Samples.Crud.csproj `
+          dotnet publish samples/Yatagarasu.Samples.Crud/Yatagarasu.Samples.Crud.csproj `
             --configuration Release `
             --runtime ${{ matrix.rid }} `
             --output artifacts/aot `

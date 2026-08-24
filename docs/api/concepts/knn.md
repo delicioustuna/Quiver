@@ -1,6 +1,6 @@
 # KNN ベクトル検索
 
-Quiver は vector を owner-bound property として保存し、read transaction の snapshot で KNN を実行する。
+Yatagarasu は vector を owner-bound property として保存し、read transaction の snapshot で KNN を実行する。
 
 ## インデックスの作成
 

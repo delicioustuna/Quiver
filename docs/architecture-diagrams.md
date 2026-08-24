@@ -1,4 +1,4 @@
-# Quiver アーキテクチャ図
+# Yatagarasu アーキテクチャ図
 
 用途別の Mermaid 図集。
 内部実装の契約は[現行仕様](spec/00_overview.md)を参照。
@@ -12,13 +12,13 @@
 ```mermaid
 flowchart TB
     subgraph optional["オプションパッケージ"]
-        Rag["Quiver.Rag<br/>RAG レイヤ"]
-        Hosting["Quiver.Hosting<br/>DI 統合"]
-        OTel["Quiver.OpenTelemetry<br/>計装"]
+        Rag["Yatagarasu.Rag<br/>RAG レイヤ"]
+        Hosting["Yatagarasu.Hosting<br/>DI 統合"]
+        OTel["Yatagarasu.OpenTelemetry<br/>計装"]
     end
 
-    subgraph core["Quiver（エンジン中核）"]
-        API["QuiverDatabase / IReadTransaction / IWriteTransaction<br/>Fluent Traversal / Match DSL"]
+    subgraph core["Yatagarasu（エンジン中核）"]
+        API["YatagarasuDatabase / IReadTransaction / IWriteTransaction<br/>Fluent Traversal / Match DSL"]
         Query["Query Engine"]
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
         Index["Scalar B+Tree / Immutable Full-Text Segments"]
@@ -28,7 +28,7 @@ flowchart TB
         Storage["PagedFile / バッファプール"]
     end
 
-    File[("*.quiver<br/>+ *.quiver-wal")]
+    File[("*.yata<br/>+ *.yata-wal")]
 
     Rag --> API
     Hosting --> API
@@ -73,7 +73,7 @@ flowchart TB
 
 ---
 
-## 3. 文書取込（Quiver.Rag）
+## 3. 文書取込（Yatagarasu.Rag）
 
 外部アプリが生成した正規化ブロック列を `RagStore` が受け取り、グラフに格納する。
 
@@ -107,7 +107,7 @@ sequenceDiagram
 
 ## 4. RAG スキーマ
 
-`Quiver.Rag` が構築するグラフ構造を示す。
+`Yatagarasu.Rag` が構築するグラフ構造を示す。
 
 ```mermaid
 flowchart LR
@@ -143,11 +143,11 @@ NuGet パッケージとしての依存グラフ。矢印はパッケージ参�
 
 ```mermaid
 flowchart LR
-    SG["Quiver.SourceGen<br/>(analyzer 同梱)"]
-    Core["Quiver<br/>（エンジン中核）"]
-    Rag["Quiver.Rag"]
-    Host["Quiver.Hosting"]
-    OTel["Quiver.OpenTelemetry"]
+    SG["Yatagarasu.SourceGen<br/>(analyzer 同梱)"]
+    Core["Yatagarasu<br/>（エンジン中核）"]
+    Rag["Yatagarasu.Rag"]
+    Host["Yatagarasu.Hosting"]
+    OTel["Yatagarasu.OpenTelemetry"]
     SG -- analyzer --> Core
     Rag --> Core
     Host --> Core

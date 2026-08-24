@@ -1,4 +1,4 @@
-# Contributing to Quiver
+# Contributing to Yatagarasu
 
 個人利用プロジェクトのためコントリビューションは想定していませんが、
 もし作成する場合は以下のフォーマットに従ってくれると嬉しいです。
@@ -10,13 +10,13 @@
 ## ビルド
 
 ```bash
-dotnet build Quiver.slnx
+dotnet build Yatagarasu.slnx
 ```
 
 ## テスト
 
 ```bash
-dotnet test Quiver.slnx
+dotnet test Yatagarasu.slnx
 ```
 
 ## ブランチ戦略

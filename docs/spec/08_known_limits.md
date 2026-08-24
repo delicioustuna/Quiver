@@ -11,7 +11,7 @@
 
 ### プロセスとスレッディングのルール {#threading}
 
-- **データベースごとに 1 プロセス。** `*.quiver` ファイルは排他 OS ファイルロック (`FileShare.None`) で
+- **データベースごとに 1 プロセス。** `*.yata` ファイルは排他 OS ファイルロック (`FileShare.None`) で
   開かれる。2 つ目のプロセスはこれを開けない。マルチプロセスやネットワークアクセスは存在しない —
   それが必要なら自前のサービスを前段に置くこと。
 - **データベースごとに1つの`GraphStore`をスレッド間で共有する。** インスタンスはスレッドセーフ。
@@ -215,7 +215,7 @@ vacuum の segment GC は reader horizon を越えた旧 manifest と、どの c
 
 ## Derived全文 segment の再構築 {#fulltext-segment-rebuild}
 
-正常 reopen は persisted manifest から `*.quiver-ftseg/` 内の checksum 一致 artifact file を開き、primary scan を行わない。
+正常 reopen は persisted manifest から `*.yata-ftseg/` 内の checksum 一致 artifact file を開き、primary scan を行わない。
 referenced body の欠損または checksum 不一致で `RebuildRequired` になった場合だけ、全文検索は transaction-local primary property scan へ fallback する。
 fallback artifact は global manifest として公開せず、background worker が source generation を再検証してから publish する。
 この破損時 fallback は結果集合を保つが、publish 完了までは検索レイテンシが corpus size に比例する。
@@ -241,11 +241,11 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 **設計根拠**: efSearch=200 まで広げても旧構築グラフは 0.825 止まりで、検索時パラメタだけでは
 0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。
-`Quiver.Benchmarks.RecallCheck`は、既定構成のtrue recall@10が0.95以上であることを検証する。
+`Yatagarasu.Benchmarks.RecallCheck`は、既定構成のtrue recall@10が0.95以上であることを検証する。
 
 ## RAG ingestion profile の切り替え {#rag-ingestion-profile-switch}
 
-`Quiver.Rag` は一つのコーパスへ異なる chunking、embedding model、normalization、embedding input template を
+`Yatagarasu.Rag` は一つのコーパスへ異なる chunking、embedding model、normalization、embedding input template を
 混在させない。既存 marker と異なる `RagIngestionProfile` は fail-fast で拒否する。
 同一 DB 内で旧 / 新 embedding index を online に二重維持して原子的に切り替える API は現在提供しない。
 profile を変更する場合は、別 DB に全 source document を再取込し、検証後にアプリケーション側で
@@ -309,7 +309,7 @@ page / WAL headerの予約領域が非0の場合と、未知WAL record typeもfa
 具体的な旧 layout reader は、実在する source layout と fixture を固定できる版でだけ登録する。
 移行 orchestration は検証済み target を別 file に構築し、durable marker 後の rename で切り替える。
 
-**緩和策**: 登録済み step のない形式は、元データまたは対応する旧 Quiver build の論理 export から
+**緩和策**: 登録済み step のない形式は、元データまたは対応する旧 Yatagarasu build の論理 export から
 現行 DB を新規構築する。旧 DB file は rollback と調査のため保持する。
 
 内部migration基盤はスキーマレベルの変更を実行できるが、安定公開APIには含めない。ここで言う「暗黙ストレージ移行なし」はオンディスクの物理フォーマット変更を指す。
@@ -362,8 +362,8 @@ deferred entity / property / value適用境界で観測する。キャンセル�
 
 ## In-Process のみ {#in-process}
 
-Quiver はアプリケーションプロセス内で動作する。サーバモード・ネットワークプロトコル・プロセス間
-アクセスは存在しない。`*.quiver` ファイルは排他ファイルロック (`FileShare.None`) で開かれる。
+Yatagarasu はアプリケーションプロセス内で動作する。サーバモード・ネットワークプロトコル・プロセス間
+アクセスは存在しない。`*.yata` ファイルは排他ファイルロック (`FileShare.None`) で開かれる。
 
 **設計根拠**: 組み込み DB として SQLite / LiteDB と同じポジションを取る設計判断。ネットワーク層を
 持たないことで、シリアライゼーションオーバーヘッド・接続管理・認証・TLS の複雑さを排除し、
@@ -375,7 +375,7 @@ Quiver はアプリケーションプロセス内で動作する。サーバモ�
 - 読み取り専用アクセスのみの場合、`CreateSnapshot()` で取得したバックアップファイルを別プロセスで開く
 
 **将来方針**: サーバモードの追加は 1.x のスコープ外。将来的にコミュニティ需要があれば、
-`Quiver.Server` パッケージとして Quiver の上に薄い gRPC / HTTP ラッパを別リポジトリで
+`Yatagarasu.Server` パッケージとして Yatagarasu の上に薄い gRPC / HTTP ラッパを別リポジトリで
 提供する可能性があるが、コアエンジンは組み込み専用を維持する。
 
 ## チェックポイントによる WAL 切り詰め {#wal-truncation}

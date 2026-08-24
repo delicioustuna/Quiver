@@ -8,10 +8,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projects = @(
-    'src/Quiver/Quiver.csproj',
-    'src/Quiver.Rag/Quiver.Rag.csproj',
-    'src/Quiver.Hosting/Quiver.Hosting.csproj',
-    'src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj'
+    'src/Yatagarasu/Yatagarasu.csproj',
+    'src/Yatagarasu.SourceGen/Yatagarasu.SourceGen.csproj',
+    'src/Yatagarasu.Rag/Yatagarasu.Rag.csproj',
+    'src/Yatagarasu.Hosting/Yatagarasu.Hosting.csproj',
+    'src/Yatagarasu.OpenTelemetry/Yatagarasu.OpenTelemetry.csproj'
 )
 
 foreach ($project in $projects) {

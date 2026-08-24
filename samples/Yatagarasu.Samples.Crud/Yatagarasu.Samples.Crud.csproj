@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Yatagarasu.Samples.Crud</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- NativeAOT smoke の対象。PublishAot をコマンドラインで渡すと netstandard2.0 の
+         Source Generator 参照へ伝播して NETSDK1207 になるため、このプロジェクト内だけで有効にする。
+         ILCompiler は publish 時だけ動作し、通常の solution build には影響しない。 -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Yatagarasu\Yatagarasu.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,11 +1,11 @@
 # グラフ移行cookbook
 
-Quiverでは「移行」を一つのdump/restore機能へまとめない。目的に応じて次の境界を選ぶ。
+Yatagarasuでは「移行」を一つのdump/restore機能へまとめない。目的に応じて次の境界を選ぶ。
 
 | 目的 | API | ID |
 |---|---|---|
 | 同じ物理形式へ復旧 | `CreateSnapshot` | 維持する |
-| Quiverの物理familyを更新 | `UpgradeStorage` | 登録stepが維持する |
+| Yatagarasuの物理familyを更新 | `UpgradeStorage` | 登録stepが維持する |
 | 別DBへ移行・subgraphを共有 | `GraphJsonExporter` / `GraphJsonImporter` | import先で新規採番する |
 | 同じDBのapplication modelを変更 | `IMigration` + `Update` / `Replace*` | property更新/label renameは維持、構造置換は新規採番 |
 
@@ -14,20 +14,20 @@ Quiverでは「移行」を一つのdump/restore機能へまとめない。目�
 物理バックアップはJSONを経由しない。コピー先primary fileのパスを指定する。
 
 ```csharp
-using var db = QuiverDatabase.Open(@"C:\data\graph.quiver");
-db.CreateSnapshot(@"D:\backup\graph-20260729.quiver");
+using var db = YatagarasuDatabase.Open(@"C:\data\graph.yata");
+db.CreateSnapshot(@"D:\backup\graph-20260729.yata");
 ```
 
 primary、active WAL、全文segment bodyの扱いと復元手順は
-[バックアップとリストア](https://github.com/delicioustuna/Quiver/blob/main/docs/operations/02_backup_restore.md)を参照する。
+[バックアップとリストア](https://github.com/delicioustuna/Yatagarasu/blob/main/docs/operations/02_backup_restore.md)を参照する。
 
-## Quiverの物理形式を更新する
+## Yatagarasuの物理形式を更新する
 
 storage upgradeはDBを閉じ、`Open`より前に明示的に実行する。
 
 ```csharp
-StorageUpgradeResult upgrade = QuiverDatabase.UpgradeStorage(
-    @"C:\data\graph.quiver",
+StorageUpgradeResult upgrade = YatagarasuDatabase.UpgradeStorage(
+    @"C:\data\graph.yata",
     new StorageUpgradeOptions { KeepBackup = true });
 
 if (upgrade.Status is StorageUpgradeStatus.AlreadyCurrent)
@@ -42,7 +42,7 @@ v0.5.0はv0.4.0と同じQUIVER-SW family version 2を使うため、現行DBは�
 Graph JSONはUTF-8の通常JSON objectであり、全graphとVertex-induced subgraphを逐次出力できる。
 
 ```csharp
-using var source = QuiverDatabase.Open(@"C:\data\source.quiver");
+using var source = YatagarasuDatabase.Open(@"C:\data\source.yata");
 await using var output = File.Create(@"D:\exchange\graph.json");
 GraphJsonExporter.Export(
     source,
@@ -55,7 +55,7 @@ GraphJsonExporter.Export(
 target IDは新規採番される。transactionとstreamのcommit/disposeはcallerが所有する。
 
 ```csharp
-using var target = QuiverDatabase.Open(@"C:\data\target.quiver");
+using var target = YatagarasuDatabase.Open(@"C:\data\target.yata");
 using var tx = target.BeginWriteTransaction();
 using var first = File.OpenRead(@"D:\exchange\part-1.json");
 using var second = File.OpenRead(@"D:\exchange\part-2.json");

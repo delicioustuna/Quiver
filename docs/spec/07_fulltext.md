@@ -24,7 +24,7 @@ commit 済み segment は in-place 更新しない。
 
 manifest は transaction ID の `xmin` と `xmax` で version 化し、read transaction の snapshot から可視な版を選ぶ。
 
-segment body は `*.quiver-ftseg/` ディレクトリへ checksum 付き immutable artifact file として保存する。
+segment body は `*.yata-ftseg/` ディレクトリへ checksum 付き immutable artifact file として保存する。
 body を fsync した後、artifact ID、length、checksum、source committed high-water を持つ manifest だけを catalog page に書く。
 manifest と primary property mutation は同じ strict `Commit` で可視になる。
 
@@ -107,7 +107,7 @@ candidate を除外した後に次点を補充してから `Take(k)` を適用�
 
 graph-first 経路は上流の full `VertexId` を primary `Read` で検証した後にだけ Sequence を physical posting lookup へ渡す。
 
-`Quiver.Rag` の `MetadataEquals` も一致文書の chunk candidate を BM25 scorer へ渡し、候補集合内で top-k を確定する。
+`Yatagarasu.Rag` の `MetadataEquals` も一致文書の chunk candidate を BM25 scorer へ渡し、候補集合内で top-k を確定する。
 BM25 の累積 score は順位から再計算せず、scorer が生成した値を `RagHit.Score.Bm25Score` へ渡す。
 
 ## Query {#query}

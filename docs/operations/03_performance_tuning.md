@@ -2,8 +2,8 @@
 
 > **いつ読むか** — 挿入が遅い、検索が遅い、メモリやディスクが想定より使われている、と感じたとき。
 > チューニングノブを回す前に、まず最上段の「鉄則」を満たしているか確認すること。
-> 設定ノブは [`QuiverDatabaseOptions`](../../src/Quiver/QuiverDatabase.cs) / appsettings の
-> [`QuiverConfigurationOptions`](../../src/Quiver.Hosting/QuiverConfigurationOptions.cs)。
+> 設定ノブは [`YatagarasuDatabaseOptions`](../../src/Yatagarasu/YatagarasuDatabase.cs) / appsettings の
+> [`YatagarasuConfigurationOptions`](../../src/Yatagarasu.Hosting/YatagarasuConfigurationOptions.cs)。
 
 ---
 
@@ -11,7 +11,7 @@
 
 **bulk パス (まとめて 1 tx) は ~69 B/entry、per-tx パターン (1 件 1 commit) は約 100 倍遅い。**
 
-これは Quiver で最も効く一手であり、他のどのノブよりも先に守るべき。
+これは Yatagarasu で最も効く一手であり、他のどのノブよりも先に守るべき。
 根拠は[索引付き書き込みのWAL増幅](../benchmark-results.md#索引付き書き込みのwal増幅)を参照。
 
 | パス | EntryCount | WAL bytes/entry | wall time | スループット |
@@ -125,7 +125,7 @@ latency は payload cache 導入後の値。この corpus では低い `EfSearch
 直近 `AdaptiveSampleWindow` 件 (既定 1000) の bytes/tx 移動平均から、`TargetRecoveryTime` (既定 5 秒) を満たす threshold を周期的に再計算する。
 
 ```csharp
-var opts = new QuiverDatabaseOptions
+var opts = new YatagarasuDatabaseOptions
 {
     CheckpointPolicy = CheckpointPolicy.Adaptive,
     TargetRecoveryTime = TimeSpan.FromSeconds(3),     // 起動を 3 秒以内に抑えたい
@@ -139,12 +139,12 @@ var opts = new QuiverDatabaseOptions
 
 ## writer lease の競合
 
-Quiver は一つの writer と任意数の snapshot reader を並走させる。
+Yatagarasu は一つの writer と任意数の snapshot reader を並走させる。
 複数の書き込み要求が同時に到着しても writer は並走せず、database instance ごとの lease が直列化する。
 reader は writer lease を取得せず、writer の終了を待たない。
 
 ```csharp
-var opts = new QuiverDatabaseOptions
+var opts = new YatagarasuDatabaseOptions
 {
     WriterContentionMode = WriterContentionMode.Wait,
     WriterWaitTimeout = TimeSpan.FromSeconds(2),
@@ -155,8 +155,8 @@ var opts = new QuiverDatabaseOptions
 `WriterContentionMode.FailFast` は待機せず `WriterBusyException` を送出する。
 待機時間を伸ばしても書き込み処理能力は増えないため、競合が続く場合は書き込みキューで mutation をまとめ、トランザクション数と fsync 回数を減らす。
 
-`quiver.writer.wait.duration` と `quiver.writer.contention.count` を観測すると、競合した取得だけの待機時間と回数を判別できる。
-reader 側は `quiver.snapshot.active.count` と `quiver.snapshot.oldest.age` で、長時間 snapshot が GC horizon を固定していないか確認する。
+`yatagarasu.writer.wait.duration` と `yatagarasu.writer.contention.count` を観測すると、競合した取得だけの待機時間と回数を判別できる。
+reader 側は `yatagarasu.snapshot.active.count` と `yatagarasu.snapshot.oldest.age` で、長時間 snapshot が GC horizon を固定していないか確認する。
 
 ---
 
@@ -191,12 +191,12 @@ using (var schemaTx = db.BeginWriteTransaction())
 
 ## 計測してから回す
 
-推測で回さない。Quiver は観測手段を持っている:
+推測で回さない。Yatagarasu は観測手段を持っている:
 
 - `db.Diagnostics.GetStatistics()` — Vertex/エッジ数、バッファプール hit/miss
-- `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、writer、snapshot、maintenance を
+- `dotnet-counters -n <proc> --counters Yatagarasu-EventSource` — buffer-pool、WAL、tx、writer、snapshot、maintenance を
   1 秒粒度でライブ観測 ([docs/cookbook.md](../cookbook.md) §9)
-- `Quiver.OpenTelemetry` の `AddQuiverInstrumentation()` — OTel でメトリクスとトレースを送る
+- `Yatagarasu.OpenTelemetry` の `AddYatagarasuInstrumentation()` — OTel でメトリクスとトレースを送る
 
 ボトルネックを 1 つ特定 → 1 ノブだけ動かす → 再計測、を繰り返すこと。
 

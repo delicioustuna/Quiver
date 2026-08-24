@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>Yatagarasu.OpenTelemetry</PackageId>
+    <Description>Yatagarasu グラフデータベースの OpenTelemetry 計装登録。Yatagarasu が発行する traces / metrics を OpenTelemetry に接続する拡張で、実 exporter (Console / Prometheus / Jaeger 等) はアプリ側で選択する。</Description>
+    <PackageTags>$(PackageTags);opentelemetry;observability;tracing;metrics;telemetry</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Yatagarasu\Yatagarasu.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- OB-1: optional の OpenTelemetry SDK 拡張。OpenTelemetry.Api だけに依存し、
+         実 exporter (Console / Prometheus / Jaeger) はアプリケーション側で選ばせる。 -->
+    <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
+    <PackageReference Include="OpenTelemetry" Version="1.15.3" />
+  </ItemGroup>
+</Project>

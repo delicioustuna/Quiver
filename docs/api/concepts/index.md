@@ -1,6 +1,6 @@
 # Concepts
 
-Quiver の主要な概念。
+Yatagarasu の主要な概念。
 
 - [Vertex / Edge / Nexus モデル](vertex-edge.md) — 二項Edgeとロール付きn項Nexusの表現
 - [Transaction](transaction.md) — トランザクション境界、分離レベル、コミットフック

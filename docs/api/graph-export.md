@@ -1,13 +1,13 @@
 # Graph JSON export
 
-`GraphJsonExporter` は、Quiver の物理バックアップではなく、別DBへの移行、閲覧、共有に使う
-論理graphをUTF-8 JSON objectとして出力する。復旧には `QuiverDatabase.CreateSnapshot` が作る
+`GraphJsonExporter` は、Yatagarasu の物理バックアップではなく、別DBへの移行、閲覧、共有に使う
+論理graphをUTF-8 JSON objectとして出力する。復旧には `YatagarasuDatabase.CreateSnapshot` が作る
 物理snapshotを使用する。
 
 ## 全graphの出力
 
 ```csharp
-using var db = QuiverDatabase.Open("graph.quiver");
+using var db = YatagarasuDatabase.Open("graph.yata");
 using var output = File.Create("graph.json");
 
 GraphJsonExportResult result = GraphJsonExporter.Export(
@@ -21,7 +21,7 @@ writerは `vertices`、`edges`、`nexuses` の各配列を逐次出力するた�
 `Bytes`はBase64、`FloatArray`はnumber配列になり、非有限浮動小数は `"NaN"`、
 `"Infinity"`、`"-Infinity"` で表す。
 
-出力はJSON LinesやQuiver独自のchunk containerではなく、単一の通常JSON objectである。
+出力はJSON LinesやYatagarasu独自のchunk containerではなく、単一の通常JSON objectである。
 そのためVS Code等のJSON viewerでそのまま開けるが、大容量文書ではviewer側が
 文書全体をメモリへ読み込む場合がある。export側の逐次出力はviewer側のメモリ使用量を
 保証しない。Excelで扱う場合はPower Query等で `vertices`、`edges`、`nexuses`を
@@ -40,7 +40,7 @@ UUIDとpacked IDは例示値であり、exportごとまたはDB内の採番に�
 
 ```json
 {
-  "format": "quiver-graph",
+  "format": "yatagarasu-graph",
   "version": 1,
   "source": {
     "databaseId": "11111111-1111-1111-1111-111111111111",

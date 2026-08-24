@@ -1,9 +1,0 @@
-<Project>
-  <!-- PKG-1: Quiver パッケージを参照しただけで `using` を書かずに使えるようにする
-       (ドロップイン体験)。ImplicitUsings 有効時のみ global using を注入する。
-       不要なら利用者側で <Using Remove="Quiver.Api" /> 等で opt-out できる。 -->
-  <ItemGroup Condition="'$(ImplicitUsings)' == 'enable' Or '$(ImplicitUsings)' == 'true'">
-    <Using Include="Quiver" />
-    <Using Include="Quiver.Api" />
-  </ItemGroup>
-</Project>

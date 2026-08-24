@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$projectPath = Join-Path $repositoryRoot "src/Quiver/Quiver.csproj"
+$projectPath = Join-Path $repositoryRoot "src/Yatagarasu/Yatagarasu.csproj"
 $outputDirectory = Join-Path $repositoryRoot ".zero-dependency-gate"
 
 # 第 1 ゲート: コアプロジェクト自身に PackageReference がないことを確認する。
@@ -13,7 +13,7 @@ $outputDirectory = Join-Path $repositoryRoot ".zero-dependency-gate"
 $packageReferences = @($project.SelectNodes("/Project/ItemGroup/PackageReference"))
 if ($packageReferences.Count -ne 0) {
     $names = $packageReferences | ForEach-Object { $_.Include }
-    throw "Quiver.csproj contains PackageReference items: $($names -join ', ')"
+    throw "Yatagarasu.csproj contains PackageReference items: $($names -join ', ')"
 }
 
 if (Test-Path -LiteralPath $outputDirectory) {
@@ -27,10 +27,10 @@ try {
         throw "dotnet pack failed with exit code $LASTEXITCODE."
     }
 
-    $packages = @(Get-ChildItem -LiteralPath $outputDirectory -Filter "Quiver.*.nupkg" |
+    $packages = @(Get-ChildItem -LiteralPath $outputDirectory -Filter "Yatagarasu.*.nupkg" |
         Where-Object { $_.Name -notlike "*.symbols.nupkg" })
     if ($packages.Count -ne 1) {
-        throw "Expected exactly one Quiver nupkg, found $($packages.Count)."
+        throw "Expected exactly one Yatagarasu nupkg, found $($packages.Count)."
     }
 
     # 第 2 ゲート: SDK/props/ProjectReference の影響を含む最終 nuspec を検証する。

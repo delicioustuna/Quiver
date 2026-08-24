@@ -28,10 +28,10 @@ jobs:
       - name: Restore tools and projects
         run: |
           dotnet tool restore
-          dotnet restore Quiver.slnx
+          dotnet restore Yatagarasu.slnx
 
       - name: Build projects
-        run: dotnet build Quiver.slnx --configuration Release --no-restore
+        run: dotnet build Yatagarasu.slnx --configuration Release --no-restore
 
       - name: Generate architecture inventory
         shell: pwsh
@@ -46,6 +46,6 @@ jobs:
       - name: Upload documentation site
         uses: actions/upload-artifact@v4
         with:
-          name: quiver-docs
+          name: yatagarasu-docs
           path: docs/api/_site/
           retention-days: 30

@@ -1,0 +1,1295 @@
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("RagSandbox")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Backend.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Benchmarks")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Benchmarks.RecallCheck")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Client.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Codec.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.FuzzTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Hosting")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Hosting.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Index.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Mcp")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.OpenTelemetry")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Operators.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.PropertyTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Rag")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Rag.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.SampleDbGen")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Crud")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.DirectedNexuses")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.FormalConcepts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.GraphAnnotations")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Hosting")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Match")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Migration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.MinimumHittingSet")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Nexuses")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Observability")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.PersistenceH0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.QueryPatterns")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Rag")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Signal")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.SourceGen")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Traversal")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Samples.Vector")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.SourceGen.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Storage.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Stores.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Transactions.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Yatagarasu.Wal.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("YatagarasuSandbox")]
+namespace Yatagarasu
+{
+    public sealed class AdvancedGraphStore
+    {
+        public Yatagarasu.GraphReadSession BeginRead() { }
+        public Yatagarasu.GraphWriteSession BeginWrite() { }
+        public Yatagarasu.ConsistencyReport CheckConsistency() { }
+        public void CompactAdjacency() { }
+        public void CreateSnapshot(string targetFilePath, Yatagarasu.SnapshotOptions? options = null) { }
+        public Yatagarasu.DatabaseStatistics GetStatistics() { }
+        public Yatagarasu.Maintenance.VacuumReport Vacuum(Yatagarasu.Maintenance.VacuumOptions? options = null) { }
+    }
+    public readonly struct CoMembershipRolePair : System.IEquatable<Yatagarasu.CoMembershipRolePair>
+    {
+        public CoMembershipRolePair(string OriginRole, string MemberRole) { }
+        public string MemberRole { get; init; }
+        public string OriginRole { get; init; }
+    }
+    public sealed class ConsistencyReport : System.IEquatable<Yatagarasu.ConsistencyReport>
+    {
+        public ConsistencyReport(bool IsConsistent, System.Collections.Generic.IReadOnlyList<string> Issues) { }
+        public bool IsConsistent { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Issues { get; init; }
+    }
+    public readonly struct DatabaseInstanceId : System.IEquatable<Yatagarasu.DatabaseInstanceId>
+    {
+        public DatabaseInstanceId(System.Guid Value) { }
+        public System.Guid Value { get; init; }
+        public override string ToString() { }
+        public static Yatagarasu.DatabaseInstanceId New() { }
+    }
+    public sealed class DatabaseStatistics : System.IEquatable<Yatagarasu.DatabaseStatistics>
+    {
+        public DatabaseStatistics(long VertexCount, long EdgeCount, long NexusCount, long IncidenceCount, long PropertyCount, long DataFileSize, long WalFileSize, long BufferPoolHits, long BufferPoolMisses, long AdjacencyFallbackCount) { }
+        public long AdjacencyFallbackCount { get; init; }
+        public long BufferPoolHits { get; init; }
+        public long BufferPoolMisses { get; init; }
+        public long DataFileSize { get; init; }
+        public long EdgeCount { get; init; }
+        public long IncidenceCount { get; init; }
+        public long NexusCount { get; init; }
+        public long PropertyCount { get; init; }
+        public long VertexCount { get; init; }
+        public long WalFileSize { get; init; }
+    }
+    public readonly struct EdgeKey : System.IEquatable<Yatagarasu.EdgeKey>
+    {
+        public bool IsValid { get; }
+        public bool Equals(Yatagarasu.EdgeKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Yatagarasu.EdgeKey left, Yatagarasu.EdgeKey right) { }
+        public static bool operator ==(Yatagarasu.EdgeKey left, Yatagarasu.EdgeKey right) { }
+    }
+    public sealed class FullTextIndexDefinition : Yatagarasu.IndexDefinition, System.IEquatable<Yatagarasu.FullTextIndexDefinition>
+    {
+        public FullTextIndexDefinition(string Name, Yatagarasu.PropertyTarget Target, string TokenizerId = "mixed-bigram-unigram-v1", System.Collections.Generic.IReadOnlyList<Yatagarasu.Text.ITokenFilter>? Filters = null, double K1 = 1.2, double B = 0.75, Yatagarasu.FullTextSegmentPolicy? SegmentPolicy = null) { }
+        public double B { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.Text.ITokenFilter>? Filters { get; init; }
+        public double K1 { get; init; }
+        public Yatagarasu.FullTextSegmentPolicy? SegmentPolicy { get; init; }
+        public string TokenizerId { get; init; }
+    }
+    public sealed class FullTextSegmentPolicy : System.IEquatable<Yatagarasu.FullTextSegmentPolicy>
+    {
+        public FullTextSegmentPolicy(int MaximumDeltaEntries = 4096, int MaximumSegments = 4, double MaximumTombstoneRatio = 0.3) { }
+        public int MaximumDeltaEntries { get; init; }
+        public int MaximumSegments { get; init; }
+        public double MaximumTombstoneRatio { get; init; }
+    }
+    public sealed class GraphCallbackReentrancyException : System.InvalidOperationException { }
+    public enum GraphCheckpointPolicy
+    {
+        Fixed = 0,
+        Adaptive = 1,
+    }
+    public sealed class GraphDiagnostic : System.IEquatable<Yatagarasu.GraphDiagnostic>
+    {
+        public GraphDiagnostic(string Operation, string Phase, string ExceptionType, string Trace) { }
+        public string ExceptionType { get; init; }
+        public string Operation { get; init; }
+        public string Phase { get; init; }
+        public string Trace { get; init; }
+    }
+    public enum GraphDirection
+    {
+        Outgoing = 0,
+        Incoming = 1,
+        Both = 2,
+    }
+    public readonly struct GraphEdge : System.IEquatable<Yatagarasu.GraphEdge>
+    {
+        public GraphEdge(Yatagarasu.EdgeKey Key, Yatagarasu.VertexKey Source, Yatagarasu.VertexKey Target, string Type) { }
+        public Yatagarasu.EdgeKey Key { get; init; }
+        public Yatagarasu.VertexKey Source { get; init; }
+        public Yatagarasu.VertexKey Target { get; init; }
+        public string Type { get; init; }
+    }
+    public readonly struct GraphEdgeEntity<T> : System.IEquatable<Yatagarasu.GraphEdgeEntity<T>>
+        where T : Yatagarasu.IGraphEdgeEntity<T>
+    {
+        public GraphEdgeEntity(Yatagarasu.EdgeKey Key) { }
+        public Yatagarasu.EdgeKey Key { get; init; }
+    }
+    public readonly struct GraphEntity<T> : System.IEquatable<Yatagarasu.GraphEntity<T>>
+        where T : Yatagarasu.IGraphEntity<T>
+    {
+        public GraphEntity(Yatagarasu.VertexKey Key) { }
+        public Yatagarasu.VertexKey Key { get; init; }
+    }
+    public enum GraphJsonPropertyConflictPolicy
+    {
+        Error = 0,
+        KeepTarget = 1,
+        OverwriteTarget = 2,
+    }
+    public sealed class GraphJsonSemanticMergeOptions
+    {
+        public GraphJsonSemanticMergeOptions() { }
+        public Yatagarasu.GraphJsonPropertyConflictPolicy PropertyConflictPolicy { get; set; }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphJsonVertexIdentityRule> VertexIdentityRules { get; set; }
+    }
+    public readonly struct GraphJsonVertexIdentityRule : System.IEquatable<Yatagarasu.GraphJsonVertexIdentityRule>
+    {
+        public GraphJsonVertexIdentityRule(string Label, string PropertyKey) { }
+        public string Label { get; init; }
+        public string PropertyKey { get; init; }
+    }
+    public sealed class GraphMatchContext
+    {
+        public Yatagarasu.GraphValue Get(string variable, string property) { }
+        public T Load<T>(string variable)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public Yatagarasu.NexusKey Nexus(string variable) { }
+        public Yatagarasu.VertexKey Vertex(string variable) { }
+    }
+    public sealed class GraphMatchQuery
+    {
+        public long Count() { }
+        public Yatagarasu.GraphMatchResult<TResult> Return<TResult>(System.Func<Yatagarasu.GraphMatchContext, TResult> selector) { }
+        public Yatagarasu.GraphMatchQuery Where(string variable, string property, Yatagarasu.Api.PropertyPredicate predicate) { }
+    }
+    public sealed class GraphMatchResult<TResult>
+    {
+        public TResult? First() { }
+        public System.Collections.Generic.IReadOnlyList<TResult> ToList() { }
+    }
+    public readonly struct GraphNexusEntity<T> : System.IEquatable<Yatagarasu.GraphNexusEntity<T>>
+        where T : Yatagarasu.IGraphNexusEntity<T>
+    {
+        public GraphNexusEntity(Yatagarasu.NexusKey Key) { }
+        public Yatagarasu.NexusKey Key { get; init; }
+    }
+    public readonly struct GraphNexusMember : System.IEquatable<Yatagarasu.GraphNexusMember>
+    {
+        public GraphNexusMember(string Role, Yatagarasu.VertexKey Vertex) { }
+        public string Role { get; init; }
+        public Yatagarasu.VertexKey Vertex { get; init; }
+    }
+    public sealed class GraphOperationException : Yatagarasu.Core.YatagarasuException
+    {
+        public Yatagarasu.GraphDiagnostic Diagnostic { get; }
+    }
+    public sealed class GraphQuery
+    {
+        public Yatagarasu.GraphVertexQuery HybridSearch(string textIndex, string queryText, string vectorIndex, System.ReadOnlySpan<float> vector, int limit) { }
+        public Yatagarasu.GraphVertexQuery Knn(string indexName, System.ReadOnlySpan<float> vector, int limit) { }
+        public Yatagarasu.GraphMatchQuery Match(Yatagarasu.Api.Match.GraphPattern pattern) { }
+        public Yatagarasu.GraphMatchQuery Match(Yatagarasu.Api.Match.NexusPattern pattern) { }
+        public Yatagarasu.GraphVertexQuery Search(string indexName, string queryText, int limit) { }
+        public Yatagarasu.GraphVertexQuery Vertices() { }
+        public Yatagarasu.GraphVertexQuery Vertices(params Yatagarasu.VertexKey[] vertices) { }
+        public Yatagarasu.TypedGraphQuery<T> Vertices<T>()
+            where T : Yatagarasu.IGraphEntity<T> { }
+    }
+    public abstract class GraphReadAccess
+    {
+        public Yatagarasu.GraphQuery Query { get; }
+        public bool Contains(Yatagarasu.VertexKey vertex) { }
+        public Yatagarasu.GraphValue Get(Yatagarasu.EdgeKey edge, string property) { }
+        public Yatagarasu.GraphValue Get(Yatagarasu.NexusKey nexus, string property) { }
+        public Yatagarasu.GraphValue Get(Yatagarasu.VertexKey vertex, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphEdge> GetEdges(Yatagarasu.VertexKey vertex, Yatagarasu.GraphDirection direction = 2, string? type = null) { }
+        public string? GetLabel(Yatagarasu.VertexKey vertex) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphNexusMember> GetMembers(Yatagarasu.NexusKey nexus, string? role = null) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.VertexKey> GetNeighbors(Yatagarasu.VertexKey vertex, Yatagarasu.GraphDirection direction = 2, string? type = null) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.NexusKey> GetNexuses(Yatagarasu.VertexKey vertex, string? type = null, string? role = null) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphValue> GetValues(Yatagarasu.EdgeKey edge, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphValue> GetValues(Yatagarasu.NexusKey nexus, string property) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphValue> GetValues(Yatagarasu.VertexKey vertex, string property) { }
+        public bool TryGet(Yatagarasu.EdgeKey edge, string property, out Yatagarasu.GraphValue value) { }
+        public bool TryGet(Yatagarasu.NexusKey nexus, string property, out Yatagarasu.GraphValue value) { }
+        public bool TryGet(Yatagarasu.VertexKey vertex, string property, out Yatagarasu.GraphValue value) { }
+    }
+    public delegate void GraphReadAction(Yatagarasu.GraphReadScope scope);
+    public delegate TResult GraphReadOperation<out TResult>(Yatagarasu.GraphReadScope scope);
+    public sealed class GraphReadScope : Yatagarasu.GraphReadAccess { }
+    public sealed class GraphReadSession : Yatagarasu.GraphReadAccess, System.IDisposable
+    {
+        public void Dispose() { }
+    }
+    public sealed class GraphSet<T>
+        where T : Yatagarasu.IGraphEntity<T>
+    {
+        public string Label { get; }
+    }
+    public sealed class GraphStore : System.IDisposable
+    {
+        public Yatagarasu.AdvancedGraphStore Advanced { get; }
+        public Yatagarasu.GraphDiagnostic? LastDiagnostic { get; }
+        public string Path { get; }
+        public void Dispose() { }
+        public void Read(Yatagarasu.GraphReadAction operation) { }
+        public TResult Read<TResult>(Yatagarasu.GraphReadOperation<TResult> operation) { }
+        public void Write(Yatagarasu.GraphWriteAction operation) { }
+        public TResult Write<TResult>(Yatagarasu.GraphWriteOperation<TResult> operation) { }
+        public static Yatagarasu.GraphStore Open(string filePath, Yatagarasu.GraphStoreOptions? options = null) { }
+        public static Yatagarasu.GraphStore OpenMemory(Yatagarasu.GraphStoreOptions? options = null) { }
+    }
+    public sealed class GraphStoreOptions
+    {
+        public GraphStoreOptions() { }
+        public int AdaptiveSampleWindow { get; set; }
+        public bool AutoRepairOrphansOnRecovery { get; set; }
+        public bool AutoVacuum { get; set; }
+        public System.TimeSpan AutoVacuumInterval { get; set; }
+        public long BufferPoolSize { get; set; }
+        public Yatagarasu.GraphCheckpointPolicy CheckpointPolicy { get; set; }
+        public long CheckpointThresholdBytes { get; set; }
+        public bool EnableChecksums { get; set; }
+        public long InitialFileAllocationBytes { get; set; }
+        public long MaximumCheckpointThresholdBytes { get; set; }
+        public long MaximumFileGrowthStepBytes { get; set; }
+        public long MinimumCheckpointThresholdBytes { get; set; }
+        public System.TimeSpan TargetRecoveryTime { get; set; }
+        public Yatagarasu.GraphWriterContentionMode WriterContentionMode { get; set; }
+        public System.TimeSpan WriterWaitTimeout { get; set; }
+    }
+    public readonly struct GraphValue : System.IEquatable<Yatagarasu.GraphValue>
+    {
+        public Yatagarasu.GraphValueKind Kind { get; }
+        public bool AsBoolean() { }
+        public System.ReadOnlyMemory<byte> AsBytes() { }
+        public System.DateOnly AsDateOnly() { }
+        public System.DateTime AsDateTime() { }
+        public System.DateTimeOffset AsDateTimeOffset() { }
+        public double AsDouble() { }
+        public System.ReadOnlyMemory<float> AsFloatVector() { }
+        public int AsInt32() { }
+        public long AsInt64() { }
+        public string AsString() { }
+        public System.TimeOnly AsTimeOnly() { }
+        public System.TimeSpan AsTimeSpan() { }
+        public bool Equals(Yatagarasu.GraphValue other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public static Yatagarasu.GraphValue FromBoolean(bool value) { }
+        public static Yatagarasu.GraphValue FromBytes(System.ReadOnlySpan<byte> value) { }
+        public static Yatagarasu.GraphValue FromDateOnly(System.DateOnly value) { }
+        public static Yatagarasu.GraphValue FromDateTime(System.DateTime value) { }
+        public static Yatagarasu.GraphValue FromDateTimeOffset(System.DateTimeOffset value) { }
+        public static Yatagarasu.GraphValue FromDouble(double value) { }
+        public static Yatagarasu.GraphValue FromFloatVector(System.ReadOnlySpan<float> value) { }
+        public static Yatagarasu.GraphValue FromInt32(int value) { }
+        public static Yatagarasu.GraphValue FromInt64(long value) { }
+        public static Yatagarasu.GraphValue FromString(string value) { }
+        public static Yatagarasu.GraphValue FromTimeOnly(System.TimeOnly value) { }
+        public static Yatagarasu.GraphValue FromTimeSpan(System.TimeSpan value) { }
+        public static Yatagarasu.GraphValue op_Implicit(bool value) { }
+        public static Yatagarasu.GraphValue op_Implicit(double value) { }
+        public static Yatagarasu.GraphValue op_Implicit(int value) { }
+        public static Yatagarasu.GraphValue op_Implicit(long value) { }
+        public static Yatagarasu.GraphValue op_Implicit(string value) { }
+        public static bool operator !=(Yatagarasu.GraphValue left, Yatagarasu.GraphValue right) { }
+        public static bool operator ==(Yatagarasu.GraphValue left, Yatagarasu.GraphValue right) { }
+    }
+    public enum GraphValueKind : byte
+    {
+        Boolean = 1,
+        Int32 = 2,
+        Int64 = 3,
+        Double = 4,
+        String = 5,
+        Bytes = 6,
+        FloatVector = 7,
+    }
+    public sealed class GraphVertexQuery
+    {
+        public Yatagarasu.GraphVertexQuery Both(string? edgeType = null) { }
+        public long Count() { }
+        public Yatagarasu.GraphVertexQuery Deduplicate() { }
+        public Yatagarasu.GraphVertexQuery Has(string property) { }
+        public Yatagarasu.GraphVertexQuery Has(string property, Yatagarasu.Api.PropertyPredicate predicate) { }
+        public Yatagarasu.GraphVertexQuery Has(string property, Yatagarasu.GraphValue value) { }
+        public Yatagarasu.GraphVertexQuery HasLabel(string label) { }
+        public Yatagarasu.GraphVertexQuery In(string? edgeType = null) { }
+        public Yatagarasu.GraphVertexQuery Limit(long count) { }
+        public Yatagarasu.GraphVertexQuery Out(string? edgeType = null) { }
+        public Yatagarasu.GraphVertexQuery Skip(long count) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.VertexKey> ToList() { }
+    }
+    public sealed class GraphWorkspace : System.IDisposable
+    {
+        public Yatagarasu.AdvancedGraphStore Advanced { get; }
+        public void Dispose() { }
+        public void Read(Yatagarasu.TypedGraphReadAction operation) { }
+        public TResult Read<TResult>(Yatagarasu.TypedGraphReadOperation<TResult> operation) { }
+        public void Write(Yatagarasu.TypedGraphWriteAction operation) { }
+        public TResult Write<TResult>(Yatagarasu.TypedGraphWriteOperation<TResult> operation) { }
+        public static Yatagarasu.GraphWorkspace Attach(Yatagarasu.GraphStore store) { }
+        public static Yatagarasu.GraphWorkspace Open(string filePath, Yatagarasu.GraphStoreOptions? options = null) { }
+        public static Yatagarasu.GraphWorkspace OpenMemory(Yatagarasu.GraphStoreOptions? options = null) { }
+    }
+    public abstract class GraphWriteAccess : Yatagarasu.GraphReadAccess
+    {
+        public void AddValue(Yatagarasu.EdgeKey edge, string property, Yatagarasu.GraphValue value) { }
+        public void AddValue(Yatagarasu.NexusKey nexus, string property, Yatagarasu.GraphValue value) { }
+        public void AddValue(Yatagarasu.VertexKey vertex, string property, Yatagarasu.GraphValue value) { }
+        public Yatagarasu.EdgeKey Connect(Yatagarasu.VertexKey source, string type, Yatagarasu.VertexKey target) { }
+        public Yatagarasu.NexusKey CreateNexus(string type, System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphNexusMember> members) { }
+        public Yatagarasu.VertexKey CreateVertex(string label) { }
+        public void Delete(Yatagarasu.EdgeKey edge) { }
+        public void Delete(Yatagarasu.NexusKey nexus) { }
+        public void Delete(Yatagarasu.VertexKey vertex) { }
+        public void Remove(Yatagarasu.EdgeKey edge, string property) { }
+        public void Remove(Yatagarasu.NexusKey nexus, string property) { }
+        public void Remove(Yatagarasu.VertexKey vertex, string property) { }
+        public void RemoveValue(Yatagarasu.EdgeKey edge, string property, Yatagarasu.GraphValue value) { }
+        public void RemoveValue(Yatagarasu.NexusKey nexus, string property, Yatagarasu.GraphValue value) { }
+        public void RemoveValue(Yatagarasu.VertexKey vertex, string property, Yatagarasu.GraphValue value) { }
+        public void Set(Yatagarasu.EdgeKey edge, string property, Yatagarasu.GraphValue value) { }
+        public void Set(Yatagarasu.NexusKey nexus, string property, Yatagarasu.GraphValue value) { }
+        public void Set(Yatagarasu.VertexKey vertex, string property, Yatagarasu.GraphValue value) { }
+        public void SetVector(Yatagarasu.VertexKey vertex, string property, System.ReadOnlySpan<float> vector) { }
+    }
+    public delegate void GraphWriteAction(Yatagarasu.GraphWriteScope scope);
+    public delegate TResult GraphWriteOperation<out TResult>(Yatagarasu.GraphWriteScope scope);
+    public sealed class GraphWriteScope : Yatagarasu.GraphWriteAccess { }
+    public sealed class GraphWriteSession : Yatagarasu.GraphWriteAccess, System.IDisposable
+    {
+        public void Commit() { }
+        public void Dispose() { }
+        public void Rollback() { }
+    }
+    public enum GraphWriterContentionMode
+    {
+        Wait = 0,
+        FailFast = 1,
+    }
+    public interface IDiagnosticsApi
+    {
+        long CurrentCheckpointThresholdBytes { get; }
+        Yatagarasu.ConsistencyReport CheckConsistency();
+        Yatagarasu.IndexConsistencyReport CheckIndexConsistency();
+        Yatagarasu.SnapshotRuntimeDiagnostics GetSnapshotDiagnostics();
+        Yatagarasu.DatabaseStatistics GetStatistics();
+        Yatagarasu.IndexRepairReport RepairIndexes(Yatagarasu.IndexRepairMode mode);
+        void SetCheckpointPolicy(Yatagarasu.Transactions.CheckpointPolicy policy, long? fixedThresholdBytes = default);
+    }
+    public interface IGraphEdgeEntity<TSelf>
+        where TSelf : Yatagarasu.IGraphEdgeEntity<TSelf>
+    {
+        string GraphType { get; }
+        TSelf Read(Yatagarasu.GraphReadAccess read, Yatagarasu.EdgeKey edge);
+        void Write(Yatagarasu.GraphWriteAccess write, Yatagarasu.EdgeKey edge, TSelf entity);
+    }
+    public interface IGraphEntity<TSelf>
+        where TSelf : Yatagarasu.IGraphEntity<TSelf>
+    {
+        string GraphLabel { get; }
+        TSelf Read(Yatagarasu.GraphReadAccess read, Yatagarasu.VertexKey vertex);
+        void Write(Yatagarasu.GraphWriteAccess write, Yatagarasu.VertexKey vertex, TSelf entity);
+    }
+    public interface IGraphNexusEntity<TSelf>
+        where TSelf : Yatagarasu.IGraphNexusEntity<TSelf>
+    {
+        string GraphType { get; }
+        System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphNexusMember> GetMembers(TSelf entity);
+        TSelf Read(Yatagarasu.GraphReadAccess read, Yatagarasu.NexusKey nexus);
+        void Write(Yatagarasu.GraphWriteAccess write, Yatagarasu.NexusKey nexus, TSelf entity);
+    }
+    public interface IGraphVertexSchema<TSelf>
+        where TSelf : Yatagarasu.IGraphVertexSchema<TSelf>
+    {
+        void EnsureIndex(Yatagarasu.ISchemaEditor schema, string propertyName, Yatagarasu.IndexKind? kindOverride);
+        void EnsureIndexes(Yatagarasu.ISchemaEditor schema);
+    }
+    public interface ISchemaCatalog
+    {
+        string? GetLabelName(Yatagarasu.Core.LabelId id);
+        string? GetNexusTypeName(Yatagarasu.Core.NexusTypeId id);
+        Yatagarasu.Core.PropertyCardinality GetPropertyKeyCardinality(Yatagarasu.Core.PropertyKeyId id);
+        bool IndexExists(string indexName);
+        System.Collections.Generic.IReadOnlyList<string> ListEdgeTypes();
+        System.Collections.Generic.IReadOnlyList<Yatagarasu.IndexInfo> ListIndexes();
+        System.Collections.Generic.IReadOnlyList<string> ListLabels();
+        System.Collections.Generic.IReadOnlyList<string> ListNexusTypes();
+        System.Collections.Generic.IReadOnlyList<string> ListPropertyKeys();
+        System.Collections.Generic.IReadOnlyList<string> ListRoles();
+        bool TryGetEdgeTypeId(string name, out Yatagarasu.Core.EdgeTypeId id);
+        bool TryGetIndex(string indexName, out Yatagarasu.IndexInfo info);
+        bool TryGetLabelId(string name, out Yatagarasu.Core.LabelId id);
+        bool TryGetNexusTypeId(string name, out Yatagarasu.Core.NexusTypeId id);
+        bool TryGetPropertyKeyId(string name, out Yatagarasu.Core.PropertyKeyId id);
+    }
+    public interface ISchemaEditor : Yatagarasu.ISchemaCatalog
+    {
+        void CreateIndex(Yatagarasu.IndexDefinition definition);
+        void DropIndex(string indexName);
+        void EnsureRole(string name);
+        Yatagarasu.Core.EdgeTypeId GetOrCreateEdgeType(string name);
+        Yatagarasu.Core.LabelId GetOrCreateLabel(string name);
+        Yatagarasu.Core.NexusTypeId GetOrCreateNexusType(string name);
+        Yatagarasu.Core.PropertyKeyId GetOrCreatePropertyKey(string name);
+        Yatagarasu.Core.PropertyKeyId GetOrCreatePropertyKey(string name, Yatagarasu.Core.PropertyCardinality cardinality);
+        bool RenameEdgeType(string oldName, string newName);
+        bool RenameIndex(string oldName, string newName);
+        bool RenameLabel(string oldName, string newName);
+        bool RenamePropertyKey(string oldName, string newName);
+    }
+    public sealed class IndexConsistencyReport : System.IEquatable<Yatagarasu.IndexConsistencyReport>
+    {
+        public IndexConsistencyReport(int IndexCount, long EntryCount, long OrphanCount, System.Collections.Generic.IReadOnlyList<Yatagarasu.OrphanIndexEntry> Orphans, long LabelIndexOrphanCount) { }
+        public long EntryCount { get; init; }
+        public int IndexCount { get; init; }
+        public long LabelIndexOrphanCount { get; init; }
+        public long OrphanCount { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.OrphanIndexEntry> Orphans { get; init; }
+    }
+    public abstract class IndexDefinition : System.IEquatable<Yatagarasu.IndexDefinition>
+    {
+        protected IndexDefinition(string Name, Yatagarasu.PropertyTarget Target) { }
+        public string Name { get; init; }
+        public Yatagarasu.PropertyTarget Target { get; init; }
+    }
+    public sealed class IndexInfo : System.IEquatable<Yatagarasu.IndexInfo>
+    {
+        public IndexInfo(Yatagarasu.IndexDefinition Definition, Yatagarasu.IndexLifecycleState State, long EntryCount) { }
+        public Yatagarasu.IndexDefinition Definition { get; init; }
+        public long EntryCount { get; init; }
+        public bool IsUnique { get; }
+        public Yatagarasu.IndexKind? Kind { get; }
+        public string Name { get; }
+        public Yatagarasu.IndexLifecycleState State { get; init; }
+        public Yatagarasu.PropertyTarget Target { get; }
+    }
+    public enum IndexKind
+    {
+        Int32Equality = 0,
+        Int64Equality = 1,
+        DoubleEquality = 2,
+        StringEquality = 3,
+        StringRange = 4,
+    }
+    public enum IndexLifecycleState
+    {
+        Ready = 0,
+        RebuildRequired = 1,
+        Building = 2,
+    }
+    public enum IndexRepairMode
+    {
+        DryRun = 0,
+        Apply = 1,
+    }
+    public sealed class IndexRepairReport : System.IEquatable<Yatagarasu.IndexRepairReport>
+    {
+        public IndexRepairReport(int RemovedCount, System.Collections.Generic.IReadOnlyList<Yatagarasu.OrphanIndexEntry> Orphans, bool LabelIndexInvalidated) { }
+        public bool LabelIndexInvalidated { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.OrphanIndexEntry> Orphans { get; init; }
+        public int RemovedCount { get; init; }
+    }
+    public readonly struct NexusKey : System.IEquatable<Yatagarasu.NexusKey>
+    {
+        public bool IsValid { get; }
+        public bool Equals(Yatagarasu.NexusKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Yatagarasu.NexusKey left, Yatagarasu.NexusKey right) { }
+        public static bool operator ==(Yatagarasu.NexusKey left, Yatagarasu.NexusKey right) { }
+    }
+    public sealed class OrphanIndexEntry : System.IEquatable<Yatagarasu.OrphanIndexEntry>
+    {
+        public OrphanIndexEntry(string IndexName, byte[] RawKey, long EntityId) { }
+        public long EntityId { get; init; }
+        public string IndexName { get; init; }
+        public byte[] RawKey { get; init; }
+    }
+    public sealed class PersistenceClusterEstimate : System.IEquatable<Yatagarasu.PersistenceClusterEstimate>
+    {
+        public PersistenceClusterEstimate(int ClusterCount, float? SeparationScale, bool UsedDisconnectedComponents) { }
+        public int ClusterCount { get; init; }
+        public float? SeparationScale { get; init; }
+        public bool UsedDisconnectedComponents { get; init; }
+    }
+    public enum PersistenceH0Filtration
+    {
+        Complete = 0,
+        SparseKnn = 1,
+    }
+    public readonly struct PersistenceH0Interval : System.IEquatable<Yatagarasu.PersistenceH0Interval>
+    {
+        public PersistenceH0Interval(float Birth, float? Death, bool IsRightCensored) { }
+        public float Birth { get; init; }
+        public float? Death { get; init; }
+        public bool IsRightCensored { get; init; }
+    }
+    public sealed class PersistenceH0Options : System.IEquatable<Yatagarasu.PersistenceH0Options>
+    {
+        public PersistenceH0Options() { }
+        public System.Threading.CancellationToken CancellationToken { get; init; }
+        public Yatagarasu.PersistenceH0Filtration Filtration { get; init; }
+        public long MaxDistanceEvaluations { get; init; }
+        public int MaxEdges { get; init; }
+        public int MaxPoints { get; init; }
+        public int MaxResults { get; init; }
+        public float? MaxScale { get; init; }
+        public int NeighborCount { get; init; }
+        public System.TimeSpan TimeLimit { get; init; }
+    }
+    public sealed class PersistenceH0Result
+    {
+        public int? ComponentCount { get; }
+        public long DistanceEvaluations { get; }
+        public int EdgeCount { get; }
+        public Yatagarasu.PersistenceH0Filtration Filtration { get; }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.PersistenceH0Interval> Intervals { get; }
+        public bool IsComplete { get; }
+        public bool IsExact { get; }
+        public Yatagarasu.PersistenceH0ResultKind Kind { get; }
+        public int? PointCount { get; }
+        public float? ScaleLimit { get; }
+        public Yatagarasu.PersistenceH0TerminationReason TerminationReason { get; }
+        public int? TotalIntervalCount { get; }
+    }
+    public enum PersistenceH0ResultKind
+    {
+        Exact = 0,
+        SparseApproximation = 1,
+        Incomplete = 2,
+    }
+    public enum PersistenceH0TerminationReason
+    {
+        Completed = 0,
+        MaxPointsReached = 1,
+        MaxEdgesReached = 2,
+        MaxDistanceEvaluationsReached = 3,
+        MaxResultsReached = 4,
+        TimeBudget = 5,
+        Cancelled = 6,
+    }
+    public enum PropertyOwnerKind
+    {
+        Vertex = 0,
+        Edge = 1,
+        Nexus = 2,
+    }
+    public sealed class PropertyTarget : System.IEquatable<Yatagarasu.PropertyTarget>
+    {
+        public PropertyTarget(Yatagarasu.PropertyOwnerKind OwnerKind, string PropertyKey, string? Scope = null) { }
+        public Yatagarasu.PropertyOwnerKind OwnerKind { get; init; }
+        public string PropertyKey { get; init; }
+        public string? Scope { get; init; }
+    }
+    public sealed class ScalarIndexDefinition : Yatagarasu.IndexDefinition, System.IEquatable<Yatagarasu.ScalarIndexDefinition>
+    {
+        public ScalarIndexDefinition(string Name, Yatagarasu.PropertyTarget Target, Yatagarasu.IndexKind Kind, bool Unique = false) { }
+        public Yatagarasu.IndexKind Kind { get; init; }
+        public bool Unique { get; init; }
+    }
+    public static class SchemaEditorExtensions
+    {
+        public static void EnsureIndex<T>(this Yatagarasu.ISchemaEditor schema, System.Linq.Expressions.Expression<System.Func<T, object?>> propertySelector, Yatagarasu.IndexKind? kindOverride = default)
+            where T : Yatagarasu.IGraphVertexSchema<T> { }
+        public static void EnsureIndexes<T>(this Yatagarasu.ISchemaEditor schema)
+            where T : Yatagarasu.IGraphVertexSchema<T> { }
+    }
+    public sealed class SnapshotOptions
+    {
+        public SnapshotOptions() { }
+        public bool IncludeIndexes { get; set; }
+    }
+    public sealed class SnapshotRuntimeDiagnostics : System.IEquatable<Yatagarasu.SnapshotRuntimeDiagnostics>
+    {
+        public SnapshotRuntimeDiagnostics(int ActiveCount, System.TimeSpan OldestAge, string? OldestStartLocation, long? OldestCommittedHighWater) { }
+        public int ActiveCount { get; init; }
+        public System.TimeSpan OldestAge { get; init; }
+        public long? OldestCommittedHighWater { get; init; }
+        public string? OldestStartLocation { get; init; }
+    }
+    public sealed class StorageUpgradeNotSupportedException : Yatagarasu.Core.YatagarasuException
+    {
+        public StorageUpgradeNotSupportedException(byte sourceVersion, byte targetVersion) { }
+        public byte SourceVersion { get; }
+        public byte TargetVersion { get; }
+    }
+    public sealed class StorageUpgradeOptions
+    {
+        public StorageUpgradeOptions() { }
+        public string? BackupFilePath { get; set; }
+        public System.Threading.CancellationToken CancellationToken { get; set; }
+        public bool KeepBackup { get; set; }
+    }
+    public sealed class StorageUpgradeResult : System.IEquatable<Yatagarasu.StorageUpgradeResult>
+    {
+        public StorageUpgradeResult(Yatagarasu.StorageUpgradeStatus Status, byte SourceVersion, byte TargetVersion, string? BackupFilePath) { }
+        public string? BackupFilePath { get; init; }
+        public byte SourceVersion { get; init; }
+        public Yatagarasu.StorageUpgradeStatus Status { get; init; }
+        public byte TargetVersion { get; init; }
+    }
+    public enum StorageUpgradeStatus
+    {
+        AlreadyCurrent = 0,
+        Upgraded = 1,
+    }
+    public sealed class TypedGraphQuery<T>
+        where T : Yatagarasu.IGraphEntity<T>
+    {
+        public long Count() { }
+        public Yatagarasu.TypedGraphQuery<T> Has<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> selector, TProperty value) { }
+        public Yatagarasu.TypedGraphQuery<T> Has<TProperty>(System.Linq.Expressions.Expression<System.Func<T, TProperty>> selector, Yatagarasu.Api.PropertyPredicate predicate) { }
+        public Yatagarasu.TypedGraphQuery<T> Limit(long count) { }
+        public Yatagarasu.TypedGraphQuery<TTarget> Out<TTarget>(string? edgeType = null)
+            where TTarget : Yatagarasu.IGraphEntity<TTarget> { }
+        public System.Collections.Generic.IReadOnlyList<T> ToList() { }
+        public Yatagarasu.TypedGraphQuery<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
+    }
+    public delegate void TypedGraphReadAction(Yatagarasu.TypedGraphReadScope scope);
+    public delegate TResult TypedGraphReadOperation<out TResult>(Yatagarasu.TypedGraphReadScope scope);
+    public sealed class TypedGraphReadScope
+    {
+        public Yatagarasu.GraphReadAccess Raw { get; }
+        public bool Contains<T>(Yatagarasu.GraphEntity<T> entity)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public T Get<T>(Yatagarasu.GraphEdgeEntity<T> entity)
+            where T : Yatagarasu.IGraphEdgeEntity<T> { }
+        public T Get<T>(Yatagarasu.GraphEntity<T> entity)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public T Get<T>(Yatagarasu.GraphNexusEntity<T> entity)
+            where T : Yatagarasu.IGraphNexusEntity<T> { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.GraphEntity<TTarget>> Related<TSource, TTarget>(Yatagarasu.GraphEntity<TSource> source, string edgeType, Yatagarasu.GraphSet<TTarget> targetSet)
+            where TSource : Yatagarasu.IGraphEntity<TSource>
+            where TTarget : Yatagarasu.IGraphEntity<TTarget> { }
+        public Yatagarasu.GraphSet<T> Set<T>()
+            where T : Yatagarasu.IGraphEntity<T> { }
+    }
+    public delegate void TypedGraphWriteAction(Yatagarasu.TypedGraphWriteScope scope);
+    public delegate TResult TypedGraphWriteOperation<out TResult>(Yatagarasu.TypedGraphWriteScope scope);
+    public sealed class TypedGraphWriteScope
+    {
+        public Yatagarasu.GraphWriteAccess Raw { get; }
+        public Yatagarasu.GraphNexusEntity<TNexus> Add<TNexus>(TNexus entity)
+            where TNexus : Yatagarasu.IGraphNexusEntity<TNexus> { }
+        public Yatagarasu.GraphEntity<T> Add<T>(Yatagarasu.GraphSet<T> set, T entity)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public Yatagarasu.EdgeKey Connect<TSource, TTarget>(Yatagarasu.GraphEntity<TSource> source, string edgeType, Yatagarasu.GraphEntity<TTarget> target)
+            where TSource : Yatagarasu.IGraphEntity<TSource>
+            where TTarget : Yatagarasu.IGraphEntity<TTarget> { }
+        public Yatagarasu.GraphEdgeEntity<TEdge> Connect<TSource, TEdge, TTarget>(Yatagarasu.GraphEntity<TSource> source, TEdge edge, Yatagarasu.GraphEntity<TTarget> target)
+            where TSource : Yatagarasu.IGraphEntity<TSource>
+            where TEdge : Yatagarasu.IGraphEdgeEntity<TEdge>
+            where TTarget : Yatagarasu.IGraphEntity<TTarget> { }
+        public void Delete<T>(Yatagarasu.GraphEntity<T> entity)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public T Get<T>(Yatagarasu.GraphEntity<T> entity)
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public Yatagarasu.GraphSet<T> Set<T>()
+            where T : Yatagarasu.IGraphEntity<T> { }
+        public T Update<T>(Yatagarasu.GraphEntity<T> entity, System.Func<T, T> update)
+            where T : Yatagarasu.IGraphEntity<T> { }
+    }
+    public sealed class UniqueConstraintViolationException : Yatagarasu.Core.YatagarasuException
+    {
+        public UniqueConstraintViolationException(string indexName, string scope, string propertyKey) { }
+        public string IndexName { get; }
+        public string PropertyKey { get; }
+        public string Scope { get; }
+    }
+    public sealed class VectorIndexDefinition : Yatagarasu.IndexDefinition, System.IEquatable<Yatagarasu.VectorIndexDefinition>
+    {
+        public VectorIndexDefinition(string Name, Yatagarasu.PropertyTarget Target, int Dimensions, Yatagarasu.Core.DistanceMetric Metric = 1, Yatagarasu.Core.VectorElementType ElementType = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400, Yatagarasu.VectorSegmentPolicy? SegmentPolicy = null) { }
+        public int Dimensions { get; init; }
+        public Yatagarasu.Core.VectorElementType ElementType { get; init; }
+        public int HnswEfConstruction { get; init; }
+        public int HnswM { get; init; }
+        public int HnswMMax0 { get; init; }
+        public int HnswMaxLayers { get; init; }
+        public Yatagarasu.Core.DistanceMetric Metric { get; init; }
+        public Yatagarasu.VectorSegmentPolicy? SegmentPolicy { get; init; }
+    }
+    public sealed class VectorSegmentPolicy : System.IEquatable<Yatagarasu.VectorSegmentPolicy>
+    {
+        public VectorSegmentPolicy(int MaximumDeltaEntries = 4096, int MaximumSegments = 16) { }
+        public int MaximumDeltaEntries { get; init; }
+        public int MaximumSegments { get; init; }
+    }
+    public readonly struct VertexKey : System.IEquatable<Yatagarasu.VertexKey>
+    {
+        public bool IsValid { get; }
+        public bool Equals(Yatagarasu.VertexKey other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Yatagarasu.VertexKey left, Yatagarasu.VertexKey right) { }
+        public static bool operator ==(Yatagarasu.VertexKey left, Yatagarasu.VertexKey right) { }
+    }
+    public enum WriterContentionMode
+    {
+        Wait = 0,
+        FailFast = 1,
+    }
+}
+namespace Yatagarasu.Api
+{
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class EdgeAttribute<TSource, TTarget> : System.Attribute
+    {
+        public EdgeAttribute(string? type = null) { }
+        public string? Type { get; }
+    }
+    public readonly struct GraphVertexRef<TVertex> : System.IEquatable<Yatagarasu.Api.GraphVertexRef<TVertex>>
+        where TVertex : Yatagarasu.IGraphEntity<TVertex>
+    {
+        public GraphVertexRef(Yatagarasu.VertexKey Key) { }
+        public Yatagarasu.VertexKey Key { get; init; }
+        public static Yatagarasu.Api.GraphVertexRef<TVertex> op_Implicit(Yatagarasu.GraphEntity<TVertex> entity) { }
+        public static Yatagarasu.Api.GraphVertexRef<TVertex> op_Implicit(Yatagarasu.VertexKey key) { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class IndexedAttribute : System.Attribute
+    {
+        public IndexedAttribute(string? indexName = null) { }
+        public string? IndexName { get; }
+        public bool Unique { get; set; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class NexusAttribute : System.Attribute
+    {
+        public NexusAttribute(string? type = null) { }
+        public string? Type { get; }
+    }
+    public static class P
+    {
+        public static Yatagarasu.Api.PropertyPredicate And(params Yatagarasu.Api.PropertyPredicate[] predicates) { }
+        public static Yatagarasu.Api.PropertyPredicate Between(double from, double to) { }
+        public static Yatagarasu.Api.PropertyPredicate Between(long from, long to) { }
+        public static Yatagarasu.Api.PropertyPredicate Contains(string needle) { }
+        public static Yatagarasu.Api.PropertyPredicate EndsWith(string suffix) { }
+        public static Yatagarasu.Api.PropertyPredicate Eq(double value) { }
+        public static Yatagarasu.Api.PropertyPredicate Eq(long value) { }
+        public static Yatagarasu.Api.PropertyPredicate Eq(string value) { }
+        public static Yatagarasu.Api.PropertyPredicate Gt(double value) { }
+        public static Yatagarasu.Api.PropertyPredicate Gt(long value) { }
+        public static Yatagarasu.Api.PropertyPredicate Gte(double value) { }
+        public static Yatagarasu.Api.PropertyPredicate Gte(long value) { }
+        public static Yatagarasu.Api.PropertyPredicate Lt(double value) { }
+        public static Yatagarasu.Api.PropertyPredicate Lt(long value) { }
+        public static Yatagarasu.Api.PropertyPredicate Lte(double value) { }
+        public static Yatagarasu.Api.PropertyPredicate Lte(long value) { }
+        public static Yatagarasu.Api.PropertyPredicate Not(Yatagarasu.Api.PropertyPredicate inner) { }
+        public static Yatagarasu.Api.PropertyPredicate Or(params Yatagarasu.Api.PropertyPredicate[] predicates) { }
+        public static Yatagarasu.Api.PropertyPredicate Regex(string pattern, System.Text.RegularExpressions.RegexOptions options = 0) { }
+        public static Yatagarasu.Api.PropertyPredicate StartsWith(string prefix) { }
+        public static Yatagarasu.Api.PropertyPredicate Within(params string[] values) { }
+        public static Yatagarasu.Api.PropertyPredicate Without(params string[] values) { }
+    }
+    public enum PredicateKind
+    {
+        Eq = 0,
+        Gt = 1,
+        Gte = 2,
+        Lt = 3,
+        Lte = 4,
+        Between = 5,
+        Within = 6,
+        Without = 7,
+        StartsWith = 8,
+        EndsWith = 9,
+        Contains = 10,
+        Regex = 11,
+        Not = 12,
+        And = 13,
+        Or = 14,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class PropertyAttribute : System.Attribute
+    {
+        public PropertyAttribute(string? key = null) { }
+        public string? Key { get; }
+    }
+    public sealed class PropertyPredicate
+    {
+        public Yatagarasu.Api.PredicateKind Kind { get; }
+        public long LongFrom { get; }
+        public long LongTo { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class RoleAttribute : System.Attribute
+    {
+        public RoleAttribute(string? role = null) { }
+        public string? Role { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class VertexAttribute : System.Attribute
+    {
+        public VertexAttribute(string? label = null) { }
+        public string? Label { get; }
+    }
+}
+namespace Yatagarasu.Api.Match
+{
+    public sealed class GraphPattern
+    {
+        public static Yatagarasu.Api.Match.NexusPattern Nexus(string variable, string? type = null) { }
+        public static Yatagarasu.Api.Match.VertexPattern Vertex(string variable, string? label = null) { }
+    }
+    public sealed class NexusPattern
+    {
+        public string? Type { get; }
+        public string Variable { get; }
+        public Yatagarasu.Api.Match.NexusPattern Member(string role, Yatagarasu.Api.Match.VertexPattern vertex) { }
+    }
+    public sealed class VertexPattern
+    {
+        public string? Label { get; }
+        public string Variable { get; }
+        public Yatagarasu.Api.Match.GraphPattern In(string edgeType, Yatagarasu.Api.Match.VertexPattern end) { }
+        public Yatagarasu.Api.Match.GraphPattern In<TEdge>(Yatagarasu.Api.Match.VertexPattern end)
+            where TEdge : Yatagarasu.IGraphEdgeEntity<TEdge> { }
+        public Yatagarasu.Api.Match.GraphPattern Out(string edgeType, Yatagarasu.Api.Match.VertexPattern end) { }
+        public Yatagarasu.Api.Match.GraphPattern Out<TEdge>(Yatagarasu.Api.Match.VertexPattern end)
+            where TEdge : Yatagarasu.IGraphEdgeEntity<TEdge> { }
+    }
+}
+namespace Yatagarasu.Core
+{
+    public sealed class ConcurrentTransactionUseException : Yatagarasu.Core.YatagarasuException
+    {
+        public ConcurrentTransactionUseException(Yatagarasu.Core.TransactionId transactionId) { }
+        public Yatagarasu.Core.TransactionId TransactionId { get; }
+    }
+    public sealed class ConstraintException : Yatagarasu.Core.YatagarasuException
+    {
+        public ConstraintException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class CorruptionException : Yatagarasu.Core.YatagarasuException
+    {
+        public CorruptionException(string message, System.Exception? inner = null) { }
+    }
+    public readonly struct CosineSimilarityOp : Yatagarasu.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
+    }
+    public enum DistanceMetric : byte
+    {
+        Cosine = 1,
+        Dot = 2,
+        Euclidean = 3,
+    }
+    public readonly struct DotProductOp : Yatagarasu.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
+    }
+    public readonly struct EdgeTypeId : System.IEquatable<Yatagarasu.Core.EdgeTypeId>
+    {
+        public static readonly Yatagarasu.Core.EdgeTypeId Invalid;
+        public EdgeTypeId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    public readonly struct EuclideanDistanceOp : Yatagarasu.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
+    }
+    public interface IDyadicOperator<TResult>
+    {
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b);
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions);
+    }
+    public interface IMonadicOperator<TResult>
+    {
+        TResult Invoke(System.ReadOnlySpan<float> a);
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<System.Range> regions);
+    }
+    public readonly struct LabelId : System.IEquatable<Yatagarasu.Core.LabelId>
+    {
+        public static readonly Yatagarasu.Core.LabelId Invalid;
+        public LabelId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    public readonly struct NexusTypeId : System.IEquatable<Yatagarasu.Core.NexusTypeId>
+    {
+        public static readonly Yatagarasu.Core.NexusTypeId Invalid;
+        public NexusTypeId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    public enum PropertyCardinality : byte
+    {
+        Single = 0,
+        Set = 1,
+    }
+    public readonly struct PropertyKeyId : System.IEquatable<Yatagarasu.Core.PropertyKeyId>
+    {
+        public static readonly Yatagarasu.Core.PropertyKeyId Invalid;
+        public PropertyKeyId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    [System.Flags]
+    public enum PropertyTypeFlags : ulong
+    {
+        None = 0ul,
+        Bool = 2ul,
+        Int32 = 4ul,
+        Int64 = 8ul,
+        Double = 16ul,
+        String = 32ul,
+        Bytes = 64ul,
+        FloatArray = 128ul,
+        BoolArray = 131072ul,
+        Int32Array = 262144ul,
+        Int64Array = 524288ul,
+        DoubleArray = 1048576ul,
+        StringArray = 2097152ul,
+        BytesArray = 4194304ul,
+        Numeric = 28ul,
+        Scalar = 126ul,
+        NumericArray = 1835008ul,
+        Array = 8257536ul,
+        Variable = 8257760ul,
+        Comparable = 60ul,
+    }
+    public sealed class StorageException : Yatagarasu.Core.YatagarasuException
+    {
+        public StorageException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class StorageFormatMismatchException : Yatagarasu.Core.YatagarasuException
+    {
+        public StorageFormatMismatchException(string fileKind, byte found, byte expected) { }
+        public byte Expected { get; }
+        public string FileKind { get; }
+        public byte Found { get; }
+    }
+    public sealed class TransactionException : Yatagarasu.Core.YatagarasuException
+    {
+        public TransactionException(string message, System.Exception? inner = null) { }
+    }
+    public readonly struct TransactionId : System.IEquatable<Yatagarasu.Core.TransactionId>
+    {
+        public static readonly Yatagarasu.Core.TransactionId Bootstrap;
+        public static readonly Yatagarasu.Core.TransactionId Invalid;
+        public TransactionId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public sealed class TransactionTooLargeException : Yatagarasu.Core.YatagarasuException
+    {
+        public TransactionTooLargeException(Yatagarasu.Core.TransactionId transactionId, int bufferPoolPageCapacity) { }
+        public int BufferPoolPageCapacity { get; }
+        public Yatagarasu.Core.TransactionId TransactionId { get; }
+    }
+    public enum VectorElementType : byte
+    {
+        Float32 = 0,
+    }
+    public sealed class VectorException : Yatagarasu.Core.YatagarasuException
+    {
+        public VectorException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class VectorSearchOptions
+    {
+        public VectorSearchOptions() { }
+        public int EfSearch { get; init; }
+        public int FilteredOversampleFactor { get; init; }
+    }
+    public sealed class WalFormatMismatchException : Yatagarasu.Core.YatagarasuException
+    {
+        public WalFormatMismatchException(string found, string expected) { }
+        public string Expected { get; }
+        public string Found { get; }
+    }
+    public sealed class WriterBusyException : Yatagarasu.Core.YatagarasuException
+    {
+        public WriterBusyException(Yatagarasu.WriterContentionMode mode, System.TimeSpan waitTimeout) { }
+        public Yatagarasu.WriterContentionMode Mode { get; }
+        public System.TimeSpan WaitTimeout { get; }
+    }
+    public abstract class YatagarasuException : System.Exception
+    {
+        protected YatagarasuException(string message) { }
+        protected YatagarasuException(string message, System.Exception inner) { }
+    }
+}
+namespace Yatagarasu.Logical
+{
+    public enum LogicalMutationKind : byte
+    {
+        CreateVertex = 1,
+        DeleteVertex = 2,
+        CreateEdge = 3,
+        DeleteEdge = 4,
+        SetVertexProperty = 5,
+        SetEdgeProperty = 6,
+        RemoveVertexProperty = 7,
+        CreateNexus = 8,
+        DeleteNexus = 9,
+        SetNexusProperty = 10,
+        RemoveNexusProperty = 11,
+        AddNexusPropertyValue = 12,
+        RemoveNexusPropertyValue = 13,
+        RemoveEdgeProperty = 14,
+        AddVertexPropertyValue = 15,
+        RemoveVertexPropertyValue = 16,
+        AddEdgePropertyValue = 17,
+        RemoveEdgePropertyValue = 18,
+    }
+}
+namespace Yatagarasu.Maintenance
+{
+    public interface IVacuum
+    {
+        Yatagarasu.Maintenance.VacuumReport Run(Yatagarasu.Maintenance.VacuumOptions? options = null);
+    }
+    public enum VacuumMode
+    {
+        Full = 0,
+        DryRun = 1,
+    }
+    public sealed class VacuumOptions
+    {
+        public VacuumOptions() { }
+        public int MaxDurationMs { get; init; }
+        public Yatagarasu.Maintenance.VacuumMode Mode { get; init; }
+        public Yatagarasu.Maintenance.VacuumTarget Targets { get; init; }
+    }
+    public enum VacuumPolicy
+    {
+        Manual = 0,
+        Auto = 1,
+    }
+    public sealed class VacuumReport : System.IEquatable<Yatagarasu.Maintenance.VacuumReport>
+    {
+        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0, int RetiredVectorManifests = 0, int RetiredFullTextManifests = 0, int ReclaimedFullTextArtifacts = 0) { }
+        public long ElapsedMs { get; init; }
+        public long HorizonTxId { get; init; }
+        public int PrunedCommittedTxEntries { get; init; }
+        public int ReclaimedEdges { get; init; }
+        public int ReclaimedFullTextArtifacts { get; init; }
+        public int ReclaimedIncidences { get; init; }
+        public int ReclaimedNexuses { get; init; }
+        public int ReclaimedProperties { get; init; }
+        public int ReclaimedVertices { get; init; }
+        public int RetiredFullTextManifests { get; init; }
+        public int RetiredVectorManifests { get; init; }
+        public bool Skipped { get; init; }
+        public long TruncatedPages { get; init; }
+    }
+    [System.Flags]
+    public enum VacuumTarget
+    {
+        None = 0,
+        Vertices = 1,
+        Edges = 2,
+        Properties = 4,
+        Indexes = 8,
+        Nexuses = 16,
+        All = 31,
+    }
+}
+namespace Yatagarasu.Migrations
+{
+    public sealed class MigrationHistoryEntry : System.IEquatable<Yatagarasu.Migrations.MigrationHistoryEntry>
+    {
+        public MigrationHistoryEntry(string Id, int Version, System.DateTime AppliedAtUtc) { }
+        public System.DateTime AppliedAtUtc { get; init; }
+        public string Id { get; init; }
+        public int Version { get; init; }
+    }
+    public sealed class MigrationResult : System.IEquatable<Yatagarasu.Migrations.MigrationResult>
+    {
+        public MigrationResult(System.Collections.Generic.IReadOnlyList<Yatagarasu.Migrations.MigrationHistoryEntry> Applied, System.Collections.Generic.IReadOnlyList<string> Skipped) { }
+        public System.Collections.Generic.IReadOnlyList<Yatagarasu.Migrations.MigrationHistoryEntry> Applied { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Skipped { get; init; }
+    }
+}
+namespace Yatagarasu.Telemetry
+{
+    public static class YatagarasuTelemetry
+    {
+        public const string CheckpointSourceName = "Yatagarasu.Checkpoint";
+        public const string MeterName = "Yatagarasu";
+        public const string QuerySourceName = "Yatagarasu.Query";
+        public const string TransactionSourceName = "Yatagarasu.Transaction";
+        public const string Version = "1.0.0";
+        public const string WalFlushSourceName = "Yatagarasu.WalFlush";
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<long> ActiveSnapshotCount;
+        public static readonly string[] AllSourceNames;
+        public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolHits;
+        public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolMisses;
+        public static readonly System.Diagnostics.ActivitySource CheckpointActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> CheckpointDurationMs;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceGarbageCollectionActive;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceRebuildActive;
+        public static readonly System.Diagnostics.Metrics.Meter Meter;
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<double> OldestSnapshotAgeSeconds;
+        public static readonly System.Diagnostics.ActivitySource QueryActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> QueryDurationMs;
+        public static readonly System.Diagnostics.ActivitySource TransactionActivitySource;
+        public static readonly System.Diagnostics.Metrics.Counter<long> TxAbortCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> TxAbortDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> TxCommitCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> TxCommitDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> WalBytesWritten;
+        public static readonly System.Diagnostics.ActivitySource WalFlushActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> WalFlushDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> WriterContentionCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> WriterWaitDurationMs;
+    }
+}
+namespace Yatagarasu.Text
+{
+    public sealed class FilteredTokenizer : Yatagarasu.Text.ITokenizer
+    {
+        public FilteredTokenizer(Yatagarasu.Text.ITokenizer inner, params Yatagarasu.Text.ITokenFilter[] filters) { }
+        public string TokenizerId { get; }
+        public void Tokenize(System.ReadOnlySpan<char> text, Yatagarasu.Text.ITokenSink sink) { }
+    }
+    public interface ITextNormalizer
+    {
+        Yatagarasu.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input);
+    }
+    public interface ITokenFilter
+    {
+        string FilterId { get; }
+        void Apply(System.ReadOnlySpan<char> token, Yatagarasu.Text.ITokenSink downstream);
+    }
+    public interface ITokenSink
+    {
+        void Accept(System.ReadOnlySpan<char> token);
+    }
+    public interface ITokenizer
+    {
+        string TokenizerId { get; }
+        void Tokenize(System.ReadOnlySpan<char> text, Yatagarasu.Text.ITokenSink sink);
+    }
+    public interface ITokenizerRegistry
+    {
+        void Register(Yatagarasu.Text.ITokenizer tokenizer);
+        Yatagarasu.Text.ITokenizer Resolve(string tokenizerId);
+        bool TryResolve(string tokenizerId, out Yatagarasu.Text.ITokenizer tokenizer);
+    }
+    public sealed class JapaneseAwareNormalizer : Yatagarasu.Text.ITextNormalizer
+    {
+        public JapaneseAwareNormalizer() { }
+        public Yatagarasu.Text.NormalizationFlags DefaultFlags { get; init; }
+        public Yatagarasu.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class JapaneseOrthographicVariantFilter : Yatagarasu.Text.ITokenFilter
+    {
+        public JapaneseOrthographicVariantFilter() { }
+        public JapaneseOrthographicVariantFilter(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<char, char>> mappings) { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Yatagarasu.Text.ITokenSink downstream) { }
+    }
+    public sealed class LowercaseFilter : Yatagarasu.Text.ITokenFilter
+    {
+        public LowercaseFilter() { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Yatagarasu.Text.ITokenSink downstream) { }
+    }
+    public sealed class MinimalNormalizer : Yatagarasu.Text.ITextNormalizer
+    {
+        public MinimalNormalizer() { }
+        public Yatagarasu.Text.NormalizationFlags DefaultFlags { get; init; }
+        public Yatagarasu.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class MixedBigramTokenizer : Yatagarasu.Text.ITokenizer
+    {
+        public const string DefaultTokenizerId = "mixed-bigram-v1";
+        public const string UnigramTokenizerId = "mixed-bigram-unigram-v1";
+        public MixedBigramTokenizer(bool emitUnigrams = false, Yatagarasu.Text.ITextNormalizer? normalizer = null) { }
+        public string TokenizerId { get; }
+        public void Tokenize(System.ReadOnlySpan<char> text, Yatagarasu.Text.ITokenSink sink) { }
+    }
+    [System.Flags]
+    public enum NormalizationFlags
+    {
+        None = 0,
+        UnicodeNFC = 1,
+        UnicodeNFKC = 2,
+        LowerCaseAscii = 4,
+        StripControlChars = 8,
+        CollapseWhitespace = 16,
+        NormalizeDashes = 32,
+    }
+    public sealed class NormalizedText
+    {
+        public NormalizedText() { }
+        public required Yatagarasu.Text.NormalizationFlags Applied { get; init; }
+        public required bool IsLossy { get; init; }
+        public required int NormalizedLengthChars { get; init; }
+        public required int OriginalLengthChars { get; init; }
+        public required string Text { get; init; }
+    }
+    public sealed class StopWordFilter : Yatagarasu.Text.ITokenFilter
+    {
+        public StopWordFilter(System.Collections.Generic.IEnumerable<string> stopWords) { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Yatagarasu.Text.ITokenSink downstream) { }
+    }
+    public sealed class TokenizerRegistry : Yatagarasu.Text.ITokenizerRegistry
+    {
+        public TokenizerRegistry(bool registerDefaults = true) { }
+        public void Register(Yatagarasu.Text.ITokenizer tokenizer) { }
+        public Yatagarasu.Text.ITokenizer Resolve(string tokenizerId) { }
+        public bool TryResolve(string tokenizerId, out Yatagarasu.Text.ITokenizer tokenizer) { }
+        public static Yatagarasu.Text.TokenizerRegistry CreateDefault() { }
+    }
+}
+namespace Yatagarasu.Transactions
+{
+    public enum CheckpointPolicy
+    {
+        Fixed = 0,
+        Adaptive = 1,
+    }
+    public interface ICommitHookRegistrar
+    {
+        void OnCommitted(System.Action callback);
+        void OnRolledBack(System.Action callback);
+    }
+    public readonly struct SavepointId : System.IEquatable<Yatagarasu.Transactions.SavepointId>
+    {
+        public SavepointId(long Value, string? Name = null) { }
+        public string? Name { get; init; }
+        public long Value { get; init; }
+        public override string ToString() { }
+    }
+    public enum TransactionState : byte
+    {
+        Active = 1,
+        Preparing = 2,
+        Committed = 3,
+        Aborted = 4,
+    }
+}

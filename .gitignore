@@ -7,11 +7,11 @@
 .env
 
 # Generated sample databases
-*.quiver
-*.quiver-wal
-!tests/Quiver.Storage.Tests/Fixtures/*.quiver
-!tests/Quiver.Storage.Tests/Fixtures/*.quiver-wal
-quiver-mcp.json
+*.yata
+*.yata-wal
+!tests/Yatagarasu.Storage.Tests/Fixtures/*.yata
+!tests/Yatagarasu.Storage.Tests/Fixtures/*.yata-wal
+yatagarasu-mcp.json
 
 # User-specific files
 *.rsuser

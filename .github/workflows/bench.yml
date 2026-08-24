@@ -1,7 +1,7 @@
 name: Benchmarks (nightly)
 
-# CI-1: nightly ベンチ。BenchmarkDotNet を走らせ JsonExporter.Full の結果を
-# benchmarks/baselines/main.json と Quiver.Benchmarks.RegressionCheck で比較し、
+# nightly ベンチ。BenchmarkDotNet を走らせ JsonExporter.Full の結果を
+# benchmarks/baselines/main.json と Yatagarasu.Benchmarks.RegressionCheck で比較し、
 # 20% (かつ >3σ) の wall-clock 劣化があれば fail する (TS-6 と連動)。
 # 結果 JSON は artifact として保存する (gh-pages への push は remote 整備後に追加)。
 on:
@@ -32,7 +32,7 @@ jobs:
       - name: Run benchmarks
         shell: pwsh
         run: |
-          dotnet run --project benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj `
+          dotnet run --project benchmarks/Yatagarasu.Benchmarks/Yatagarasu.Benchmarks.csproj `
             --configuration Release `
             -- --filter '*' `
             2>&1 | Tee-Object -FilePath bench.log
@@ -41,7 +41,7 @@ jobs:
       - name: Merge results
         shell: pwsh
         run: |
-          dotnet run --project benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj `
+          dotnet run --project benchmarks/Yatagarasu.Benchmarks.RegressionCheck/Yatagarasu.Benchmarks.RegressionCheck.csproj `
             --configuration Release `
             -- --merge BenchmarkDotNet.Artifacts/results --output artifacts/current.json
           if ($LASTEXITCODE -ne 0) { throw "merge failed" }
@@ -49,7 +49,7 @@ jobs:
       - name: Regression check vs baseline
         shell: pwsh
         run: |
-          dotnet run --project benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj `
+          dotnet run --project benchmarks/Yatagarasu.Benchmarks.RegressionCheck/Yatagarasu.Benchmarks.RegressionCheck.csproj `
             --configuration Release `
             -- --baseline benchmarks/baselines/main.json --current artifacts/current.json
 

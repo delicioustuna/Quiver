@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);YATAGARASU_LEGACY_GENERATED_API</DefineConstants>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Yatagarasu.Samples.SourceGen</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Yatagarasu\Yatagarasu.csproj" />
+    <!-- 属性は Yatagarasu 本体に含まれる。生成器 (analyzer) のみ直接参照する。 -->
+    <ProjectReference Include="..\..\src\Yatagarasu.SourceGen\Yatagarasu.SourceGen.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,6 @@
 # Backends
 
-Quiver は `IGraphStorageBackend` 抽象を介してストレージレイアウトを切り替えられる。
+Yatagarasu は `IGraphStorageBackend` 抽象を介してストレージレイアウトを切り替えられる。
 
 ## 組み込みバックエンド
 
@@ -11,15 +11,15 @@ Quiver は `IGraphStorageBackend` 抽象を介してストレージレイアウ�
 ## 選択
 
 ```csharp
-using var db = QuiverDatabase.Open("./mygraph.quiver");
+using var db = YatagarasuDatabase.Open("./mygraph.yata");
 ```
 
 ## カスタムバックエンドの注入 (テスト向け)
 
 ```csharp
-using var db = QuiverDatabase.Open(
-    "./mygraph.quiver",
-    new QuiverDatabaseOptions
+using var db = YatagarasuDatabase.Open(
+    "./mygraph.yata",
+    new YatagarasuDatabaseOptions
     {
         BackendFactory = new MyInMemoryBackendFactory(),
     });

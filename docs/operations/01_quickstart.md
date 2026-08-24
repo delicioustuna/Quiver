@@ -1,10 +1,10 @@
 # 01. クイックスタート (運用者向け)
 
-> **いつ読むか** — 初めて Quiver をアプリに埋め込むとき。この 1 ページだけで「DB を作る →
+> **いつ読むか** — 初めて Yatagarasu をアプリに埋め込むとき。この 1 ページだけで「DB を作る →
 > スキーマ/索引を用意する → 最初の書き込みを commit する → 再起動後に読み戻す」までを通す。
 > API レシピの網羅は [docs/cookbook.md](../cookbook.md)、概念解説は [docs/api/](../api/) を参照。
 
-Quiver は **単一プロセスに埋め込む組み込みグラフ DB** であり、
+Yatagarasu は **単一プロセスに埋め込む組み込みグラフ DB** であり、
 サーバープロセスもネットワークポートも持たない。アプリと同じプロセス内で DB ディレクトリを
 1 つ開いて使う。制約の全体像は [05_known_limits.md](05_known_limits.md) を参照。
 
@@ -12,15 +12,15 @@ Quiver は **単一プロセスに埋め込む組み込みグラフ DB** であ�
 
 ## 1. 最小構成 — 直接 API で開く
 
-NuGet では `Quiver` パッケージ 1 つに依存すればよい。DB は「ディレクトリ」単位で、
+NuGet では `Yatagarasu` パッケージ 1 つに依存すればよい。DB は「ディレクトリ」単位で、
 存在しなければ初回 `Open` 時に作成される。
 
 ```csharp
-using Quiver;
-using Quiver.Storage.Records;
+using Yatagarasu;
+using Yatagarasu.Storage.Records;
 
 // DB ディレクトリを開く (無ければ新規作成)。using で必ず Dispose する。
-using var db = QuiverDatabase.Open(@"C:\data\myapp-graph");
+using var db = YatagarasuDatabase.Open(@"C:\data\myapp-graph");
 
 // --- 書き込みトランザクション ---
 using (var tx = db.BeginWriteTransaction())
@@ -46,11 +46,11 @@ using (var tx = db.BeginReadTransaction())
 
 ポイント:
 
-- `using var db = QuiverDatabase.Open(dir)` の **Dispose は必須**。Dispose で AutoVacuum ワーカー停止
+- `using var db = YatagarasuDatabase.Open(dir)` の **Dispose は必須**。Dispose で AutoVacuum ワーカー停止
   → バックエンドの flush/close が行われる。プロセスを `kill` で落としても commit 済みデータは
   WAL replay で復元されるが (→ [04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))、正常終了では必ず Dispose を通す。
 - `tx.Commit()` を呼ばないまま `tx` を Dispose すると **rollback** される。これが既定の安全側挙動。
-- `QuiverDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginWriteTransaction` してよい。
+- `YatagarasuDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginWriteTransaction` してよい。
   ただし 1 つの `tx` を複数スレッドで共有してはいけない。
 
 ---
@@ -61,7 +61,7 @@ using (var tx = db.BeginReadTransaction())
 事前のスキーマ宣言は必須ではない。ただし **検索や MERGE を高速化する索引は明示的に作る**。
 
 ```csharp
-using var db = QuiverDatabase.Open(dir);
+using var db = YatagarasuDatabase.Open(dir);
 
 // 起動直後に一度だけ索引を作る (冪等。既にあれば no-op)。
 using (var schemaTx = db.BeginWriteTransaction())
@@ -87,14 +87,14 @@ using (var schemaTx = db.BeginWriteTransaction())
 
 ## 3. appsettings.json + DI で開く (ASP.NET Core / Generic Host)
 
-`Quiver.Hosting` パッケージを足すと、`IConfiguration` から設定を bind して DI コンテナに
-`QuiverDatabase` を singleton 登録できる。
+`Yatagarasu.Hosting` パッケージを足すと、`IConfiguration` から設定を bind して DI コンテナに
+`YatagarasuDatabase` を singleton 登録できる。
 
 `appsettings.json`:
 
 ```jsonc
 {
-  "Quiver": {
+  "Yatagarasu": {
     "DataDirectory": "C:\\data\\myapp-graph",
     "BufferPoolSize": 536870912,        // 512 MB
     "CheckpointThresholdBytes": 67108864,
@@ -107,17 +107,17 @@ using (var schemaTx = db.BeginWriteTransaction())
 `Program.cs`:
 
 ```csharp
-using Quiver;
-using Quiver.Hosting;
+using Yatagarasu;
+using Yatagarasu.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// "Quiver" セクションを bind して QuiverDatabase を singleton 登録。
-builder.Services.AddQuiver(builder.Configuration.GetSection("Quiver"));
+// "Yatagarasu" セクションを bind して YatagarasuDatabase を singleton 登録。
+builder.Services.AddYatagarasu(builder.Configuration.GetSection("Yatagarasu"));
 
 var app = builder.Build();
 
-app.MapGet("/stats", (QuiverDatabase db) =>
+app.MapGet("/stats", (YatagarasuDatabase db) =>
 {
     var s = db.Diagnostics.GetStatistics();
     return Results.Ok(new { vertices = s.VertexCount, rels = s.EdgeCount });
@@ -129,20 +129,20 @@ app.Run();
 環境変数によるオーバーライドは **二重アンダースコア** 区切り:
 
 ```pwsh
-$env:Quiver__DataDirectory = "D:\prod\graph"
-$env:Quiver__BufferPoolSize = "1073741824"   # 1 GB
+$env:Yatagarasu__DataDirectory = "D:\prod\graph"
+$env:Yatagarasu__BufferPoolSize = "1073741824"   # 1 GB
 ```
 
-`Quiver.Hosting` は core の EventSource イベントをホストの `ILoggerFactory` へ自動転送する。
+`Yatagarasu.Hosting` は core の EventSource イベントをホストの `ILoggerFactory` へ自動転送する。
 追加のロガー設定は不要で、ASP.NET Core / Generic Host の通常の Logging 設定がそのまま使われる。
 
 `IConfiguration` でbind できない要素 (バックエンドファクトリ・
-`LogicalMutationSink` など) を差し込みたい場合は、`AddQuiver` の `postConfigure` デリゲートから
-実体 `QuiverDatabaseOptions` を直接編集する:
+`LogicalMutationSink` など) を差し込みたい場合は、`AddYatagarasu` の `postConfigure` デリゲートから
+実体 `YatagarasuDatabaseOptions` を直接編集する:
 
 ```csharp
-builder.Services.AddQuiver(
-    builder.Configuration.GetSection("Quiver"),
+builder.Services.AddYatagarasu(
+    builder.Configuration.GetSection("Yatagarasu"),
     postConfigure: opts =>
     {
         opts.WriterContentionMode = WriterContentionMode.Wait;
@@ -150,7 +150,7 @@ builder.Services.AddQuiver(
     });
 ```
 
-完全な動作サンプルは [`samples/Quiver.Samples.Hosting`](../../samples/Quiver.Samples.Hosting/)。
+完全な動作サンプルは [`samples/Yatagarasu.Samples.Hosting`](../../samples/Yatagarasu.Samples.Hosting/)。
 
 ---
 
@@ -178,7 +178,7 @@ builder.Services.AddQuiver(
 ```csharp
 VertexId savedId;
 
-using (var db = QuiverDatabase.Open(dir))
+using (var db = YatagarasuDatabase.Open(dir))
 using (var tx = db.BeginWriteTransaction())
 {
     savedId = tx.CreateVertex("Config");
@@ -187,7 +187,7 @@ using (var tx = db.BeginWriteTransaction())
 }
 
 // プロセスをまたいでも、別の Open で復元される
-using (var db = QuiverDatabase.Open(dir))
+using (var db = YatagarasuDatabase.Open(dir))
 using (var tx = db.BeginReadTransaction())
 {
     Debug.Assert(tx.VertexExists(savedId));

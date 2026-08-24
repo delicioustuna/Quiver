@@ -13,7 +13,7 @@ page headerの予約byteは0である。同じfamily versionを名乗るpageに�
 
 ## PagedFile {#paged-file}
 
-`PagedFile` (`src/Quiver/Storage/PagedFile.cs`) は、メモリマップトファイルと Clock アルゴリズムの
+`PagedFile` (`src/Yatagarasu/Storage/PagedFile.cs`) は、メモリマップトファイルと Clock アルゴリズムの
 バッファプールを用いて `IPagedFile` を実装する。
 
 ### バッファプール {#buffer-pool}
@@ -61,15 +61,15 @@ commit が `PageImage` を追記するときに割り当てた LSN を WAL paylo
 バイナリバックエンドと共通であり、物理層と WAL だけを `InMemoryPagedFile` /
 `NullWriteAheadLog` に差し替える。
 
-`QuiverDatabase.CreateInMemory()` または `QuiverDatabase.Open(":memory:")` で選択する。
+`YatagarasuDatabase.CreateInMemory()` または `YatagarasuDatabase.Open(":memory:")` で選択する。
 `Flush()` は no-op で、データファイル、WAL、チェックポイント、リカバリは作成しない。
 インスタンスを破棄すると全ページが失われる。
 
 ## 単一ファイルコンテナ {#single-file}
 
-`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、scalar index、definition catalog）を単一の `*.quiver` ファイルに多重化する。
+`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、scalar index、definition catalog）を単一の `*.yata` ファイルに多重化する。
 
-全文の term data、document length、stats は `*.quiver-ftseg/` 内の checksum 付き immutable segment file に置き、専用 B+Tree tenant を割り当てない。
+全文の term data、document length、stats は `*.yata-ftseg/` 内の checksum 付き immutable segment file に置き、専用 B+Tree tenant を割り当てない。
 artifact ID、checksum、source high-water、lifecycle state を持つ小さい manifest は definition catalog tenant に保存する。
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
@@ -99,17 +99,17 @@ process kill 後は、最後に完了した checkpoint 以降の winner redo と
 
 ## WAL サイドカー {#wal-sidecar}
 
-WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。
+WAL は単一のサイドカーファイル `*.yata-wal` に存在する。
 チェックポイントは writer lease を取得して active writer がいない境界を作り、`CheckpointBegin` を fsync してから committed dirty page とカタログを flush する。
 データファイルの flush 後に対応する `CheckpointEnd` を fsync できた場合だけ WAL を切り詰める。
 
-全文 index を持つ database は `*.quiver-ftseg/` artifact directory も保持する。
+全文 index を持つ database は `*.yata-ftseg/` artifact directory も保持する。
 online snapshot は container と WAL に加えてこの append-only artifact を複製する。
 reader の終了は待たない。
 
 ## オフラインストレージ移行 {#storage-upgrade}
 
-`QuiverDatabase.UpgradeStorage(path, options)` は `Open` より前に呼ぶ明示的な
+`YatagarasuDatabase.UpgradeStorage(path, options)` は `Open` より前に呼ぶ明示的な
 offline operation である。先頭ページを `PagedFile` で開く前に raw inspection し、
 `QUIVER-SW` magic と family version を判定する。現行 family version 2 のデータベースは
 先頭ページの checksum まで検証した後、ファイルを書き換えず `AlreadyCurrent` を返す。
@@ -121,7 +121,7 @@ offline operation である。先頭ページを `PagedFile` で開く前に raw
 であり、現行 build に旧 layout decoder や実変換 step は登録されていない。
 
 将来 step を登録するときも source page の in-place rewrite は行わない。step は排他された source の
-読み取りストリームから、source と同じディレクトリの一時 database を構築する。Quiver は一時 file を
+読み取りストリームから、source と同じディレクトリの一時 database を構築する。Yatagarasu は一時 file を
 durable flush し、target family と step 固有の整合性検証が成功した後だけ switch marker を永続化する。
 その後 source を rollback copy へ rename し、完成済み target を source path へ rename する。
 各 rename 境界で中断しても、次の `UpgradeStorage` は marker と source / target / rollback copy の

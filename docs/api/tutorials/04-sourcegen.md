@@ -1,6 +1,6 @@
 # 04. SourceGenerator で型付き CRUD
 
-`[Vertex]` / `[Property]` / `[Indexed]` / `[Edge]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.SourceGen)。
+`[Vertex]` / `[Property]` / `[Indexed]` / `[Edge]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Yatagarasu.Samples.SourceGen`](https://github.com/delicioustuna/Yatagarasu/tree/main/samples/Yatagarasu.Samples.SourceGen)。
 
 ```csharp
 [Vertex]
@@ -26,7 +26,7 @@ public partial class Person
 > `EditSchema.CreateIndex(new ScalarIndexDefinition(...))` で文字列指定もできるが、属性の値と二重に書くことになるので新規コードでは上記の型付き API を推奨。`MergeVertex` も同じ `(label, propertyKey)` のインデックスを自動で利用するので、業務キー upsert を使う場合も初期化時に index 作成が必須。
 
 ```csharp
-using var db = QuiverDatabase.Open("./mygraph");
+using var db = YatagarasuDatabase.Open("./mygraph");
 using (var schemaTx = db.BeginWriteTransaction())
 {
     schemaTx.EditSchema.EnsureIndexes<Person>();

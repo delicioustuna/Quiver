@@ -1,12 +1,12 @@
-# Quiver
+# Yatagarasu
 
 > [英語版README](README.md)を正本とします。
 
-[![CI](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml)
-[![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
-[![OS portability](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/portability.yml)
+[![CI](https://github.com/delicioustuna/Yatagarasu/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/ci.yml)
+[![AOT publish smoke](https://github.com/delicioustuna/Yatagarasu/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/aot.yml)
+[![OS portability](https://github.com/delicioustuna/Yatagarasu/actions/workflows/portability.yml/badge.svg)](https://github.com/delicioustuna/Yatagarasu/actions/workflows/portability.yml)
 
-Quiverは、グラフデータベース、ベクトル検索、全文検索を統合した.NET向けの組み込みデータベースエンジンです。
+Yatagarasuは、グラフデータベース、ベクトル検索、全文検索を統合した.NET向けの組み込みデータベースエンジンです。
 プロパティグラフとロール付きn項関係のNexusを単一ファイルへ保存し、Source Generatorによる型安全なマッピング、Fluent APIによるグラフ走査、トランザクション永続化、KNN検索、BM25検索を提供します。
 
 コアエンジンはPure C#で実装され、サードパーティ製パッケージとアンマネージドライブラリに依存せず、NativeAOTに対応します。
@@ -30,7 +30,7 @@ Quiverは、グラフデータベース、ベクトル検索、全文検索を�
 型付きグラフモデルを定義します。
 
 ```csharp
-using Quiver.Api;
+using Yatagarasu.Api;
 
 [Vertex]
 public partial class Person
@@ -54,9 +54,9 @@ public partial class Knows
 型付きworkspaceから書き込みと検索を行います。write callbackが正常終了すると自動でcommitします。
 
 ```csharp
-using Quiver;
+using Yatagarasu;
 
-using var graph = GraphWorkspace.Open("people.quiver");
+using var graph = GraphWorkspace.Open("people.yata");
 graph.Write(write =>
 {
     var people = write.Set<Person>();
@@ -73,18 +73,22 @@ IReadOnlyList<Person> known = graph.Read(read =>
         .ToList());
 ```
 
-`Quiver`パッケージには、モデル属性とSource Generatorが含まれます。
-`ImplicitUsings`が有効なプロジェクトには、`Quiver`と`Quiver.Api`の名前空間が自動的に追加されます。
+`Yatagarasu`パッケージには、モデル属性とSource Generatorが含まれます。
+`ImplicitUsings`が有効なプロジェクトには、`Yatagarasu`と`Yatagarasu.Api`の名前空間が自動的に追加されます。
 
-公開バージョンは現在`0.6.0`であり、1.0未満です。
+公開バージョンは現在`0.7.0`であり、1.0未満です。
+
+## 名前の由来
+
+Yatagarasu（八咫烏）は、日本神話で神武天皇を導いた三本足の烏です。三本の足はgraph、vector、full-textの3エンジンに対応し、神武東征を導いた役割は、必要な情報へ利用者を導く検索という製品の役割を表しています。
 
 ## ローカルRAG
 
-`Quiver.Rag`は、DocumentとChunkの取込、チャンキング、再取込、メタデータフィルタ、ベクトル検索とBM25の融合、周辺コンテキストと親文書へのgraph expansionを提供します。
+`Yatagarasu.Rag`は、DocumentとChunkの取込、チャンキング、再取込、メタデータフィルタ、ベクトル検索とBM25の融合、周辺コンテキストと親文書へのgraph expansionを提供します。
 
 埋め込み生成は呼び出し側アプリケーションが担い、`IChunkEmbedder`を通じて注入します。
 
-[RAGサンプル](samples/Quiver.Samples.Rag/)と[ローカルRAGのレシピ](docs/cookbook.md)を参照してください。
+[RAGサンプル](samples/Yatagarasu.Samples.Rag/)と[ローカルRAGのレシピ](docs/cookbook.md)を参照してください。
 
 ## 参考性能
 
@@ -121,6 +125,7 @@ AMD Ryzen 7 5700Xと.NET 10を使用し、in-processで計測した参考値で�
 | [Getting Started](docs/api/getting-started.md) | 導入と最初のデータベース |
 | [APIリファレンス](docs/api/) | 承認済みの公開型とメンバー |
 | [現行仕様](docs/spec/00_overview.md) | 現在のストレージと実行契約 |
+| [0.7.0改名ガイド](docs/operations/06_yatagarasu_rename.md) | パッケージ、名前空間、`.yata`への移行 |
 
 ## サンプル
 

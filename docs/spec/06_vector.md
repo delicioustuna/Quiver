@@ -36,7 +36,7 @@ definition は scalar index と同じ `IndexDefinition` catalog に参加し、`
 
 definition catalog は target property key と scope を明示的に保存する。
 embedding 元 property、provider、normalization profile は汎用 index definition に含めない。
-`Quiver.Rag` はこれらを `RagIngestionProfile` の corpus marker と Document の `ingestionFingerprint` に保持する。
+`Yatagarasu.Rag` はこれらを `RagIngestionProfile` の corpus marker と Document の `ingestionFingerprint` に保持する。
 
 ```csharp
 using var schema = database.BeginWriteTransaction();
@@ -143,10 +143,10 @@ PersistenceH0Result barcode = PersistenceH0Algorithms.Compute(
 
 ## 埋め込み生成と RAG
 
-Quiver は埋め込みモデルを呼び出さない。
+Yatagarasu は埋め込みモデルを呼び出さない。
 呼び出し側は埋め込みを生成し、write transaction の `SetVectorProperty` で vector property を保存する。
 
-`Quiver.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
+`Yatagarasu.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
 `IChunkEmbedder.ProfileId` は構成済み `EmbeddingProfileId` と一致する必要がある。
 chunking、embedding model、normalization、embedding input template の profile 不一致は取込前に拒否し、
 同じ vector index に異なる意味の vector を混在させない。profile を変更するときは別コーパスを構築し、
