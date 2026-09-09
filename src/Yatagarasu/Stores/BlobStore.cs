@@ -49,7 +49,7 @@ internal sealed class BlobStore
             {
                 var prev = _file.PinForWrite(new PageId(prevPageId));
                 BinaryPrimitives.WriteInt64LittleEndian(prev.Data, pid);
-                _file.UnpinDirty(new PageId(prevPageId), 0);
+                prev.Dispose();
             }
 
             int toCopy = Math.Min(DataPerPage, (int)(totalLen - written));
@@ -58,7 +58,7 @@ internal sealed class BlobStore
             BinaryPrimitives.WriteInt64LittleEndian(body, -1L);          // NextPageId
             BinaryPrimitives.WriteInt64LittleEndian(body[8..], totalLen); // TotalLen
             data.Slice(written, toCopy).CopyTo(body[DataOffset..]);
-            _file.UnpinDirty(new PageId(pid), 0);
+            ph.Dispose();
 
             written += toCopy;
             prevPageId = pid;
@@ -114,7 +114,7 @@ internal sealed class BlobStore
             var ph = _file.PinForWrite(new PageId(pid));
             ph.Data.Clear();
             BinaryPrimitives.WriteInt64LittleEndian(ph.Data, _blobFreeHead);
-            _file.UnpinDirty(new PageId(pid), 0);
+            ph.Dispose();
             _blobFreeHead = pid;
 
             pid = nextPid;
@@ -152,6 +152,6 @@ internal sealed class BlobStore
     {
         var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _blobFreeHead);
-        _file.UnpinDirty(HeaderPageId, 0);
+        ph.Dispose();
     }
 }

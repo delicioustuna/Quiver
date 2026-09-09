@@ -55,7 +55,7 @@ public sealed class WalWinnerLoserTests : IDisposable
         }
         finally
         {
-            destination.Unpin(winnerPage);
+            winner.Dispose();
         }
         destination.PageCount.Should().Be(
             loserPage.Value,

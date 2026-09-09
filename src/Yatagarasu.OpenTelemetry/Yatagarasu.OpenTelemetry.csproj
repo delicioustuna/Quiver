@@ -13,8 +13,8 @@
     <ProjectReference Include="..\Yatagarasu\Yatagarasu.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <!-- OB-1: optional の OpenTelemetry SDK 拡張。OpenTelemetry.Api だけに依存し、
-         実 exporter (Console / Prometheus / Jaeger) はアプリケーション側で選ばせる。 -->
+    <!-- 任意で導入できる OpenTelemetry 拡張。OpenTelemetry.Api と SDK に依存する。
+         出力先（Console / Prometheus / Jaeger など）はアプリケーション側で選択する。 -->
     <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
     <PackageReference Include="OpenTelemetry" Version="1.15.3" />
   </ItemGroup>

@@ -106,13 +106,12 @@ internal readonly ref struct EdgeReadHandle
 
 internal ref struct EdgeWriteHandle
 {
-    private readonly IPagedFile _file;
-    private readonly PageId _pageId;
+    private PageWriteHandle _page;
     private Span<byte> _rec;
 
-    internal EdgeWriteHandle(IPagedFile file, PageId pageId, Span<byte> rec)
+    internal EdgeWriteHandle(PageWriteHandle page, Span<byte> rec)
     {
-        _file = file; _pageId = pageId; _rec = rec;
+        _page = page; _rec = rec;
     }
 
     // オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
@@ -157,7 +156,7 @@ internal ref struct EdgeWriteHandle
         set => RecordHelpers.WriteInt48(_rec[39..], value.Sequence);
     }
 
-    public void Dispose() => _file.UnpinDirty(_pageId, 0);
+    public void Dispose() => _page.Dispose();
 }
 
 /// <summary>

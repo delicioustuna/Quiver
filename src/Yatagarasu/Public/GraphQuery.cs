@@ -25,9 +25,15 @@ public sealed class GraphQuery
     {
         _read.EnsureActive();
         ArgumentNullException.ThrowIfNull(vertices);
-        VertexId[] ids = new VertexId[vertices.Length];
-        for (int i = 0; i < vertices.Length; i++) ids[i] = vertices[i].ToCore();
-        return new GraphVertexQuery(_read.Transaction.Query.Vertices(ids), _read);
+        var ids = new List<VertexId>(vertices.Length);
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            VertexKey vertex = vertices[i];
+            if (!vertex.IsValid) continue;
+            VertexId id = vertex.ToCore();
+            if (_read.Transaction.VertexExists(id)) ids.Add(id);
+        }
+        return new GraphVertexQuery(_read.Transaction.Query.Vertices(ids.ToArray()), _read);
     }
 
     /// <summary>指定 model の label に限定した型付き traversal を開始する。</summary>

@@ -32,11 +32,14 @@ internal interface IPagedFile : IDisposable
     /// <summary>書き込み用にページを pin する。</summary>
     PageWriteHandle PinForWrite(PageId pageId);
 
-    /// <summary>ページの pin を解除する (変更なし)。</summary>
-    void Unpin(PageId pageId);
+    /// <summary>取得時に保持したフレーム情報を使い、読み取りロックとページの固定を解除する。</summary>
+    void ReleaseRead(ReadPageLease lease);
+
+    /// <summary>変更前に検証が失敗した書き込み用ページの固定を、変更済みの印や更新後イメージを登録せずに解除する。</summary>
+    void ReleaseWriteUnchanged(WritePageLease lease);
 
     /// <summary>ページの pin を解除し dirty マークと WAL ログ書き込みを行う。</summary>
-    void UnpinDirty(PageId pageId, long lsn);
+    void ReleaseWriteDirty(WritePageLease lease, long lsn);
 
     /// <summary>バッファプールのダーティページをディスクにフラッシュする。</summary>
     void Flush();

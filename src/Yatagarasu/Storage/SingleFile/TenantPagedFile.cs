@@ -94,9 +94,10 @@ internal sealed class TenantPagedFile : IPagedFile
 
     public PageReadHandle PinForRead(PageId pageId) => _physical.PinForRead(Translate(pageId));
     public PageWriteHandle PinForWrite(PageId pageId) => _physical.PinForWrite(Translate(pageId));
-    // Unpin / UnpinDirty は PagedFile では明示的インターフェイス実装なのでインターフェイス経由で呼ぶ。
-    public void Unpin(PageId pageId) => ((IPagedFile)_physical).Unpin(Translate(pageId));
-    public void UnpinDirty(PageId pageId, long lsn) => ((IPagedFile)_physical).UnpinDirty(Translate(pageId), lsn);
+    // 読み取り権限は取得時の物理フレームを指すため、論理PageIdへの再変換はしない。
+    public void ReleaseRead(ReadPageLease lease) => _physical.ReleaseRead(lease);
+    public void ReleaseWriteUnchanged(WritePageLease lease) => _physical.ReleaseWriteUnchanged(lease);
+    public void ReleaseWriteDirty(WritePageLease lease, long lsn) => _physical.ReleaseWriteDirty(lease, lsn);
 
     public void Flush() => _physical.Flush();
 

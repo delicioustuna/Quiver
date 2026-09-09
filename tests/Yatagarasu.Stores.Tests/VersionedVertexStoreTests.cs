@@ -143,6 +143,24 @@ public class VersionedVertexStoreTests : IDisposable
     }
 
     [Fact]
+    public void Stale_generation_cannot_free_or_write_current_vertex()
+    {
+        VertexId current = _store.Allocate(new LabelId(1));
+        VertexId stale = VertexId.Create(current.Sequence, current.Generation + 1);
+
+        _store.Free(stale);
+        using (VertexReadHandle live = _store.Read(current))
+            live.InUse.Should().BeTrue();
+
+        Action write = () =>
+        {
+            VertexWriteHandle handle = _store.Write(stale);
+            handle.Dispose();
+        };
+        write.Should().Throw<CorruptionException>();
+    }
+
+    [Fact]
     public void Many_vertices_span_multiple_heap_pages()
     {
         const int n = 1000;

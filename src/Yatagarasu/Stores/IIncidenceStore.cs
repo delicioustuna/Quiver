@@ -122,14 +122,12 @@ internal ref struct IncidenceWriteHandle
     private const int OffNextInVertex = 15;
     private const int OffNextInNexus = 21;
 
-    private readonly IPagedFile _file;
-    private readonly PageId _pageId;
+    private PageWriteHandle _page;
     private Span<byte> _record;
 
-    internal IncidenceWriteHandle(IPagedFile file, PageId pageId, Span<byte> record)
+    internal IncidenceWriteHandle(PageWriteHandle page, Span<byte> record)
     {
-        _file = file;
-        _pageId = pageId;
+        _page = page;
         _record = record;
     }
 
@@ -163,7 +161,7 @@ internal ref struct IncidenceWriteHandle
         set => RecordHelpers.WriteInt48(_record[OffNextInNexus..], value.Sequence);
     }
 
-    public void Dispose() => _file.UnpinDirty(_pageId, 0);
+    public void Dispose() => _page.Dispose();
 }
 
 // ref struct にすることで、可視性 skip を含む chain 走査を 1 incidence あたり

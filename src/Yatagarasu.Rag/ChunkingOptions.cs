@@ -6,22 +6,24 @@ namespace Yatagarasu.Rag;
 public sealed record ChunkingOptions
 {
     /// <summary>
-    /// チャンクの目標文字数。小ブロックはこのサイズまでパックし、
+    /// チャンクの目標サイズ（UTF-16コード単位数）。小ブロックはこのサイズまでパックし、
     /// これを超える単一段落はこのサイズの窓で分割する。既定 800。
+    /// サイズ1でもサロゲートペアは長さ2の単独チャンクとして保持する。
     /// </summary>
     public int TargetSize { get; init; } = 800;
 
     /// <summary>
-    /// 段落分割時に連続チャンク間で重ねる文字数。
-    /// 前チャンクの末尾と次チャンクの先頭がこの数だけ重複する。
+    /// 段落分割時に連続チャンク間で重ねる最大UTF-16コード単位数。
+    /// 語境界とUnicodeスカラー値の境界へ開始位置を前進させるため、実際の重なりは小さくなる場合がある。
     /// 既定 100。<see cref="TargetSize"/> 未満であること。
     /// </summary>
     public int Overlap { get; init; } = 100;
 
     /// <summary>
-    /// 安全弁としての絶対上限文字数。既定 0 
+    /// Table / Codeの安全弁となる上限サイズ（UTF-16コード単位数）。既定 0
     /// (無効 = <see cref="BlockKind.Table"/> / <see cref="BlockKind.Code"/> は決して分割しない)。
     /// 0 より大きい値を設定すると、その長さを超える Table / Code ブロックもオーバーラップ無しで強制分割する。
+    /// 上限1でもサロゲートペアは長さ2の単独チャンクとして保持する。段落にはTargetSizeを適用する。
     /// </summary>
     public int MaxChunkSize { get; init; } = 0;
 

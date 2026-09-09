@@ -24,7 +24,6 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IGraphAccessMethods _access;
     private readonly AbortUndoHandler? _undoHandler;
     private readonly ConcurrentDictionary<long, Transaction> _active = new();
-    private readonly object _snapshotGate = new();
     private readonly CommittedTxRegistry _committed;
     private readonly WriterLease _writerLease;
     private readonly SnapshotRegistry _snapshotRegistry;
@@ -83,7 +82,7 @@ internal sealed class TransactionManager : ITransactionManager
                 diagnostics.OldestCommittedHighWater ?? 0));
         _writerLease = new WriterLease(
             writerTimeout ?? TimeSpan.FromSeconds(5),
-            rejectConcurrentWriters);
+            rejectConcurrentWriters, _committed.SetActiveWriter);
         _nextTxId = TransactionId.Bootstrap.Value + 1;
         _activeTxCountRegistration =
             YatagarasuEventSource.Log.RegisterActiveTxCountProvider(() => _active.Count);
@@ -129,31 +128,87 @@ internal sealed class TransactionManager : ITransactionManager
         return _writerLease.Acquire(AllocateTransactionId());
     }
 
-    public ITransaction BeginRead()
+    /// <summary>
+    /// 今回取得できなくても後続の機会へ延期できる保守処理のため、待機せずに書き込み権限を取得する。
+    /// </summary>
+    private IDisposable? TryAcquireMutationLease()
+    {
+        if (IsFaulted) return null;
+        return _writerLease.TryAcquire(AllocateTransactionId());
+    }
+
+    /// <summary>保守用の書き込み権限を保持した状態で、ページ更新だけからなる処理段階を原子的に永続化する。</summary>
+    internal T ExecuteMaintenanceWrite<T>(Func<T> action)
     {
         ThrowIfFaulted();
-        lock (_snapshotGate)
+        if (_writerLease.ActiveWriterId is null || _wal.ActiveWriteSet is not null || _undoHandler is null)
+            throw new InvalidOperationException("Maintenance writes require an exclusive lease and page undo support.");
+        var id = AllocateTransactionId();
+        _wal.Append(WalRecordType.BeginWrite, id, ReadOnlySpan<byte>.Empty);
+        var writes = new WalWriteSet(_wal, id);
+        _wal.ActiveWriteSet = writes;
+        bool commitAttempted = false;
+        try
         {
-            TransactionId txId = AllocateTransactionId();
-            SnapshotState snapshot = _committed.Capture(_writerLease.ActiveWriterId);
-            SnapshotRegistry.SnapshotRegistration registration =
-                _snapshotRegistry.Register(in snapshot);
+            T result = action();
+            if (writes.IsTooLarge)
+                throw new TransactionTooLargeException(id, writes.TooLargeBufferCapacity);
+            writes.FlushPending();
+            commitAttempted = true;
+            long lsn = _wal.Append(WalRecordType.Commit, id, ReadOnlySpan<byte>.Empty);
+            _wal.FlushTo(lsn);
+            Complete(id, committed: true, isReadOnly: false);
+            _wal.ActiveWriteSet = null;
+            return result;
+        }
+        catch
+        {
+            // コミットの成否が不明なら取り消さず、変更所有者を維持して復旧処理へ委ねる。
+            if (commitAttempted)
+            {
+                MarkFaulted();
+                throw;
+            }
             try
             {
-                var transaction = CreateTransaction(
-                    txId,
-                    snapshot,
-                    isReadOnly: true,
-                    writerLease: null,
-                    registration);
-                _active[txId.Value] = transaction;
-                return transaction;
+                _undoHandler.Undo(writes.GetAllBeforeImagesOldestWins());
+                _wal.Append(WalRecordType.Abort, id, ReadOnlySpan<byte>.Empty);
+                Complete(id, committed: false, isReadOnly: false);
+                _wal.ActiveWriteSet = null;
             }
             catch
             {
-                registration.Dispose();
+                MarkFaulted();
                 throw;
             }
+            throw;
+        }
+    }
+
+    internal Action? ReadReservedForTest { get; set; }
+    internal Action? ReadSnapshotLoadedForTest { get; set; }
+    internal Action? BeforeCommitFlushForTest { get; set; }
+
+    public ITransaction BeginRead()
+    {
+        ThrowIfFaulted();
+        TransactionId txId = AllocateTransactionId();
+        var registration = _snapshotRegistry.Reserve();
+        try
+        {
+            ReadReservedForTest?.Invoke();
+            SnapshotState snapshot = _committed.Published.Snapshot;
+            ReadSnapshotLoadedForTest?.Invoke();
+            registration.Bind(in snapshot);
+            var transaction = CreateTransaction(txId, snapshot, isReadOnly: true,
+                writerLease: null, registration);
+            _active[txId.Value] = transaction;
+            return transaction;
+        }
+        catch
+        {
+            registration.Dispose();
+            throw;
         }
     }
 
@@ -164,20 +219,13 @@ internal sealed class TransactionManager : ITransactionManager
         WriterLease.WriterLeaseHandle lease = _writerLease.Acquire(txId);
         try
         {
-            lock (_snapshotGate)
-            {
-                ThrowIfFaulted();
-                SnapshotState snapshot = _committed.Capture(_writerLease.ActiveWriterId);
-                _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-                var transaction = CreateTransaction(
-                    txId,
-                    snapshot,
-                    isReadOnly: false,
-                    lease,
-                    registration: null);
-                _active[txId.Value] = transaction;
-                return transaction;
-            }
+            ThrowIfFaulted();
+            SnapshotState snapshot = _committed.Published.Snapshot;
+            _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+            var transaction = CreateTransaction(txId, snapshot, isReadOnly: false,
+                lease, registration: null);
+            _active[txId.Value] = transaction;
+            return transaction;
         }
         catch
         {
@@ -215,23 +263,16 @@ internal sealed class TransactionManager : ITransactionManager
             writerLease,
             registration);
 
-    internal void Complete(
-        TransactionId txId,
-        bool committed,
-        bool isReadOnly)
+    internal void Complete(TransactionId txId, bool committed, bool isReadOnly)
     {
-        lock (_snapshotGate)
+        if (!isReadOnly)
         {
-            if (!isReadOnly)
-            {
-                if (committed)
-                    _committed.MarkCommitted(txId);
-                else
-                    _committed.MarkAborted(txId);
-            }
-            _active.TryRemove(txId.Value, out _);
+            if (committed)
+                _committed.MarkCommitted(txId);
+            else
+                _committed.MarkAborted(txId);
         }
-
+        _active.TryRemove(txId.Value, out _);
     }
 
     internal void AfterWriteCommitted()
@@ -258,7 +299,7 @@ internal sealed class TransactionManager : ITransactionManager
 
     internal long GetVisibilityHorizon()
     {
-        long fallback = _committed.CommittedHighWater;
+        long fallback = _committed.Published.Snapshot.CommittedHighWater;
         long oldest = _snapshotRegistry.OldestCommittedHighWater(fallback);
         return oldest == long.MaxValue ? long.MaxValue : oldest + 1;
     }
@@ -326,9 +367,11 @@ internal sealed class TransactionManager : ITransactionManager
             threshold = CurrentCheckpointThresholdBytes;
             if (threshold <= 0) return;
             if (_wal.BytesWritten - _lastCheckpointBytes < threshold) return;
-            // threshold/manual/close のどの入口でも同じ writer lease を取得する。
-            // reader は lease を使わないため checkpoint の前後で待たされない。
-            using IDisposable checkpointLease = AcquireMutationLease();
+            // コミット後のしきい値によるチェックポイントは延期可能な保守処理なので、別の書き込み側が
+            // 権限を先に取得していた場合は、次のコミットまたは終了時まで延期する。
+            // 明示的なチェックポイントは、RequestCheckpointで従来どおり書き込み権限の取得を待つ。
+            using IDisposable? checkpointLease = TryAcquireMutationLease();
+            if (checkpointLease is null) return;
             checkpointer.Checkpoint();
             Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
         }

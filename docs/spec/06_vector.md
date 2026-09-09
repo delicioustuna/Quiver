@@ -1,12 +1,14 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
+> as-built 仕様（QUIVER-SW family version 2、2026-09-08）
 
 ## Primary vector property
 
 ベクトル値の正本は、owner に束縛された `FloatArray` property version である。
 `IWriteTransaction.SetVectorProperty(owner, propertyKey, vector)` は通常の property mutation と同じトランザクションへ値を書き込む。
 ベクトルインデックスが存在しない場合も、property は commit、rollback、reopen の規則に従う。
+
+`FloatArray`の更新では、所有者とプロパティキーに一致する全ベクトル索引の次元数を、トークンやプロパティの変更前に検証する。不一致は`VectorException`で拒否し、通常の`SetProperty`と集合値の追加にも同じ検証を適用する。索引がない値の保存許可範囲は変更しない。
 
 property version は配列本体ではなく、immutable な `VectorPayloadRef(Sequence, Generation)` を保持する。
 payload metadata は element type、generation、dimensions、byte length、CRC32C checksum、blob ID を保持する。
@@ -35,6 +37,7 @@ definition は scalar index と同じ `IndexDefinition` catalog に参加し、`
 | `SegmentPolicy` | delta entry 数と segment 数の merge しきい値 |
 
 definition catalog は target property key と scope を明示的に保存する。
+所有者の種類とプロパティキーが同じで、適用範囲が重なる定義は、次元数が異なる場合に`ConstraintException`で作成を拒否する。範囲の指定がない定義はすべての範囲と重なり、指定値が異なる範囲同士は重ならない。
 embedding 元 property、provider、normalization profile は汎用 index definition に含めない。
 `Yatagarasu.Rag` はこれらを `RagIngestionProfile` の corpus marker と Document の `ingestionFingerprint` に保持する。
 
@@ -80,6 +83,7 @@ long reader は開始時に可視だった manifest と primary vector property 
 segment candidate は logical result に変換する前に primary store で再検証する。
 検証対象は full typed owner identity、owner generation、owner の snapshot visibility、target scope、property key、dimensions、payload checksum である。
 削除済み owner、同じ sequence の別 generation、更新前 property、別 target の entry は結果から除外する。
+索引作成前などに保存された次元不一致の値は、単発検索・一括検索の双方で候補から除外し、トランザクション内部の次元不一致カウンターへ記録する。
 
 raw sequence は physical store の read 成功直後にだけ使う。
 transaction、query、traversal、検索結果は `EntityRef`、`VertexId`、`EdgeId`、`NexusId` の full identity を保持する。
@@ -89,6 +93,8 @@ transaction、query、traversal、検索結果は `EntityRef`、`VertexId`、`Ed
 `IReadTransaction.KnnSearch` と `KnnSearchBatch` は、transaction snapshot から definition、manifest、primary property を解決する。
 `KnnSearchBatch` は同じsnapshotのprimary vectorを一度だけ走査し、全queryのexact top-kを同時に更新する。
 cursor は transaction の利用期間を超えて使えない。
+上位k件への採否、ヒープの並び替え、結果の整列は、スコアの降順、同点ならEntityIdの昇順という共通の比較規則を使う。計算結果がNaNまたは無限大の候補は採用しない。
+疎なグラフのH0計算では、距離の欠落を正常なグラフとして扱わないため、内部検索オプションにより有限値でないスコアを`VectorException`で拒否する。通常検索の既定動作や公開オプションは変更しない。
 
 ```csharp
 using var read = database.BeginReadTransaction();

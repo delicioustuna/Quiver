@@ -69,7 +69,7 @@ internal sealed class VectorPayloadStore
         BinaryPrimitives.WriteInt32LittleEndian(record[OffByteLength..], bytes.Length);
         BinaryPrimitives.WriteUInt32LittleEndian(record[OffChecksum..], Crc32.HashToUInt32(bytes));
         BinaryPrimitives.WriteInt64LittleEndian(record[OffBlobId..], blobId);
-        _file.UnpinDirty(pageId, 0);
+        page.Dispose();
         SaveMeta();
         return new VectorPayloadRef(sequence, generation);
     }
@@ -105,6 +105,32 @@ internal sealed class VectorPayloadStore
         if (Crc32.HashToUInt32(bytes) != expected)
             throw new CorruptionException("Vector payload checksum mismatch.");
         return MemoryMarshal.Cast<byte, float>(bytes).ToArray();
+    }
+
+    /// <summary>読み取り側の参照可能範囲を外れた所有プロパティの物理回収時だけ呼ぶ。同一世代の解放済み参照にはfalseを返す。</summary>
+    internal bool Free(VectorPayloadRef reference)
+    {
+        if (!reference.IsValid || reference.Sequence >= _hwm)
+            throw new CorruptionException("Cannot free a missing vector payload.");
+        var (pageId, offset) = Location(reference.Sequence);
+        long blobId;
+        using (var page = _file.PinForRead(pageId))
+        {
+            ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+            if (BinaryPrimitives.ReadInt32LittleEndian(record[OffGeneration..]) != reference.Generation)
+                throw new CorruptionException("Cannot free a stale vector payload generation.");
+            if ((record[OffFlags] & FlagPresent) == 0) return false;
+            blobId = BinaryPrimitives.ReadInt64LittleEndian(record[OffBlobId..]);
+        }
+        // 格納データの破損を、空きリストの変更前に検出する。
+        _ = Read(reference);
+        _blobs.Free(blobId);
+        using var metadata = _file.PinForWrite(pageId);
+        Span<byte> tombstone = metadata.Data.Slice(offset, RecordSize);
+        tombstone.Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(tombstone[OffGeneration..], reference.Generation);
+        // スロットと割り当て済み上限は維持する。同じ参照の再解放と古い世代の参照を区別するため。
+        return true;
     }
 
     public IReadOnlyList<VectorPayloadRef> ScanOrphans(IReadOnlySet<VectorPayloadRef> reachable)

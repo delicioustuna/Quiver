@@ -7,6 +7,43 @@ namespace Yatagarasu.Tests;
 
 public sealed class SnapshotReaderTests : IDisposable
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Vacuum_during_reader_registration_preserves_the_captured_version(bool afterLoad)
+    {
+        VertexId vertex;
+        using (var writer = _database.BeginWriteTransaction())
+        {
+            vertex = writer.CreateVertex("item");
+            writer.SetProperty(vertex, "value", PropertyValue.FromInt32(1));
+            writer.Commit();
+        }
+        var manager = (Yatagarasu.Transactions.TransactionManager)_database.BackendInternal.Transactions;
+        void MutateAndVacuum()
+        {
+            using (var writer = _database.BeginWriteTransaction())
+            {
+                writer.SetProperty(vertex, "value", PropertyValue.FromInt32(2));
+                writer.Commit();
+            }
+            _database.Vacuum().ReclaimedProperties.Should().Be(0);
+        }
+        if (afterLoad) manager.ReadSnapshotLoadedForTest = MutateAndVacuum;
+        else manager.ReadReservedForTest = MutateAndVacuum;
+        try
+        {
+            using var reader = _database.BeginReadTransaction();
+            reader.GetProperty(vertex, "value").Int32Value.Should().Be(afterLoad ? 1 : 2);
+        }
+        finally
+        {
+            manager.ReadSnapshotLoadedForTest = null;
+            manager.ReadReservedForTest = null;
+        }
+        _database.Vacuum().ReclaimedProperties.Should().BeGreaterThan(0);
+    }
+
     private readonly string _directory;
     private readonly YatagarasuDatabase _database;
 

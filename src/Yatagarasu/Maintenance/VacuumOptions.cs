@@ -36,7 +36,8 @@ public sealed class VacuumOptions
 
     /// <summary>
     /// 実行を打ち切る上限時間 (ミリ秒)。<c>0</c> 以下で制限なし。
-    /// 現在は advisory であり、走査 phase の境界で確認する。既定 0 (制限なし)。
+    /// 目安として、書き込み権限の取得後から各処理段階の境界で確認する。開始済みの段階は中断しない。
+    /// 整合性維持に必要な後処理とチェックポイントは期限を越えても完了する。既定0（制限なし）。
     /// </summary>
     public int MaxDurationMs { get; init; }
 
@@ -52,11 +53,11 @@ public enum VacuumTarget
 {
     /// <summary>対象なし。</summary>
     None = 0,
-    /// <summary>Vertexを対象にする。</summary>
+    /// <summary>Vertexを対象にする。削除済みVertexの回収に必要な所有プロパティも先に回収する。</summary>
     Vertices = 1 << 0,
-    /// <summary>Edgeを対象にする。</summary>
+    /// <summary>Edgeを対象にする。削除済みEdgeの回収に必要な所有プロパティも先に回収する。</summary>
     Edges = 1 << 1,
-    /// <summary>プロパティを対象にする。</summary>
+    /// <summary>Vertex・Edge・Nexusの古いプロパティ版を対象にする。エンティティ自体は回収しない。</summary>
     Properties = 1 << 2,
     /// <summary>索引を対象にする。</summary>
     Indexes = 1 << 3,
@@ -69,8 +70,8 @@ public enum VacuumTarget
 /// <summary>
 /// vacuum 実行結果。
 /// </summary>
-/// <param name="ReclaimedVertices">物理回収した dead Vertex版数。</param>
-/// <param name="ReclaimedEdges">物理回収した dead Edge版数。</param>
+/// <param name="ReclaimedVertices">物理回収した 削除済みVertex版数。</param>
+/// <param name="ReclaimedEdges">物理回収した 削除済みEdge版数。</param>
 /// <param name="ReclaimedProperties">物理回収した dead プロパティ版数。</param>
 /// <param name="PrunedCommittedTxEntries">visibility horizon を下回り削除した committed registry エントリ数。</param>
 /// <param name="ElapsedMs">実行に要した時間 (ミリ秒)。</param>

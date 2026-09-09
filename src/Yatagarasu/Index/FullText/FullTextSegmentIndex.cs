@@ -554,15 +554,16 @@ internal sealed class FullTextSegmentIndex : IDisposable
 
     private IndexState GetOrCreateState(
         FullTextIndexDefinition definition,
-        string? encodedManifest = null)
+        string? encodedManifest = null,
+        bool readOnly = false)
     {
         if (_indexes.TryGetValue(definition.Name, out IndexState? state))
         {
-            SynchronizeFromCatalog(state, definition, encodedManifest);
+            SynchronizeFromCatalog(state, definition, encodedManifest, readOnly);
             return state;
         }
         state = new(definition);
-        SynchronizeFromCatalog(state, definition, encodedManifest);
+        SynchronizeFromCatalog(state, definition, encodedManifest, readOnly);
         _indexes.Add(definition.Name, state);
         return state;
     }
@@ -570,7 +571,8 @@ internal sealed class FullTextSegmentIndex : IDisposable
     private void SynchronizeFromCatalog(
         IndexState state,
         FullTextIndexDefinition definition,
-        string? encodedManifest)
+        string? encodedManifest,
+        bool readOnly)
     {
         if (!string.IsNullOrEmpty(encodedManifest))
         {
@@ -599,6 +601,7 @@ internal sealed class FullTextSegmentIndex : IDisposable
             }
             catch (CorruptionException)
             {
+                if (readOnly) throw;
                 _markRebuildRequired(definition.Name);
                 CatalogStateChanged?.Invoke(
                     definition.Name,
@@ -678,7 +681,7 @@ internal sealed class FullTextSegmentIndex : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             foreach (FullTextCatalogEntry catalog in catalogEntries)
-                GetOrCreateState(FromCatalog(catalog), catalog.Manifest);
+                GetOrCreateState(FromCatalog(catalog), catalog.Manifest, readOnly: dryRun);
             int retiredManifests = 0;
             var retainedArtifacts = new HashSet<Guid>();
             foreach (IndexState state in _indexes.Values)

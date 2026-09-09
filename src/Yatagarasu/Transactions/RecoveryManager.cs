@@ -41,19 +41,6 @@ internal sealed class RecoveryManager : IRecoveryManager
         YatagarasuEventSource.Log.CrashRecovery();
         WalRecoveryScanResult scan = WalRecoveryScanner.Scan(_wal);
 
-        if (_committedRegistry is not null)
-        {
-            foreach (long txId in scan.Winners)
-                _committedRegistry.MarkCommitted(new TransactionId(txId));
-
-            foreach (long txId in scan.ObservedTransactions)
-            {
-                if (!scan.Winners.Contains(txId))
-                    _committedRegistry.MarkAborted(new TransactionId(txId));
-            }
-            _committedRegistry.RecordMaxObservedTxId(scan.MaxObservedTxId);
-        }
-
         {
             using var reader = _wal.OpenReader(scan.RedoStartLsn);
             while (reader.TryReadNext(out WalRecord record))
@@ -69,6 +56,9 @@ internal sealed class RecoveryManager : IRecoveryManager
                 }
             }
         }
+
+        _committedRegistry?.RestoreRecoveredTransactions(
+            scan.Winners, scan.ObservedTransactions, scan.MaxObservedTxId);
 
         if (_persistRecoveryState is not null)
         {

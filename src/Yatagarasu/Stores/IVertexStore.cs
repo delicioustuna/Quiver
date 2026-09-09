@@ -66,13 +66,12 @@ internal readonly ref struct VertexReadHandle
 // (Xmin/Xmax は VertexVersionMeta sidecar に移管)
 internal ref struct VertexWriteHandle
 {
-    private readonly IPagedFile _file;
-    private readonly PageId _pageId;
+    private PageWriteHandle _page;
     private Span<byte> _rec;
 
-    internal VertexWriteHandle(IPagedFile file, PageId pageId, Span<byte> rec)
+    internal VertexWriteHandle(PageWriteHandle page, Span<byte> rec)
     {
-        _file = file; _pageId = pageId; _rec = rec;
+        _page = page; _rec = rec;
     }
 
     public EdgeId FirstEdgeId
@@ -93,5 +92,5 @@ internal ref struct VertexWriteHandle
         set => BinaryPrimitives.WriteInt16LittleEndian(_rec[13..], (short)value.Value);
     }
 
-    public void Dispose() => _file.UnpinDirty(_pageId, 0);
+    public void Dispose() => _page.Dispose();
 }

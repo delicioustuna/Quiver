@@ -92,6 +92,11 @@ WAL で観測した transaction のうち winner でない ID は aborted gap �
 
 checkpoint は writer lease を取得し、active writer がいない sharp boundary で実行する。
 reader の終了は待たない。
+コミット後にWALサイズのしきい値を超えて起動するチェックポイントは、延期可能な保守処理である。
+別の書き込み側がすでに権限を取得している場合は、待機も例外送出もせず、その回を見送る。
+残ったWALは、次のコミット時、または終了時の明示的なチェックポイントで処理する。
+明示的なチェックポイントは、従来どおり書き込み権限の取得を待つ。
+
 `CheckpointBegin` を fsync した後に committed high-water と次の transaction ID を catalog へ保存し、committed dirty page とデータファイルを flush する。
 対応する `CheckpointEnd` を fsync できた場合だけ checkpoint を完了済みとみなし、その End 以前の WAL を切り詰める。
 

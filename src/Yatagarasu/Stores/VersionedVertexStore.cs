@@ -120,6 +120,9 @@ internal sealed class VersionedVertexStore : IVertexStore, ITransactionVertexSto
     public void Free(VertexId vertexId, TransactionId transactionId)
     {
         long seq = vertexId.Sequence;
+        if (seq < 0 || seq >= _map.Hwm) return;
+        int carriedGeneration = vertexId.Generation;
+        if (carriedGeneration != 0 && carriedGeneration != CurrentGeneration(seq)) return;
         // 論理削除は head version に xmax をスタンプする。
         if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax)) return;
         if (xmax != 0) return; // 既に論理削除済
@@ -159,19 +162,33 @@ internal sealed class VersionedVertexStore : IVertexStore, ITransactionVertexSto
 
     public VertexWriteHandle Write(VertexId vertexId)
     {
-        var ptr = _heap.GetHead(vertexId.Sequence);
+        long sequence = vertexId.Sequence;
+        int carriedGeneration = vertexId.Generation;
+        if (sequence < 0
+            || sequence >= _map.Hwm
+            || (carriedGeneration != 0 && carriedGeneration != CurrentGeneration(sequence)))
+        {
+            throw new CorruptionException(
+                $"Write on missing or stale vertex seq={sequence} generation={carriedGeneration}");
+        }
+        var ptr = _heap.GetHead(sequence);
         if (ptr.IsNull)
-            throw new CorruptionException($"Write on missing vertex seq={vertexId.Sequence}");
+            throw new CorruptionException($"Write on missing vertex seq={sequence}");
         var pageId = new PageId(ptr.PageId);
         var ph = _file.PinForWrite(pageId);
-        var sp = new SlottedPage(ph.Data);
-        if (!sp.TryGetMutable(ptr.Slot, out var rec))
+        try
         {
-            _file.Unpin(pageId);
-            throw new CorruptionException($"missing version slot for vertex seq={vertexId.Sequence}");
+            var sp = new SlottedPage(ph.Data);
+            if (!sp.TryGetMutable(ptr.Slot, out var rec))
+                throw new CorruptionException($"missing version slot for vertex seq={sequence}");
+            var fields = rec.Slice(HdrSize, PayloadSize);
+            return new VertexWriteHandle(ph.Transfer(), fields);
         }
-        var fields = rec.Slice(HdrSize, PayloadSize);
-        return new VertexWriteHandle(_file, pageId, fields);
+        catch
+        {
+            ph.ReleaseUnchanged();
+            throw;
+        }
     }
 
     public IEnumerable<VertexId> Scan()
@@ -271,11 +288,11 @@ internal sealed class VersionedVertexStore : IVertexStore, ITransactionVertexSto
     internal IPagedFile UnderlyingFile => _file;
 
     /// <summary>
-    /// vacuum: horizon 未満で xmax がコミット済みの dead Vertexを heap から物理回収する
+    /// vacuum: horizon 未満で xmax がコミット済みの 削除済みVertexを heap から物理回収する
     /// (全 version slot を tombstone + map エントリ null 化)。inUseCount は <see cref="Free"/> で
     /// 既に減算済みなので触らない。
     /// </summary>
-    internal int VacuumDeadVersions(long horizonTxId, CommittedTxRegistry committed)
+    internal int VacuumDeadVersions(long horizonTxId, CommittedTxRegistry committed, bool dryRun = false)
     {
         int reclaimed = 0;
         long hwm = _map.Hwm;
@@ -284,11 +301,14 @@ internal sealed class VersionedVertexStore : IVertexStore, ITransactionVertexSto
             if (!_heap.TryReadHeadRaw(seq, out _, out _, out long xmax)) continue;
             if (xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax))
             {
-                _heap.Remove(seq);   // 全 version slot tombstone + map entry null
-                _map.PushFreeSeq(seq); // seq を再利用待ちへ (世代は sidecar に残る)
+                if (!dryRun)
+                {
+                    _heap.Remove(seq);
+                    _map.PushFreeSeq(seq);
+                }
                 reclaimed++;
             }
-            else if (xmax == 0)
+            else if (!dryRun && xmax == 0)
             {
                 // 生存 Vertex では property 更新で生じた dead 旧版を回収する。
                 _heap.PruneDeadVersions(seq,

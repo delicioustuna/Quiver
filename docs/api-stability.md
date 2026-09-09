@@ -19,6 +19,11 @@ Yatagarasu は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.
 - `1.0.0` 未満 (`0.x` / `-rc` / `-preview`) は **安定性の保証対象外**。`0.x` 系では MINOR でも breaking change が入りうる。
 - pre-release タグ (`-rc.1`, `-preview.2` 等) が付くバージョンは feedback 収集目的であり、GA (`1.0.0`) までは API が動く可能性がある。
 - トランザクション上の非同期 API は v1 の契約に含めない。1.0 後に再導入する場合は、次の MAJOR バージョンで契約を再設計する。
+- 0.8.0では、無効なキーによる更新が何もせず終了したり、別世代のデータを更新したりする不具合を修正する。
+  既定値のキー、古い世代のキー、削除済みの対象への公開更新操作は、`KeyNotFoundException`で拒否する。
+  `GraphStore.Write`のコールバックの外側では、従来どおり`GraphOperationException`の内部例外となる。
+  同じキーによる読み取り・存在確認・検索では、対象なしとして扱う。
+  これは0.xのマイナーバージョン更新で許容する例外動作の修正であり、公開APIのシグネチャと保存形式は変更しない。
 
 ### breaking change の定義
 

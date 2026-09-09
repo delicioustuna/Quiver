@@ -10,6 +10,107 @@ namespace Yatagarasu.Transactions.Tests;
 
 public class TransactionManagerTests : IDisposable
 {
+    [Fact]
+    public void Commit_is_not_published_before_wal_flush()
+    {
+        using var writer = _manager.BeginWrite();
+        var before = _manager.CommittedRegistry.Published;
+        _manager.BeforeCommitFlushForTest = () =>
+        {
+            _wal.CurrentLsn.Should().BeGreaterThan(_wal.FlushedLsn);
+            _manager.CommittedRegistry.Published.Should().BeSameAs(before);
+            using var reader = _manager.BeginRead();
+            Visibility.IsVisible(writer.Id.Value, 0, reader.Snapshot, reader.Id).Should().BeFalse();
+        };
+        try { writer.Commit(); }
+        finally { _manager.BeforeCommitFlushForTest = null; }
+        using var current = _manager.BeginRead();
+        Visibility.IsVisible(writer.Id.Value, 0, current.Snapshot, current.Id).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Pending_reader_prevents_reclamation_until_snapshot_is_bound()
+    {
+        using (var writer = _manager.BeginWrite()) writer.Commit();
+        long oldHighWater = _manager.CommittedRegistry.Published.Snapshot.CommittedHighWater;
+        _manager.ReadSnapshotLoadedForTest = () =>
+        {
+            _manager.GetVisibilityHorizon().Should().Be(1);
+            using var writer = _manager.BeginWrite();
+            writer.Commit();
+            _manager.GetVisibilityHorizon().Should().Be(1);
+        };
+        using var reader = _manager.BeginRead();
+        _manager.ReadSnapshotLoadedForTest = null;
+        reader.Snapshot.CommittedHighWater.Should().Be(oldHighWater);
+        _manager.GetVisibilityHorizon().Should().Be(oldHighWater + 1);
+        reader.Dispose();
+        _manager.GetVisibilityHorizon().Should().Be(
+            _manager.CommittedRegistry.Published.Snapshot.CommittedHighWater + 1);
+    }
+
+    [Fact]
+    public void Reservation_before_load_observes_commit_and_failed_begin_releases_reservation()
+    {
+        long committedId = 0;
+        _manager.ReadReservedForTest = () =>
+        {
+            _manager.GetVisibilityHorizon().Should().Be(1);
+            using var writer = _manager.BeginWrite();
+            writer.Commit();
+            committedId = writer.Id.Value;
+        };
+        using (var read = _manager.BeginRead())
+            read.Snapshot.CommittedHighWater.Should().Be(committedId);
+        _manager.ReadReservedForTest = () => throw new InvalidOperationException("injected");
+        Action begin = () => _manager.BeginRead();
+        begin.Should().Throw<InvalidOperationException>();
+        _manager.Snapshots.ActiveCount.Should().Be(0);
+        _manager.ReadReservedForTest = null;
+    }
+
+    [Fact]
+    public void Reader_begin_and_complete_do_not_wait_for_writer_publication()
+    {
+        using var writer = _manager.BeginWrite();
+        long before = _manager.CommittedRegistry.Published.Snapshot.CommittedHighWater;
+        _manager.CommittedRegistry.BeforePublishForTest = () =>
+        {
+            _manager.CommittedRegistry.BeforePublishForTest = null;
+            Task work = Task.Run(() =>
+            {
+                using var reader = _manager.BeginRead();
+                reader.Snapshot.CommittedHighWater.Should().Be(before);
+                reader.Snapshot.ActiveWriterId.Should().Be(writer.Id);
+                reader.Commit();
+            });
+            work.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            work.GetAwaiter().GetResult();
+        };
+        try { writer.Commit(); }
+        finally { _manager.CommittedRegistry.BeforePublishForTest = null; }
+        using var fresh = _manager.BeginRead();
+        fresh.Snapshot.CommittedHighWater.Should().Be(writer.Id.Value);
+        fresh.Snapshot.ActiveWriterId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Writer_release_and_next_acquire_publish_distinct_owners()
+    {
+        using var first = _manager.BeginWrite();
+        using var old = _manager.BeginRead();
+        old.Snapshot.ActiveWriterId.Should().Be(first.Id);
+        first.Abort();
+        _manager.CommittedRegistry.Published.Snapshot.ActiveWriterId.Should().BeNull();
+        using var second = _manager.BeginWrite();
+        using var next = _manager.BeginRead();
+        next.Snapshot.ActiveWriterId.Should().Be(second.Id);
+        old.Snapshot.ActiveWriterId.Should().Be(first.Id);
+        second.Commit();
+        using var fresh = _manager.BeginRead();
+        fresh.Snapshot.AbortedGaps.Should().Contain(first.Id.Value);
+    }
+
     private readonly string _walDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
     private readonly WriteAheadLog _wal;
     private readonly TransactionManager _manager;

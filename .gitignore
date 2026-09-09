@@ -516,3 +516,6 @@ docs/api/_apispec/
 docs/api/_site/
 # PublicApi approval transient output
 *.received.txt
+
+# Release notes are source documents, not build output.
+!docs/releases/

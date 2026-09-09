@@ -15,7 +15,7 @@
   <!-- API 安定性ポリシー (docs/api-stability.md)。SemVer の正本となるバージョンを一元管理する。
        0.x 系は pre-1.0 で安定性の保証対象外。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
   <PropertyGroup>
-    <VersionPrefix>0.7.0</VersionPrefix>
+    <VersionPrefix>0.8.0</VersionPrefix>
     <!-- pre-release を付ける場合はビルド時に -p:VersionSuffix=rc.1 等で指定する (例: 0.7.0-rc.1)。 -->
   </PropertyGroup>
 

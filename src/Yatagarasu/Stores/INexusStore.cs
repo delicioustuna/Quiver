@@ -140,14 +140,12 @@ internal readonly ref struct NexusReadHandle
 /// </summary>
 internal ref struct NexusWriteHandle
 {
-    private readonly IPagedFile _file;
-    private readonly PageId _pageId;
+    private PageWriteHandle _page;
     private Span<byte> _record;
 
-    internal NexusWriteHandle(IPagedFile file, PageId pageId, Span<byte> record)
+    internal NexusWriteHandle(PageWriteHandle page, Span<byte> record)
     {
-        _file = file;
-        _pageId = pageId;
+        _page = page;
         _record = record;
     }
 
@@ -169,5 +167,5 @@ internal ref struct NexusWriteHandle
         set => RecordHelpers.WriteInt48(_record[9..], value.Sequence);
     }
 
-    public void Dispose() => _file.UnpinDirty(_pageId, 0);
+    public void Dispose() => _page.Dispose();
 }

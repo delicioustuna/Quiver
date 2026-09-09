@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.CompilerServices;
 using Yatagarasu.Core;
 using Yatagarasu.Telemetry;
 using Yatagarasu.Storage.Wal;
@@ -28,8 +29,8 @@ internal sealed class PagedFile : IPagedFile
     private readonly int _poolCapacity;
     private readonly long _initialFileAllocationBytes;
     private readonly long _maximumFileGrowthStepBytes;
-    // _poolLock は buffer pool 操作と MMF アクセス全体を保護する
-    private readonly object _poolLock = new();
+    private readonly Lock _poolLock = new();
+    private readonly PoolShard[] _shards = Enumerable.Range(0, 16).Select(_ => new PoolShard()).ToArray();
 
     private FileStream _fileStream;
     private MemoryMappedFile? _mmf;
@@ -38,7 +39,6 @@ internal sealed class PagedFile : IPagedFile
     private long _logicalPageCount;
 
     private readonly PoolFrame[] _frames;
-    private readonly Dictionary<PageId, int> _pageToFrame;
     private int _clockHand;
     private bool _disposed;
     private byte? _walFileKind;
@@ -67,7 +67,6 @@ internal sealed class PagedFile : IPagedFile
         _maximumFileGrowthStepBytes = NormalizeAllocationOption(
             maximumFileGrowthStepBytes, nameof(maximumFileGrowthStepBytes));
         _frames = new PoolFrame[poolCapacity];
-        _pageToFrame = new Dictionary<PageId, int>(poolCapacity);
         for (int i = 0; i < poolCapacity; i++)
             _frames[i] = new PoolFrame();
 
@@ -96,7 +95,7 @@ internal sealed class PagedFile : IPagedFile
 
     public PageId AllocatePage(PageKind kind)
     {
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
             if (_wal?.ActiveWriteSet is not null)
                 return AllocatePageNoStealLocked(kind);
@@ -233,7 +232,7 @@ internal sealed class PagedFile : IPagedFile
 
     public void FreePage(PageId pageId)
     {
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
             if (_wal?.ActiveWriteSet is not null)
             {
@@ -270,22 +269,73 @@ internal sealed class PagedFile : IPagedFile
         }
     }
 
+    private int _readOnlyAnalysisCount;
+
+    /// <summary>書き込み権限を保持した解析中に、未常駐ページの読み取りが変更済みページを書き出すのを防ぐ。</summary>
+    internal IDisposable BeginReadOnlyAnalysis()
+    {
+        Interlocked.Increment(ref _readOnlyAnalysisCount);
+        return new ReadOnlyAnalysisScope(this);
+    }
+
+    private sealed class ReadOnlyAnalysisScope(PagedFile file) : IDisposable
+    {
+        private PagedFile? _file = file;
+        public void Dispose()
+        {
+            var current = Interlocked.Exchange(ref _file, null);
+            if (current is not null) Interlocked.Decrement(ref current._readOnlyAnalysisCount);
+        }
+    }
+
     public PageReadHandle PinForRead(PageId pageId)
     {
-        int frame = GetOrLoadFrame(pageId);
+        int frame;
+        if (Volatile.Read(ref _readOnlyAnalysisCount) != 0)
+        {
+            using (EnterPoolCoordination())
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (!GetShard(pageId).Pages.ContainsKey(pageId))
+                {
+                    if (pageId.Value < 0 || pageId.Value >= PageCount)
+                        throw new ArgumentOutOfRangeException(nameof(pageId));
+                    // 常駐する変更済みフレームを最新値の正本とする。未常駐ページだけを別のバッファへ読み、退避のための書き出しを避ける。
+                    byte[] snapshot = new byte[PageSizeConst];
+                    MmfReadPage(pageId, snapshot);
+                    PageHeader.Validate(snapshot, pageId);
+                    return new PageReadHandle(pageId, snapshot);
+                }
+                frame = GetOrLoadFrame(pageId);
+            }
+        }
+        else frame = GetOrLoadFrame(pageId);
         // ハンドル生存中、他スレッドからの書き込みからバッファを保護する。
         // 検証はロード時に済んでいるので pin ごとの再検証はしない (上記 GetOrLoadFrame 参照)。
-        _frames[frame].FrameLock.EnterReadLock();
-        return new PageReadHandle(this, pageId, ReadFrameSpan(frame));
+        bool readLocked = false;
+        try
+        {
+            _frames[frame].FrameLock.EnterReadLock();
+            readLocked = true;
+            return new PageReadHandle(this, new ReadPageLease(pageId, frame, _frames[frame].Generation), ReadFrameSpan(frame));
+        }
+        catch
+        {
+            if (readLocked) _frames[frame].FrameLock.ExitReadLock();
+            Interlocked.Decrement(ref _frames[frame].PinCount);
+            throw;
+        }
     }
 
     public PageWriteHandle PinForWrite(PageId pageId)
     {
         int frame = GetOrLoadFrame(pageId);
         // ハンドル生存中、他スレッドからの読み書きを排他する。
-        _frames[frame].FrameLock.EnterWriteLock();
+        bool writeLocked = false;
         try
         {
+            _frames[frame].FrameLock.EnterWriteLock();
+            writeLocked = true;
             Span<byte> raw = ReadFrameSpan(frame);
             // 検証はロード時に済んでいるので pin ごとの再検証はしない (GetOrLoadFrame 参照)。
             // この書き込みトランザクション内で本ページを初めて pin する時点の内容を
@@ -296,64 +346,75 @@ internal sealed class PagedFile : IPagedFile
             {
                 _wal?.ActiveWriteSet?.CaptureBeforeImage(fileKind, pageId.Value, raw);
             }
-            return new PageWriteHandle(this, pageId, raw);
+            return new PageWriteHandle(this, new WritePageLease(pageId, frame, _frames[frame].Generation), raw);
         }
         catch
         {
-            _frames[frame].FrameLock.ExitWriteLock();
-            lock (_poolLock)
-            {
-                if (_pageToFrame.TryGetValue(pageId, out int f))
-                    Interlocked.Decrement(ref _frames[f].PinCount);
-            }
+            if (writeLocked) _frames[frame].FrameLock.ExitWriteLock();
+            Interlocked.Decrement(ref _frames[frame].PinCount);
             throw;
         }
     }
 
-    void IPagedFile.Unpin(PageId pageId)
+    void IPagedFile.ReleaseRead(ReadPageLease lease)
     {
-        int? lockedFrame = null;
-        lock (_poolLock)
-        {
-            if (_pageToFrame.TryGetValue(pageId, out int frame))
-            {
-                Interlocked.Decrement(ref _frames[frame].PinCount);
-                lockedFrame = frame;
-            }
-        }
-        if (lockedFrame is int f)
-            _frames[f].FrameLock.ExitReadLock();
+        if ((uint)lease.FrameIndex >= (uint)_frames.Length)
+            throw new InvalidOperationException("Invalid read page frame.");
+        PoolFrame frame = _frames[lease.FrameIndex];
+        if (frame.PageId != lease.PageId || frame.Generation != lease.Generation || !frame.FrameLock.IsReadLockHeld)
+            throw new InvalidOperationException("Read page lease is stale or is not held by this thread.");
+        lease.ClaimRelease();
+        // 固定数が正の間は再割り当てされない。ロックを解放してから最後に固定を解除する。
+        frame.FrameLock.ExitReadLock();
+        Interlocked.Decrement(ref frame.PinCount);
     }
 
-    void IPagedFile.UnpinDirty(PageId pageId, long lsn)
+    private PoolFrame ClaimWriteRelease(WritePageLease lease)
     {
-        int? lockedFrame = null;
-        lock (_poolLock)
-        {
-            if (!_pageToFrame.TryGetValue(pageId, out int frame)) return;
-            WalWriteSet? writeSet = _wal?.ActiveWriteSet;
+        if ((uint)lease.FrameIndex >= (uint)_frames.Length)
+            throw new InvalidOperationException("Invalid write page frame.");
+        PoolFrame frame = _frames[lease.FrameIndex];
+        if (frame.PageId != lease.PageId || frame.Generation != lease.Generation || !frame.FrameLock.IsWriteLockHeld)
+            throw new InvalidOperationException("Write page lease is stale or is not held by this thread.");
+        lease.ClaimRelease();
+        return frame;
+    }
 
+    void IPagedFile.ReleaseWriteUnchanged(WritePageLease lease)
+    {
+        PoolFrame frame = ClaimWriteRelease(lease);
+        frame.FrameLock.ExitWriteLock();
+        Interlocked.Decrement(ref frame.PinCount);
+    }
+
+    void IPagedFile.ReleaseWriteDirty(WritePageLease lease, long lsn)
+    {
+        PoolFrame frame = ClaimWriteRelease(lease);
+        WalWriteSet? writeSet = _wal?.ActiveWriteSet;
+        // 書き出しはフレームの読み取りロック、追い出しは固定数で排他する。変更所有者を公開してから固定を解除する。
+        frame.IsDirty = true;
+        frame.DirtyTransactionId = writeSet?.TransactionId.Value ?? 0;
+        try
+        {
             // WAL ログ書き込み前にヘッダの LSN とチェックサムを更新し、ページイメージを有効化する。
-            PageHeader.UpdateLsnAndChecksum(_frames[frame].Buffer.AsSpan(), lsn);
+            PageHeader.UpdateLsnAndChecksum(frame.Buffer.AsSpan(), lsn);
 
             // WAL-first: クラッシュリカバリでコミット済み書き込みを再生できるよう、ページイメージをログに残す。
             if (_walFileKind is byte fileKind)
                 writeSet?.LogPageImage(
                     fileKind,
-                    pageId.Value,
-                    _frames[frame].Buffer.AsSpan(0, PageSizeConst),
+                    lease.PageId.Value,
+                    frame.Buffer.AsSpan(0, PageSizeConst),
                     committedLsn => StampCommittedLsn(
-                        pageId,
+                        lease.PageId,
                         writeSet.TransactionId,
                         committedLsn));
-
-            _frames[frame].IsDirty = true;
-            _frames[frame].DirtyTransactionId = writeSet?.TransactionId.Value ?? 0;
-            Interlocked.Decrement(ref _frames[frame].PinCount);
-            lockedFrame = frame;
         }
-        if (lockedFrame is int f)
-            _frames[f].FrameLock.ExitWriteLock();
+        finally
+        {
+            frame.FrameLock.ExitWriteLock();
+            Interlocked.Decrement(ref frame.PinCount);
+        }
     }
 
     public void EnableWalLogging(byte fileKind, IWriteAheadLog wal)
@@ -366,7 +427,7 @@ internal sealed class PagedFile : IPagedFile
     {
         if (pageBytes.Length != PageSizeConst) return;
         PageHeader.Validate(pageBytes, pageId);
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
             EnsureFileSizeAndRemapLocked(pageId.Value + 1);
 
@@ -386,7 +447,7 @@ internal sealed class PagedFile : IPagedFile
                 _logicalPageCount = Math.Max(_logicalPageCount, pageId.Value + 1);
 
             // 後続の読み出しが復旧済み内容を参照できるよう、キャッシュ済みフレームを無効化する。
-            if (_pageToFrame.TryGetValue(pageId, out int frame))
+            if (GetShard(pageId).Pages.TryGetValue(pageId, out int frame))
             {
                 pageBytes.CopyTo(_frames[frame].Buffer.AsSpan());
                 _frames[frame].IsDirty = false;
@@ -428,9 +489,9 @@ internal sealed class PagedFile : IPagedFile
 
     public long ReadPageLsnForRecovery(PageId pageId)
     {
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
-            if (_pageToFrame.TryGetValue(pageId, out int frame))
+            if (GetShard(pageId).Pages.TryGetValue(pageId, out int frame))
             {
                 try
                 {
@@ -467,12 +528,13 @@ internal sealed class PagedFile : IPagedFile
 
     public void Flush()
     {
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             FlushDirtyFramesLocked();
             _viewAccessor?.Flush();
+            _fileStream.Flush(flushToDisk: true);
         }
-        _fileStream.Flush(flushToDisk: true);
     }
 
     /// <summary>
@@ -491,7 +553,7 @@ internal sealed class PagedFile : IPagedFile
         if (newPageCount < 1)
             throw new ArgumentOutOfRangeException(
                 nameof(newPageCount), "newPageCount must be >= 1 (meta page must be retained).");
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_wal?.ActiveWriteSet is not null)
@@ -509,7 +571,7 @@ internal sealed class PagedFile : IPagedFile
                 if (f.PinCount > 0)
                     throw new InvalidOperationException(
                         $"Cannot truncate: page {f.PageId.Value} is pinned (PinCount={f.PinCount}).");
-                _pageToFrame.Remove(f.PageId);
+                GetShard(f.PageId).Pages.Remove(f.PageId);
                 f.PageId = PageId.Invalid;
                 f.IsDirty = false;
                 f.DirtyTransactionId = 0;
@@ -552,11 +614,42 @@ internal sealed class PagedFile : IPagedFile
     // バッファプール内部実装
     // ------------------------------------------------------------------
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetOrLoadFrame(PageId pageId)
     {
-        lock (_poolLock)
+        PoolShard shard = GetShard(pageId);
+        int frame;
+        lock (shard.Gate)
         {
-            if (_pageToFrame.TryGetValue(pageId, out int existing))
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (shard.Pages.TryGetValue(pageId, out frame))
+            {
+                _frames[frame].Referenced = true;
+                Interlocked.Increment(ref _frames[frame].PinCount);
+            }
+            else frame = -1;
+        }
+        if (frame < 0) return LoadFrame(pageId);
+        try
+        {
+            // MeterListenerのコールバックが全体操作へ再入しても、シャードから全体ロックへの逆順取得を避ける。
+            YatagarasuTelemetry.BufferPoolHits.Add(1);
+            YatagarasuEventSource.Log.BufferPoolHit();
+            return frame;
+        }
+        catch
+        {
+            Interlocked.Decrement(ref _frames[frame].PinCount);
+            throw;
+        }
+    }
+
+    private int LoadFrame(PageId pageId)
+    {
+        using (EnterPoolCoordination())
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (GetShard(pageId).Pages.TryGetValue(pageId, out int existing))
             {
                 _frames[existing].Referenced = true;
                 Interlocked.Increment(ref _frames[existing].PinCount);
@@ -573,15 +666,16 @@ internal sealed class PagedFile : IPagedFile
             EvictFrame(victim);
 
             _frames[victim].PageId = pageId;
+            _frames[victim].Generation++;
             MmfReadPage(pageId, _frames[victim].Buffer);
             // checksum / magic / pageId の検証は disk→frame ロード時 (= ここ) のみ行う。
             // 常駐フレームの pin ごとに全ページ CRC を再計算するのは冗長 (RAM 上の内容は disk 破損に
-            // 晒されず、書込は UnpinDirty で checksum を更新し FrameLock が read/write pin を排他する)。
+            // 晒されず、書込は ReleaseWriteDirty で チェックサムを更新し、FrameLock が読み取りと書き込みを排他する)。
             // 破損ページの早期検出はロード時で十分。
             PageHeader.Validate(ReadFrameSpan(victim), pageId);
             _frames[victim].Referenced = true;
             _frames[victim].IsDirty = false;
-            _pageToFrame[pageId] = victim;
+            GetShard(pageId).Pages[pageId] = victim;
             Interlocked.Increment(ref _frames[victim].PinCount);
             // バッファプールミス (eviction + page-in 発生)。
             YatagarasuTelemetry.BufferPoolMisses.Add(1);
@@ -591,7 +685,7 @@ internal sealed class PagedFile : IPagedFile
         }
     }
 
-    // Clock (Second-Chance) アルゴリズム。_poolLock 保持下で呼び出す。
+    // Clock (Second-Chance) アルゴリズム。全体ロックと全シャードのロックの保持下で呼び出す。
     private int FindVictim()
     {
         int probes = 0;
@@ -599,7 +693,7 @@ internal sealed class PagedFile : IPagedFile
         while (probes++ < maximumProbes)
         {
             ref PoolFrame f = ref _frames[_clockHand];
-            if (f.PinCount == 0)
+            if (Volatile.Read(ref f.PinCount) == 0)
             {
                 if (!f.Referenced)
                 {
@@ -631,7 +725,7 @@ internal sealed class PagedFile : IPagedFile
             $"Buffer pool has no evictable frame among {_poolCapacity} pages.");
     }
 
-    // _poolLock 保持下で呼び出す。
+    // 全体ロックと全シャードのロックの保持下で呼び出す。
     private void EvictFrame(int frame)
     {
         ref PoolFrame f = ref _frames[frame];
@@ -644,7 +738,7 @@ internal sealed class PagedFile : IPagedFile
                 FlushWalBeforeDataWrite();
                 MmfWritePage(f.PageId, f.Buffer);
             }
-            _pageToFrame.Remove(f.PageId);
+            GetShard(f.PageId).Pages.Remove(f.PageId);
             f.PageId = PageId.Invalid;
             f.IsDirty = false;
             f.DirtyTransactionId = 0;
@@ -665,9 +759,9 @@ internal sealed class PagedFile : IPagedFile
         TransactionId transactionId,
         long lsn)
     {
-        lock (_poolLock)
+        using (EnterPoolCoordination())
         {
-            if (!_pageToFrame.TryGetValue(pageId, out int frame))
+            if (!GetShard(pageId).Pages.TryGetValue(pageId, out int frame))
                 return;
             ref PoolFrame current = ref _frames[frame];
             if (!current.IsDirty
@@ -691,7 +785,7 @@ internal sealed class PagedFile : IPagedFile
     private Span<byte> ReadFrameSpan(int frame) => new Span<byte>(_frames[frame].Buffer);
 
     // ------------------------------------------------------------------
-    // MMF アクセスヘルパー (いずれも _poolLock 保持下で呼び出す)
+    // MMF アクセスヘルパー (いずれも 全体ロックと全シャードのロックの保持下で呼び出す)
     // ------------------------------------------------------------------
 
     private void MmfReadPage(PageId pageId, byte[] buffer)
@@ -708,7 +802,7 @@ internal sealed class PagedFile : IPagedFile
     private void MmfWritePageAndSync(PageId pageId, byte[] buffer)
     {
         MmfWritePage(pageId, buffer);
-        if (_pageToFrame.TryGetValue(pageId, out int frame))
+        if (GetShard(pageId).Pages.TryGetValue(pageId, out int frame))
         {
             buffer.AsSpan(0, PageSizeConst).CopyTo(_frames[frame].Buffer);
             _frames[frame].IsDirty = false;
@@ -716,33 +810,29 @@ internal sealed class PagedFile : IPagedFile
         }
     }
 
-    // ダーティなフレームを全て MMF に書き出す。_poolLock 保持下で呼び出す。
+    // ダーティなフレームを全て MMF に書き出す。全体ロックと全シャードのロックの保持下で呼び出す。
     private void FlushDirtyFramesLocked()
     {
-        bool anyFlushableDirty = false;
+        bool walFlushed = false;
         for (int i = 0; i < _poolCapacity; i++)
         {
-            if (_frames[i].IsDirty
-                && _frames[i].PageId.IsValid
-                && !IsUncommittedDirty(_frames[i]))
+            PoolFrame f = _frames[i];
+            // プールのロックを保持して書き込み完了を待つと、書き込み側による別ページの取得と循環待ちになる。
+            // 読み取り中の固定は保存を妨げない。同じスレッドが書き込み中のページも保存対象から外す。
+            if (f.FrameLock.IsWriteLockHeld || !f.FrameLock.TryEnterReadLock(0)) continue;
+            try
             {
-                anyFlushableDirty = true;
-                break;
-            }
-        }
-        // データページを書き出す前に WAL を先行フラッシュする (checkpoint / Flush /
-        // ファイル拡張時の remap 経路も含む write-ahead 順序)。
-        if (anyFlushableDirty) FlushWalBeforeDataWrite();
-
-        for (int i = 0; i < _poolCapacity; i++)
-        {
-            ref PoolFrame f = ref _frames[i];
-            if (f.IsDirty && f.PageId.IsValid && !IsUncommittedDirty(f))
-            {
+                if (!f.IsDirty || !f.PageId.IsValid || IsUncommittedDirty(f)) continue;
+                if (!walFlushed)
+                {
+                    FlushWalBeforeDataWrite();
+                    walFlushed = true;
+                }
                 MmfWritePage(f.PageId, f.Buffer);
                 f.IsDirty = false;
                 f.DirtyTransactionId = 0;
             }
+            finally { f.FrameLock.ExitReadLock(); }
         }
     }
 
@@ -758,7 +848,7 @@ internal sealed class PagedFile : IPagedFile
             _fileStream.SetLength(ComputeGrowthTarget(_fileStream.Length, required));
     }
 
-    // _poolLock 保持下で呼び出す。ファイル拡張時に MMF を再マップする。
+    // 全体ロックと全シャードのロックの保持下で呼び出す。ファイル拡張時に MMF を再マップする。
     private void EnsureFileSizeAndRemapLocked(long pageCount)
     {
         long required = checked(pageCount * PageSizeConst);
@@ -839,9 +929,10 @@ internal sealed class PagedFile : IPagedFile
 
     public void Dispose()
     {
+        using var coordination = EnterPoolCoordination();
         if (_disposed) return;
-        _disposed = true;
         Flush();
+        _disposed = true;
         _viewAccessor?.Dispose();
         _mmf?.Dispose();
         _fileStream.Dispose();
@@ -849,10 +940,55 @@ internal sealed class PagedFile : IPagedFile
         _bufferPoolSizeRegistration.Dispose();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private PoolShard GetShard(PageId pageId) =>
+        _shards[(int)((ulong)pageId.Value ^ ((ulong)pageId.Value >> 4)) & 15];
+
+    // 常駐ページの取得は単一シャードだけをロックする。未常駐なら一度解放し、全体ロック、全シャードの昇順で取得して再検査する。
+    // 再入可能な割り当てと書き出しも同じ順序を守り、フレームの再割り当てとMMFの寿命をまとめて保護する。
+    private PoolCoordination EnterPoolCoordination() => new(_poolLock, _shards);
+
+    private readonly struct PoolCoordination : IDisposable
+    {
+        private readonly Lock _global;
+        private readonly PoolShard[] _shards;
+
+        internal PoolCoordination(Lock global, PoolShard[] shards)
+        {
+            _global = global;
+            _shards = shards;
+            global.Enter();
+            int acquired = 0;
+            try
+            {
+                for (; acquired < shards.Length; acquired++) shards[acquired].Gate.Enter();
+            }
+            catch
+            {
+                while (acquired > 0) shards[--acquired].Gate.Exit();
+                global.Exit();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            for (int i = _shards.Length - 1; i >= 0; i--) _shards[i].Gate.Exit();
+            _global.Exit();
+        }
+    }
+
+    private sealed class PoolShard
+    {
+        internal readonly Lock Gate = new();
+        internal readonly Dictionary<PageId, int> Pages = new();
+    }
+
     private sealed class PoolFrame
     {
         public PageId PageId = PageId.Invalid;
         public int PinCount;
+        public long Generation;
         public bool Referenced;
         public bool IsDirty;
         public long DirtyTransactionId;

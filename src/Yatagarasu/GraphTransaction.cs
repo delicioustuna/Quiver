@@ -323,6 +323,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     private void DeleteVertexCore(VertexId vertexId)
     {
+        vertexId = RequireVertexMutationTarget(vertexId);
         var firstEdgeId = _inner.Vertices.Read(vertexId).FirstEdgeId;
         var edgesToDelete = new List<EdgeId>();
         var edgeId = firstEdgeId;
@@ -733,7 +734,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public EdgeId CreateEdge(VertexId source, VertexId target, string type)
     {
         EnsureWritable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
         using var usage = EnterUsage();
+        source = RequireVertexMutationTarget(source);
+        target = RequireVertexMutationTarget(target);
         var typeId = _edgeTypeTokens.GetOrCreate(type);
         return CreateEdgeCore(source, target, typeId, type);
     }
@@ -741,7 +745,11 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public EdgeId CreateEdge(VertexId source, VertexId target, EdgeTypeId typeId)
     {
         EnsureWritable();
+        if (!typeId.IsValid)
+            throw new ArgumentException("Invalid edge type ID.", nameof(typeId));
         using var usage = EnterUsage();
+        source = RequireVertexMutationTarget(source);
+        target = RequireVertexMutationTarget(target);
         return CreateEdgeCore(source, target, typeId, _edgeTypeTokens.GetName(typeId));
     }
 
@@ -760,7 +768,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public (EdgeId Id, bool Created) MergeEdge(VertexId source, VertexId target, string type)
     {
         EnsureWritable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
         using var usage = EnterUsage();
+        source = RequireVertexMutationTarget(source);
+        target = RequireVertexMutationTarget(target);
         // Merge の作成パスでは型トークンが必ず必要になるため、先に同一 ID へ解決する。
         // その ID で既存 adjacency を照合すれば、同一 tx で新規作成した型も確実に検索できる。
         var typeId = _edgeTypeTokens.GetOrCreate(type);
@@ -780,7 +791,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
-        if (!IsLogicalEdgeIdentity(edgeId)) return;
+        edgeId = RequireEdgeMutationTarget(edgeId);
         DeleteEdgeCore(edgeId);
     }
 
@@ -802,12 +813,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         VertexId target,
         string type)
     {
-        if (!IsLogicalEdgeIdentity(edgeId))
-            throw new KeyNotFoundException($"Edge {edgeId} does not exist in this transaction.");
-
+        edgeId = RequireEdgeMutationTarget(edgeId);
+        source = RequireVertexMutationTarget(source);
+        target = RequireVertexMutationTarget(target);
         EdgeReadHandle oldEdge = _inner.Edges.Read(edgeId);
-        if (!oldEdge.InUse)
-            throw new KeyNotFoundException($"Edge {edgeId} does not exist in this transaction.");
 
         var properties = CaptureProperties(
             PropertyOwner(edgeId),
@@ -821,8 +830,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     private void DeleteEdgeCore(EdgeId edgeId)
     {
-        if (!_inner.Edges.Read(edgeId).InUse)
+        EdgeReadHandle entity = _inner.Edges.Read(edgeId);
+        if (!entity.InUse)
             return;
+        edgeId = entity.Id;
         RemoveFullTextIndexEntries(PropertyOwner(edgeId));
         FreeEdgeProperties(edgeId);
         // この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
@@ -853,6 +864,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        vertexId = RequireVertexMutationTarget(vertexId);
+        ValidateVectorDimensions(PropertyOwner(vertexId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
@@ -873,12 +886,11 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
-        if (!IsLogicalEdgeIdentity(edgeId)) return;
+        edgeId = RequireEdgeMutationTarget(edgeId);
+        ValidateVectorDimensions(PropertyOwner(edgeId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
-        if (!_inner.Edges.Read(edgeId).InUse)
-            return;
         if (_logicalSink != null)
         {
             var captured = LogicalPropertyValue.Capture(in value);
@@ -961,6 +973,30 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         return EntityRef.From(generation > 0 ? NexusId.Create(id.Sequence, generation) : id);
     }
 
+    private VertexId RequireVertexMutationTarget(VertexId id)
+    {
+        VertexReadHandle entity = _inner.Vertices.Read(id);
+        if (!entity.InUse || (id.Generation != 0 && entity.Id != id))
+            throw new KeyNotFoundException($"Vertex {id} does not exist in this transaction.");
+        return entity.Id;
+    }
+
+    private EdgeId RequireEdgeMutationTarget(EdgeId id)
+    {
+        EdgeReadHandle entity = _inner.Edges.Read(id);
+        if (id.Generation == 0 || !entity.InUse || entity.Id != id)
+            throw new KeyNotFoundException($"Edge {id} does not exist in this transaction.");
+        return entity.Id;
+    }
+
+    private NexusId RequireNexusMutationTarget(NexusId id)
+    {
+        NexusReadHandle entity = _inner.Nexuses.Read(id);
+        if (id.Generation == 0 || !entity.InUse || entity.Id != id)
+            throw new KeyNotFoundException($"Nexus {id} does not exist in this transaction.");
+        return entity.Id;
+    }
+
     private bool RemovePropertyCore(EntityRef owner, PropertyVersionRef firstProperty, PropertyKeyId keyId)
     {
         var cursor = _inner.Properties.Enumerate(owner, firstProperty);
@@ -999,6 +1035,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        vertexId = RequireVertexMutationTarget(vertexId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
         var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
@@ -1015,6 +1052,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public PropertyValue GetProperty(VertexId vertexId, string key)
     {
         using var usage = EnterUsage();
+        if (!_inner.Vertices.Read(vertexId).InUse) return default;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -1026,6 +1064,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         using var usage = EnterUsage();
         if (!IsLogicalEdgeIdentity(edgeId)) return default;
+        if (!_inner.Edges.Read(edgeId).InUse) return default;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -1036,6 +1075,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public bool HasProperty(VertexId vertexId, string key)
     {
         using var usage = EnterUsage();
+        if (!_inner.Vertices.Read(vertexId).InUse) return false;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
         var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
         return HasPropertyCore(PropertyOwner(vertexId), firstProperty, keyId);
@@ -1063,6 +1103,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        vertexId = RequireVertexMutationTarget(vertexId);
+        ValidateVectorDimensions(PropertyOwner(vertexId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
         // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)
@@ -1098,10 +1140,9 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
-        if (!IsLogicalEdgeIdentity(edgeId)) return;
+        edgeId = RequireEdgeMutationTarget(edgeId);
+        ValidateVectorDimensions(PropertyOwner(edgeId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
-        if (!_inner.Edges.Read(edgeId).InUse)
-            return;
 
         var propEnum = _inner.Edges.EnumerateProperties(edgeId, _inner.Properties);
         while (propEnum.MoveNext())
@@ -1135,6 +1176,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        vertexId = RequireVertexMutationTarget(vertexId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
@@ -1165,13 +1207,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
-        if (!IsLogicalEdgeIdentity(edgeId)) return;
+        edgeId = RequireEdgeMutationTarget(edgeId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
-        if (!_inner.Edges.Read(edgeId).InUse)
-            return;
-
         var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
         EntityRef owner = PropertyOwner(edgeId);
         var cursor = _inner.Properties.Enumerate(owner, firstProperty);
@@ -1220,9 +1259,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
-        if (!IsLogicalEdgeIdentity(edgeId)) return;
+        edgeId = RequireEdgeMutationTarget(edgeId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
-        if (!_inner.Edges.Read(edgeId).InUse) return;
 
         var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
         EntityRef owner = PropertyOwner(edgeId);
@@ -1458,6 +1496,17 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     // ========== vector property ==========
 
+    private void ValidateVectorDimensions(EntityRef owner, string key, in PropertyValue value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        if (value.Type != PropertyValueType.FloatArray) return;
+        foreach (var index in _schema.ListIndexes())
+            if (index.Definition is VectorIndexDefinition vector
+                && vector.Target.PropertyKey == key && MatchesOwner(owner, vector.Target)
+                && vector.Dimensions != value.FloatArrayValue.Length)
+                throw new VectorException($"Vector index '{vector.Name}' expects {vector.Dimensions} dimensions, got {value.FloatArrayValue.Length}.");
+    }
+
     public void SetVectorProperty(
         Core.EntityRef owner,
         string propertyKey,
@@ -1560,7 +1609,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                     query,
                     k,
                     options);
-                var segmentHeap = new VectorKnnHeap(k);
+                var segmentHeap = new VectorKnnHeap(k, options.RejectNonFiniteScores);
                 var seen = new HashSet<EntityRef>();
                 foreach (VectorSegmentCandidate candidate in segmentResult.Candidates)
                 {
@@ -1579,7 +1628,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             }
             if (hits.Length == 0)
             {
-                var heap = new VectorKnnHeap(k);
+                var heap = new VectorKnnHeap(k, options.RejectNonFiniteScores);
                 if (_propKeyTokens.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId))
                     ScanPrimaryVectors(definition, keyId, query, heap);
                 hits = heap.ToSortedArray();
@@ -1623,7 +1672,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
         var heaps = new VectorKnnHeap[queries.Count];
         for (int i = 0; i < heaps.Length; i++)
-            heaps[i] = new VectorKnnHeap(k);
+            heaps[i] = new VectorKnnHeap(k, options.RejectNonFiniteScores);
         using (EnterUsage())
         {
             if (_propKeyTokens.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId))
@@ -1846,6 +1895,11 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         IReadOnlyList<(PropertyKeyId KeyId, PropertyCardinality Cardinality, LogicalPropertyValue Value)> properties,
         EntityRef target)
     {
+        foreach (var property in properties)
+        {
+            PropertyValue value = property.Value.ToPropertyValue();
+            ValidateVectorDimensions(target, _propKeyTokens.GetName(property.KeyId), in value);
+        }
         PropertyVersionRef head = PropertyVersionRef.Invalid;
         foreach (var property in properties)
         {
@@ -1990,7 +2044,16 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
     }
 
-    private static void OfferVectorBatch(
+    internal long SkippedVectorDimensionMismatchCount { get; private set; }
+
+    private bool VectorDimensionsMatch(int actual, int expected)
+    {
+        if (actual == expected) return true;
+        SkippedVectorDimensionMismatchCount++;
+        return false;
+    }
+
+    private void OfferVectorBatch(
         EntityRef owner,
         PropertyCursor properties,
         PropertyKeyId keyId,
@@ -2005,6 +2068,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 || property.Value.Type != PropertyValueType.FloatArray)
                 continue;
             ReadOnlySpan<float> vector = property.Value.FloatArrayValue;
+            if (queries.Count == 0 || !VectorDimensionsMatch(vector.Length, queries[0].Length)) continue;
             for (int query = 0; query < queries.Count; query++)
             {
                 heaps[query].Offer(new VectorSearchResult(
@@ -2015,7 +2079,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
     }
 
-    private static void OfferVector(
+    private void OfferVector(
         EntityRef owner,
         PropertyCursor properties,
         PropertyKeyId keyId,
@@ -2028,7 +2092,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             PropertyEntry property = properties.Current;
             if (property.KeyId != keyId
                 || property.Value.Type != PropertyValueType.FloatArray
-                || property.Value.FloatArrayValue.Length != query.Length)
+                || !VectorDimensionsMatch(property.Value.FloatArrayValue.Length, query.Length))
                 continue;
             heap.Offer(new VectorSearchResult(
                 owner,
@@ -2068,7 +2132,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             PropertyEntry property = properties.Current;
             if (property.KeyId != keyId
                 || property.Value.Type != PropertyValueType.FloatArray
-                || property.Value.FloatArrayValue.Length != definition.Dimensions
+                || !VectorDimensionsMatch(property.Value.FloatArrayValue.Length, definition.Dimensions)
                 || VectorPayloadChecksum.Compute(property.Value.FloatArrayValue)
                     != candidate.PayloadChecksum)
                 continue;
@@ -2189,8 +2253,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         using var usage = EnterUsage();
         if (string.IsNullOrWhiteSpace(type))
             throw new ArgumentException("Nexus type must not be null, empty, or whitespace.", nameof(type));
+        NexusMember[] validated = ValidateNexusMembers(members);
         var typeId = _nexusTypeTokens.GetOrCreate(type);
-        return CreateNexusCore(typeId, members);
+        IncidenceMember[] resolved = ResolveNexusMembers(validated);
+        return CreateNexusCore(typeId, validated, resolved);
     }
 
     public NexusId CreateNexus(NexusTypeId typeId, ReadOnlySpan<NexusMember> members)
@@ -2199,7 +2265,9 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         using var usage = EnterUsage();
         if (!typeId.IsValid)
             throw new ArgumentException("Invalid nexus type ID.", nameof(typeId));
-        return CreateNexusCore(typeId, members);
+        NexusMember[] validated = ValidateNexusMembers(members);
+        IncidenceMember[] resolved = ResolveNexusMembers(validated);
+        return CreateNexusCore(typeId, validated, resolved);
     }
 
     public (NexusId Id, bool Created) MergeNexus(
@@ -2213,8 +2281,9 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 "Nexus type must not be null, empty, or whitespace.",
                 nameof(type));
 
+        NexusMember[] validated = ValidateNexusMembers(members);
         NexusTypeId typeId = _nexusTypeTokens.GetOrCreate(type);
-        IncidenceMember[] resolved = ResolveNexusMembers(members);
+        IncidenceMember[] resolved = ResolveNexusMembers(validated);
         if (_nexusMergeIndex is not null
             && _nexusMergeIndex.TryFind(
                 _inner,
@@ -2222,13 +2291,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 resolved,
                 out NexusId existing))
             return (existing, false);
-        return (CreateNexusCore(typeId, members, resolved), true);
-    }
-
-    private NexusId CreateNexusCore(NexusTypeId typeId, ReadOnlySpan<NexusMember> members)
-    {
-        IncidenceMember[] resolved = ResolveNexusMembers(members);
-        return CreateNexusCore(typeId, members, resolved);
+        return (CreateNexusCore(typeId, validated, resolved), true);
     }
 
     private NexusId CreateNexusCore(
@@ -2256,30 +2319,38 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         return nexusId;
     }
 
-    private IncidenceMember[] ResolveNexusMembers(
+    private NexusMember[] ValidateNexusMembers(
         ReadOnlySpan<NexusMember> members)
     {
         if (members.Length < 2)
             throw new ArgumentException("A nexus requires at least 2 members.", nameof(members));
 
-        var resolved = new IncidenceMember[members.Length];
-
-        var seen = new HashSet<(int, long)>();
+        var validated = new NexusMember[members.Length];
+        var seen = new HashSet<(string Role, VertexId VertexId)>();
         for (int i = 0; i < members.Length; i++)
         {
             var m = members[i];
             if (string.IsNullOrWhiteSpace(m.Role))
                 throw new ArgumentException($"Member role at index {i} must not be null, empty, or whitespace.", nameof(members));
 
-            var vertex = _inner.Vertices.Read(m.VertexId);
-            if (!vertex.InUse)
-                throw new ArgumentException($"Vertex {m.VertexId} at index {i} does not exist or is not visible.", nameof(members));
-
-            var roleId = _roleTokens.GetOrCreate(m.Role);
-            if (!seen.Add((roleId.Value, m.VertexId.Sequence)))
+            VertexId vertexId = RequireVertexMutationTarget(m.VertexId);
+            if (!seen.Add((m.Role, vertexId)))
                 throw new ArgumentException($"Duplicate (Role, VertexId) pair at index {i}: ({m.Role}, {m.VertexId}).", nameof(members));
 
-            resolved[i] = new IncidenceMember(m.VertexId, roleId);
+            validated[i] = new NexusMember(m.Role, vertexId);
+        }
+        return validated;
+    }
+
+    private IncidenceMember[] ResolveNexusMembers(ReadOnlySpan<NexusMember> members)
+    {
+        var resolved = new IncidenceMember[members.Length];
+        for (int i = 0; i < members.Length; i++)
+        {
+            NexusMember member = members[i];
+            resolved[i] = new IncidenceMember(
+                member.VertexId,
+                _roleTokens.GetOrCreate(member.Role));
         }
         return resolved;
     }
@@ -2288,6 +2359,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        nexusId = RequireNexusMutationTarget(nexusId);
         DeleteNexusCore(nexusId);
     }
 
@@ -2308,15 +2380,16 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         ReadOnlySpan<NexusMember> members)
     {
 
+        nexusId = RequireNexusMutationTarget(nexusId);
+        NexusMember[] validated = ValidateNexusMembers(members);
         using NexusReadHandle oldNexus = _inner.Nexuses.Read(nexusId);
-        if (!oldNexus.InUse)
-            throw new KeyNotFoundException($"Nexus {nexusId} does not exist in this transaction.");
 
         var properties = CaptureProperties(
             PropertyOwner(nexusId),
             oldNexus.FirstPropertyRef);
         NexusTypeId typeId = _nexusTypeTokens.GetOrCreate(type);
-        NexusId newId = CreateNexusCore(typeId, members);
+        IncidenceMember[] resolved = ResolveNexusMembers(validated);
+        NexusId newId = CreateNexusCore(typeId, validated, resolved);
         CopyProperties(properties, PropertyOwner(newId));
         DeleteNexusCore(nexusId);
         return new NexusReplacement(nexusId, newId);
@@ -2324,6 +2397,9 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     private void DeleteNexusCore(NexusId nexusId)
     {
+        NexusReadHandle entity = _inner.Nexuses.Read(nexusId);
+        if (!entity.InUse) return;
+        nexusId = entity.Id;
         RemoveFullTextIndexEntries(PropertyOwner(nexusId));
         // header の可視性が incidence とプロパティの可視性の正本 — header を論理削除すれば
         // それらも同スナップショットで不可視になる。overflow プロパティレコードは物理的に残る
@@ -2430,6 +2506,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        nexusId = RequireNexusMutationTarget(nexusId);
+        ValidateVectorDimensions(PropertyOwner(nexusId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
@@ -2457,6 +2535,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public PropertyValue GetProperty(NexusId nexusId, string key)
     {
         using var usage = EnterUsage();
+        if (!_inner.Nexuses.Read(nexusId).InUse) return default;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -2467,6 +2546,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public bool HasProperty(NexusId nexusId, string key)
     {
         using var usage = EnterUsage();
+        if (!_inner.Nexuses.Read(nexusId).InUse) return false;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
         var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
         return HasPropertyCore(PropertyOwner(nexusId), firstProperty, keyId);
@@ -2476,6 +2556,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        nexusId = RequireNexusMutationTarget(nexusId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
         var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
@@ -2511,6 +2592,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        nexusId = RequireNexusMutationTarget(nexusId);
+        ValidateVectorDimensions(PropertyOwner(nexusId), key, in value);
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
         // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)。
@@ -2544,6 +2627,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        nexusId = RequireNexusMutationTarget(nexusId);
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");

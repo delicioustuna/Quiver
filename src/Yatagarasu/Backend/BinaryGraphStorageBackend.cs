@@ -867,6 +867,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             YatagarasuTelemetry.TrackGarbageCollection();
         using var mutationLease = _txManager.AcquireMutationLease();
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
+        VacuumOptions effectiveOptions = options ?? new VacuumOptions();
+        var budget = new VacuumBudget(effectiveOptions.MaxDurationMs, VacuumTimeProvider);
+        using var readOnlyAnalysis = options?.Mode == VacuumMode.DryRun
+            ? (_container.Physical as PagedFile)?.BeginReadOnlyAnalysis()
+            : null;
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
         // nexus / incidence / vertex-incidence-head の実体は transaction 配線側が保持するため、
         // そこから取り出して nexus 回収を有効にする (backend は直接参照を持たない)。
@@ -875,10 +880,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _txManager, _txManager.CommittedRegistry, _wal,
             _txManager.NexusStore as VersionedNexusStore,
             _txManager.IncidenceStore as IncidenceStore,
-            _txManager.VertexIncidenceHeadStore);
+            _txManager.VertexIncidenceHeadStore,
+            budget);
         VacuumReport report = vac.Run(options);
-        VacuumOptions effectiveOptions = options ?? new VacuumOptions();
-        if ((effectiveOptions.Targets & VacuumTarget.Indexes) != 0)
+        if ((effectiveOptions.Targets & VacuumTarget.Indexes) != 0 && budget.CanStartPhase())
         {
             bool dryRun = effectiveOptions.Mode == VacuumMode.DryRun;
             int retiredVectorManifests = _vectorSegments.CollectGarbage(
@@ -896,19 +901,23 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 ReclaimedFullTextArtifacts = fullTextGc.ReclaimedArtifacts,
             };
         }
+        if (effectiveOptions.Mode == VacuumMode.DryRun)
+            return report with { ElapsedMs = budget.ElapsedMilliseconds };
         if (vac.ReclaimedEdgeSequences.Count > 0)
             _relationshipReuse.BeginAndRun(vac.ReclaimedEdgeSequences);
         // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
         // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
-        if (report.ReclaimedNexuses > 0 || _txManager.ActiveCount == 0)
+        if (report.ReclaimedNexuses > 0 || _txManager.ActiveCount == 0 && budget.CanStartPhase())
             _coMembershipStore?.Rebuild(
                 _txManager.NexusStore,
                 _txManager.IncidenceStore);
         // vacuum は transaction 外の maintenance mutation なので、返却前に同じ writer lease 下で
         // sharp checkpoint を完了し、回収した page/free-list/catalog state を durable にする。
         _txManager.RequestCheckpoint(writerLeaseHeld: true);
-        return report;
+        return report with { ElapsedMs = budget.ElapsedMilliseconds };
     }
+
+    internal TimeProvider VacuumTimeProvider { get; set; } = TimeProvider.System;
 
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
     {

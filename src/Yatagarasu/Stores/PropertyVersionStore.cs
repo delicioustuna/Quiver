@@ -164,7 +164,7 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
         BinaryPrimitives.WriteInt64LittleEndian(record[OffXmin..], transactionId.Value);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffXmax..], 0);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffGeneration..], generation);
-        _file.UnpinDirty(pageId, 0);
+        ph.Dispose();
         _metaDirty = true;
         if (!deferMetaFlush)
             FlushMeta();
@@ -192,7 +192,7 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
             BinaryPrimitives.WriteInt64LittleEndian(
                 page.Data[(offset + OffXmax)..],
                 transactionId.Value);
-            _file.UnpinDirty(pageId, 0);
+            page.Dispose();
         }
         return currentFirst;
     }
@@ -318,40 +318,104 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
 
     internal void BulkFlushMeta() => FlushMeta();
 
-    internal int VacuumDeadVersions(
-        VersionedVertexStore vertexStore,
-        long horizonTxId,
-        CommittedTxRegistry committed)
-    {
-        int reclaimed = 0;
-        for (long sequence = 0; sequence < vertexStore.Hwm; sequence++)
-        {
-            RawVertexRecord raw = vertexStore.ReadRaw(sequence);
-            if (!raw.InUse || !raw.FirstPropertyRef.IsValid)
-                continue;
-            var ownerId = VertexId.Create(sequence, vertexStore.CurrentGeneration(sequence));
-            EntityRef owner = EntityRef.From(ownerId);
-            bool ownerDead = raw.Xmax != 0 && raw.Xmax < horizonTxId && committed.IsCommitted(raw.Xmax);
-            if (ownerDead)
-            {
-                reclaimed += ReclaimEntireChain(raw.FirstPropertyRef);
-                continue;
-            }
+    internal sealed record PropertyVacuumPlan(
+        PropertyVersionRef Head,
+        IReadOnlyList<PropertyVersionRef> Retained,
+        IReadOnlyList<PropertyVersionRef> Reclaimed);
 
-            var (newHead, reclaimedForOwner) = CompactChain(owner, raw.FirstPropertyRef, horizonTxId, committed);
-            reclaimed += reclaimedForOwner;
-            if (newHead != raw.FirstPropertyRef)
-                vertexStore.UpdateFirstPropertyRef(ownerId, newHead);
-        }
-        if (reclaimed > 0)
+    internal PropertyVacuumPlan PlanVacuum(
+        EntityRef owner, PropertyVersionRef head, bool ownerDead,
+        long horizonTxId, CommittedTxRegistry committed)
+    {
+        var retained = new List<PropertyVersionRef>();
+        var reclaimed = new List<PropertyVersionRef>();
+        var visited = new HashSet<long>();
+        PropertyVersionRef current = head;
+        while (current.IsValid)
         {
-            ShrinkHwmFromTrailingFreeSlots();
-            FlushMeta();
+            if (!visited.Add(current.Sequence))
+                throw new CorruptionException("Property owner chain contains a cycle.");
+            if (current.Sequence >= _hwm)
+                throw new CorruptionException("Property owner chain references a missing or stale version.");
+            var (pageId, offset) = Location(current.Sequence);
+            using var page = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+            long generation = BinaryPrimitives.ReadInt64LittleEndian(record[OffGeneration..]);
+            if ((record[OffFlags] & FlagInUse) == 0 || generation <= 0
+                || current.Generation != 0 && current.Generation != generation)
+                throw new CorruptionException("Property owner chain references a missing or stale version.");
+            if (DecodeOwner(BinaryPrimitives.ReadInt64LittleEndian(record[OffOwner..])) != owner)
+                throw new CorruptionException("Property owner chain references another owner or generation.");
+            long xmax = BinaryPrimitives.ReadInt64LittleEndian(record[OffXmax..]);
+            bool dead = ownerDead || xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
+            (dead ? reclaimed : retained).Add(PropertyVersionRef.Create(current.Sequence, checked((int)generation)));
+            long next = RecordHelpers.ReadInt48(record[OffNextOwned..]);
+            if (next < -1) throw new CorruptionException("Property owner chain has an invalid next reference.");
+            current = PropertyVersionRef.FromSequence(next);
         }
-        return reclaimed;
+        return new PropertyVacuumPlan(head, retained, reclaimed);
     }
 
-    internal int ReclaimOverflowChain(PropertyVersionRef head) => ReclaimEntireChain(head);
+    internal sealed class PropertyVacuumContext
+    {
+        internal HashSet<VectorPayloadRef>? ValidatedVectorReferences;
+    }
+
+    internal PropertyVersionRef ApplyVacuum(PropertyVacuumPlan plan, PropertyVacuumContext? context = null)
+    {
+        if (plan.Reclaimed.Count == 0) return plan.Head;
+        var vectors = new List<VectorPayloadRef>();
+        var slots = new HashSet<PropertyVersionRef>();
+        foreach (var version in plan.Reclaimed)
+        {
+            if (!version.IsValid || !slots.Add(version) || version.Sequence >= _hwm)
+                throw new CorruptionException("Property reclaim plan contains a duplicate or missing slot.");
+            var (pageId, offset) = Location(version.Sequence);
+            using var page = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+            if ((record[OffFlags] & FlagInUse) == 0
+                || BinaryPrimitives.ReadInt64LittleEndian(record[OffGeneration..]) != version.Generation)
+                throw new CorruptionException("Property reclaim plan references a missing or stale slot.");
+            if ((record[OffFlags] & FlagVectorPayload) != 0) vectors.Add(ReadVectorReference(record));
+        }
+        if (vectors.Count > 0)
+        {
+            context ??= new PropertyVacuumContext();
+            context.ValidatedVectorReferences ??= ValidateExclusiveVectorReferences();
+            foreach (var vector in vectors)
+                if (!context.ValidatedVectorReferences.Contains(vector))
+                    throw new CorruptionException("Property reclaim plan references an unvalidated vector payload.");
+        }
+        // 候補列挙を完了してから変更する。途中で所有者の不一致や循環を検出しても部分回収しない。
+        foreach (var version in plan.Reclaimed) ReclaimSlot(version);
+        PropertyVersionRef newHead = PropertyVersionRef.Invalid;
+        for (int i = plan.Retained.Count - 1; i >= 0; i--)
+        {
+            RewriteNext(plan.Retained[i], newHead);
+            newHead = plan.Retained[i];
+        }
+        return newHead;
+    }
+
+    private HashSet<VectorPayloadRef> ValidateExclusiveVectorReferences()
+    {
+        var references = new HashSet<VectorPayloadRef>();
+        for (long sequence = 0; sequence < _hwm; sequence++)
+        {
+            var (pageId, offset) = Location(sequence);
+            using var page = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> record = page.Data.Slice(offset, RecordSize);
+            if ((record[OffFlags] & (FlagInUse | FlagVectorPayload)) != (FlagInUse | FlagVectorPayload)) continue;
+            var reference = ReadVectorReference(record);
+            if (!reference.IsValid || !references.Add(reference))
+                throw new CorruptionException("Vector payload reference is invalid or shared by multiple property versions.");
+        }
+        return references;
+    }
+
+    private static VectorPayloadRef ReadVectorReference(ReadOnlySpan<byte> record) => new(
+        BinaryPrimitives.ReadInt64LittleEndian(record[OffValue..]),
+        BinaryPrimitives.ReadInt32LittleEndian(record[(OffValue + sizeof(long))..]));
 
     internal void FinishExternalReclaim()
     {
@@ -408,70 +472,14 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
         return PropertyVersionRef.Invalid;
     }
 
-    private (PropertyVersionRef Head, int Reclaimed) CompactChain(
-        EntityRef owner,
-        PropertyVersionRef head,
-        long horizonTxId,
-        CommittedTxRegistry committed)
-    {
-        var live = new List<PropertyVersionRef>();
-        int reclaimed = 0;
-        PropertyVersionRef current = Materialize(head.Sequence);
-        long guard = _hwm + 1;
-        while (current.IsValid && guard-- > 0)
-        {
-            PropertyVersionRecord record = ReadRaw(owner, current);
-            bool dead = !record.InUse || record.Xmax != 0 && record.Xmax < horizonTxId && committed.IsCommitted(record.Xmax);
-            PropertyVersionRef next = record.NextOwnedProperty;
-            if (dead)
-            {
-                if (record.InUse)
-                {
-                    ReclaimSlot(current);
-                    reclaimed++;
-                }
-            }
-            else
-            {
-                live.Add(current);
-            }
-            current = next;
-        }
-
-        PropertyVersionRef newHead = PropertyVersionRef.Invalid;
-        for (int i = live.Count - 1; i >= 0; i--)
-        {
-            RewriteNext(live[i], newHead);
-            newHead = live[i];
-        }
-        return (newHead, reclaimed);
-    }
-
-    private PropertyVersionRecord ReadRaw(EntityRef owner, PropertyVersionRef version)
-    {
-        return ReadCore(owner, version, LatestVisible, applyVisibility: false);
-    }
-
     private static bool LatestVisible(long xmin, long xmax) => xmin != 0 && xmax == 0;
-
-    private int ReclaimEntireChain(PropertyVersionRef head)
-    {
-        int count = 0;
-        PropertyVersionRef current = Materialize(head.Sequence);
-        long guard = _hwm + 1;
-        while (current.IsValid && guard-- > 0)
-        {
-            current = ReclaimSlot(current);
-            count++;
-        }
-        return count;
-    }
 
     private PropertyVersionRef ReclaimSlot(PropertyVersionRef version)
     {
         var (pageId, offset) = Location(version.Sequence);
         PropertyVersionRef next;
         long blobId = -1;
+        VectorPayloadRef vector = VectorPayloadRef.Invalid;
         long generation;
         long nextSequence;
         using (var h = _file.PinForRead(pageId))
@@ -479,19 +487,22 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
             ReadOnlySpan<byte> record = h.Data.Slice(offset, RecordSize);
             nextSequence = RecordHelpers.ReadInt48(record[OffNextOwned..]);
             generation = BinaryPrimitives.ReadInt64LittleEndian(record[OffGeneration..]);
+            if ((record[OffFlags] & FlagVectorPayload) != 0) vector = ReadVectorReference(record);
             if ((record[OffFlags] & (FlagSpillover | FlagVectorPayload)) == FlagSpillover)
                 blobId = BinaryPrimitives.ReadInt64LittleEndian(record[OffValue..]);
         }
         next = Materialize(nextSequence);
         if (blobId >= 0)
             _blobs.Free(blobId);
+        if (vector.IsValid && !_vectors.Free(vector))
+            throw new CorruptionException("Property references an already freed vector payload.");
 
         var ph = _file.PinForWrite(pageId);
         Span<byte> writable = ph.Data.Slice(offset, RecordSize);
         writable.Clear();
         RecordHelpers.WriteInt48(writable[OffNextOwned..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(writable[OffGeneration..], generation);
-        _file.UnpinDirty(pageId, 0);
+        ph.Dispose();
         _freeHead = version.Sequence;
         _metaDirty = true;
         return next;
@@ -502,7 +513,7 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
         var (pageId, offset) = Location(version.Sequence);
         var ph = _file.PinForWrite(pageId);
         RecordHelpers.WriteInt48(ph.Data[(offset + OffNextOwned)..], next.Sequence);
-        _file.UnpinDirty(pageId, 0);
+        ph.Dispose();
     }
 
     private void ShrinkHwmFromTrailingFreeSlots()
@@ -532,7 +543,7 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
 
             var ph = _file.PinForWrite(pageId);
             RecordHelpers.WriteInt48(ph.Data[(offset + OffNextOwned)..], _freeHead);
-            _file.UnpinDirty(pageId, 0);
+            ph.Dispose();
             _freeHead = sequence;
         }
     }
@@ -719,7 +730,7 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaAllocatedHwm..], _allocatedHwm);
         if (initialise)
             ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
-        _file.UnpinDirty(HeaderPageId, 0);
+        ph.Dispose();
         _metaDirty = false;
     }
 }

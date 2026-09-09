@@ -146,6 +146,24 @@ public sealed class NexusStoreTests : IDisposable
             (new VertexId(2), new RoleId(20)));
     }
 
+    [Fact]
+    public void Stale_generation_cannot_delete_or_write_current_nexus()
+    {
+        NexusId current = CreateTwoMemberNexus();
+        NexusId stale = NexusId.Create(current.Sequence, current.Generation + 1);
+
+        _nexuses.Delete(stale);
+        using (NexusReadHandle live = _nexuses.Read(current))
+            live.InUse.Should().BeTrue();
+
+        Action write = () =>
+        {
+            NexusWriteHandle handle = _nexuses.Write(stale);
+            handle.Dispose();
+        };
+        write.Should().Throw<CorruptionException>();
+    }
+
     private NexusId CreateTwoMemberNexus()
     {
         IncidenceMember[] members =

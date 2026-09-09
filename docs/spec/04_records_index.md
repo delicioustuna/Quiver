@@ -1,6 +1,6 @@
 # レコード & インデックス
 
-> as-built 仕様（QUIVER-SW family version 2、2026-08-03）
+> as-built 仕様（QUIVER-SW family version 2、2026-09-07）
 
 ## Slotted ページモデル {#slotted-pages}
 
@@ -24,6 +24,8 @@ Property version、incidence、primary vector payload は Sequence から固定 
 - xmin/xmax は version header に格納する。
 - Generation は `EntityVersionMeta` sidecar に格納する。
 - vacuum が reader horizon を越えた record を回収した後、Sequence を再利用すると Generation が増える。
+- `Free`と`Write`は、Generationが0の内部物理参照を除き、指定世代と補助メタデータの現在値を
+  照合してからヘッダを変更する。古い世代のIDでは現在のスロットを変更しない。
 
 ## Edge ストア {#rel-store}
 
@@ -42,6 +44,9 @@ adjacency、delta、locator が raw Sequence を保持するため、通常の d
 各 phase と対象 Sequence は primary catalog に永続化する。
 release 前の crash は再利用しない safe leak となり、reopen 後に未完了 phase から再開する。
 free list へ返した Sequence の次回割り当てでは Generation が増える。
+補助メタデータに再利用済みの印も同時に永続化し、巻き戻し後のメタデータ再読み込みやファイルを開き直した際に、
+Generationが1の高速経路へ誤って戻ることを防ぐ。`Delete` / `Write`によるレコードの特定では、位置情報の有無にかかわらず
+指定世代と補助メタデータの現在値を照合し、古いIDで現在のEdgeを参照しない。
 
 `AdjacencySegmentStore` は linked-list から再構築できる derived view である。
 descriptor version 2 の `KindSegment` だけを受理し、payload lane がない場合も `PayloadKind.None` の同じ segment format を使う。
@@ -65,6 +70,8 @@ header レコードが MVCC 可視性の正本になる。
 
 - `VersionedRecordHeap` + `ItemPointerMap` 上の固定 payload であり、inline property 領域は持たない
 - xmin/xmax は heap の version header、Generation は `EntityVersionMeta` sidecar に置く
+- `Delete`と`Write`は、Generationが0の内部物理参照を除き、指定世代と補助メタデータの現在値を
+  照合してからヘッダを変更する。古い世代のIDでは現在のスロットを変更しない
 - メンバー集合は作成時に確定し、以後変更されない。変更は削除 + 再作成で表現する
 - 同じロールとVertexの組は 1 つのNexus内で重複できない。
   同じVertexが別ロールで参加すること、同じロールに複数Vertexが参加することは許される
@@ -157,7 +164,8 @@ vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incide
 `Vacuum()` は database instance の writer lease を取得するが、active reader の終了は待たない。
 `SnapshotRegistry` が返す最古の visibility horizon より前だけを回収するため、long reader は開始時の property、payload、entity、manifest を読み続けられる。
 
-derived index entry を先に退役させ、primary property version とその version だけが参照する payload を同じ maintenance commit で回収する。
+導出索引の項目を先に退役させ、正本のプロパティ版と外部に格納したバイナリデータを、同じ保守処理のコミットで回収する。
+FloatArrayの参照先も、バイナリ領域の解放、ベクトルメタデータへの削除済みの印の設定、プロパティスロットの解放の順で、同じ保守処理のコミットで回収する。
 その後に incidence、Edge、Vertex、Nexus slot を回収する。
 この順序により、到達可能な property version が解放済み payload を指す状態を作らない。
 
@@ -166,6 +174,41 @@ derived index entry を先に退役させ、primary property version とその v
 回収結果は `RetiredVectorManifests`、`RetiredFullTextManifests`、`ReclaimedFullTextArtifacts` で報告する。
 
 ## Property ストア {#property-store}
+
+`VacuumTarget.Properties`は、Vertex・Edge・Nexusの全所有者のプロパティ連鎖を走査する。
+所有者の削除がコミット済みで、読み取り側の回収境界より古い場合は連鎖全体を回収する。
+生存中の所有者では、同じ条件を満たす古いプロパティ版だけを回収する。
+`Vertices` / `Edges` / `Nexuses`だけを指定した場合も、その種類の削除済みエンティティの回収に必要なプロパティを先に回収し、
+`ReclaimedProperties`へ合算する。`Properties`だけの場合はエンティティのスロットを回収せず、解放済み連鎖の先頭参照を無効にする。
+これにより、後続の`Vacuum`が再利用済みのプロパティスロットや空きリストをたどることを防ぐ。
+
+候補抽出では格納データを展開せず、メタデータだけを読む。
+全連鎖の所有者・世代、スロットの存在、循環と参照範囲を検証してから回収し、未変更の連鎖は書き直さない。
+`DryRun`は`Full`と同じ所有者・連鎖の判定で候補を数え、プロパティ版・Vertex・Edge・Nexus・接続情報、
+コミット履歴と索引のマニフェスト・関連ファイルの予測件数を返す。繰り返し実行しても候補を消費しない。
+プロパティの変更、エンティティの回収、連鎖の再構築、履歴の削除、関係の再利用、メンバー共有情報の再構築、チェックポイントは実行しない。
+現行の正本となる3ストアは、必要ページ数として現在の`PageCount`を返すため、切り詰めの見込みは`Full`と同様に0である。
+`DryRun`中の物理ページの読み取りでは、常駐ページからは変更済みの最新値を読み、未常駐ページは一時バッファへ直接読んで検証する。
+バッファプールへの追加や、変更済みページの追い出しによる書き出しは行わない。
+全文検索のマニフェストの破損時は、カタログや再構築通知を更新せず、`CorruptionException`を送出する。
+
+`MaxDurationMs`は書き込み権限の取得後の単調時計を使い、各処理段階の開始前に確認する。0以下は無制限である。
+期限超過後は、新たな正本データの回収、履歴削除、切り詰め、索引の不要データ回収を開始しない。
+開始済みの段階は中断せず、回収済みEdgeの再利用準備、Nexusの導出情報の再構築、`Full`のチェックポイントは、
+整合性維持のため期限を超えても完了する。完了済みの段階（`DryRun`では分析済みの段階）の件数と、
+後処理を含む`ElapsedMs`を報告する。期限による部分完了は`Skipped`ではない。
+
+`FloatArray`の格納データは古い読み取り側が参照可能な間は保持し、プロパティ版の物理回収時だけ解放する。
+適用直前にプロパティスロットの存在と世代を再検証する。ベクトルの回収候補がある保守処理では、
+使用中の全プロパティのベクトル参照を一度検査し、不正な共有参照を拒否する。
+格納データの世代・長さ・チェックサムを検証してからバイナリ領域を解放し、メタデータに削除済みの印を付ける。
+同一世代の解放済みデータへの再解放は検出でき、古い世代の参照は破損として拒否する。
+メタデータのスロットは再利用せず、割り当て済み上限も巻き戻さない。既存の無関係な未参照データを一括削除することはない。
+途中失敗は保守処理の変更前イメージで巻き戻し、復旧ではコミット済みのページイメージだけを再適用する。
+プロパティ回収は専用の更新集合を使い、所有者の先頭参照と空きリストも一緒にコミットする。後段のエンティティ回収や切り詰めとは分離する。
+未コミットページを書き出さない方式の容量制約を超えた場合は、その処理段階を巻き戻す。
+`Commit`の書き込み開始後に成否が不明になった場合は、インスタンスを障害状態にして未確定ページの書き出しを防ぎ、
+再度開いた際の復旧処理へ委ねる。`ReclaimedProperties`は格納データ数ではなく、プロパティ版数を表す。
 
 `PropertyVersionStore` (`src/Yatagarasu/Stores/PropertyVersionStore.cs`) は owner-bound property version を格納する。
 Property は独立 entity ではなく、public `PropertyId` を持たない。
@@ -218,6 +261,8 @@ Property は独立 entity ではなく、public `PropertyId` を持たない。
 - Generation は vacuum 後の slot 再利用時にインクリメントされ、ABA エイリアシングを防ぐ
 - Generation オーバーフロー (> 65535): その slot は恒久的に退役する
 - `VertexId`、`EdgeId`、`NexusId`、`EntityRef` の等価性とハッシュは Generation を含む。
+- 公開する`VertexKey`、`EdgeKey`、`NexusKey`はGenerationが1以上の場合だけを有効とし、既定の圧縮値0を
+  Sequenceが0のエンティティへ対応させない。Generationが0の参照は、検証済みの内部物理参照に限定する。
 - public な `EntityRef` は typed `From` または検証済み `Create` でだけ生成する。
   `Vertex`、`Edge`、`Nexus` 以外の kind と、範囲外の local value は拒否する。
   `default(EntityRef)` だけが invalid sentinel である。

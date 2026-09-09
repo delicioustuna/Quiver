@@ -146,7 +146,12 @@ public sealed class FullTextDurableArtifactTests : IDisposable
         FullTextSegmentIndex.ArtifactPhaseInjector = null;
         ArtifactFiles().Should().HaveCount(retainedCount + 1);
         using var reopened = YatagarasuDatabase.Open(DatabasePath);
+        var before = ArtifactFiles().ToDictionary(file => file, File.ReadAllBytes);
+        var dry = reopened.Vacuum(new VacuumOptions { Mode = VacuumMode.DryRun });
+        ArtifactFiles().ToDictionary(file => file, File.ReadAllBytes).Should().BeEquivalentTo(before);
+        Search(reopened, "stable").Should().ContainSingle().Which.Should().Be(document);
         var report = reopened.Vacuum();
+        dry.Should().BeEquivalentTo(report, config => config.Excluding(x => x.ElapsedMs));
         report.ReclaimedFullTextArtifacts.Should().BeGreaterThanOrEqualTo(1);
         ArtifactFiles().Count().Should().BeLessThan(retainedCount + 1);
         Search(reopened, "stable").Should().ContainSingle().Which.Should().Be(document);

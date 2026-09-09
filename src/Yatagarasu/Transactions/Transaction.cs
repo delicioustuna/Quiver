@@ -143,6 +143,7 @@ internal sealed class Transaction : ITransaction
             _properties.FlushMeta();
             _walWriteSet!.FlushPending();
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
+            _manager.BeforeCommitFlushForTest?.Invoke();
             _wal.FlushTo(lsn);
             durableCommitted = true;
             _nexuses.PublishPendingViewAdds();

@@ -221,12 +221,12 @@ public sealed class VacuumTests : IDisposable
 
         var dryRun = db.Vacuum(new VacuumOptions { Mode = VacuumMode.DryRun });
         dryRun.Skipped.Should().BeFalse();
-        dryRun.ReclaimedVertices.Should().Be(0); // ドライランは書き込まない
-        dryRun.PrunedCommittedTxEntries.Should().Be(0);
+        dryRun.ReclaimedVertices.Should().Be(1);
 
         // 続けて実行する Full は普通に回収できる。
         var full = db.Vacuum();
         full.ReclaimedVertices.Should().Be(1);
+        dryRun.PrunedCommittedTxEntries.Should().Be(full.PrunedCommittedTxEntries);
     }
 
     [Fact]

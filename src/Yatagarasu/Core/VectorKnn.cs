@@ -25,20 +25,27 @@ internal static class VectorMetrics
 /// Offer は O(log k)、最終抽出は O(k log k)。<see cref="ToSortedArray"/> は score 降順 / 同点は
 /// EntityId 昇順の決定的順序 (gather / scan / batch 経路が一致する)。
 /// </summary>
-internal sealed class VectorKnnHeap(int capacity)
+internal sealed class VectorKnnHeap(int capacity, bool rejectNonFiniteScores = false)
 {
     private readonly VectorSearchResult[] _items = new VectorSearchResult[capacity];
     private int _count;
 
     public void Offer(VectorSearchResult r)
     {
+        if (!float.IsFinite(r.Score))
+        {
+            if (rejectNonFiniteScores)
+                throw new VectorException("Vector search produced a non-finite score.");
+            return;
+        }
+        if (_items.Length == 0) return;
         if (_count < _items.Length)
         {
             _items[_count++] = r;
             SiftUpMin(_count - 1);
             return;
         }
-        if (r.Score > _items[0].Score)
+        if (Compare(r, _items[0]) < 0)
         {
             _items[0] = r;
             SiftDownMin(0);
@@ -49,12 +56,14 @@ internal sealed class VectorKnnHeap(int capacity)
     {
         var arr = new VectorSearchResult[_count];
         Array.Copy(_items, arr, _count);
-        Array.Sort(arr, static (a, b) =>
-        {
-            int c = b.Score.CompareTo(a.Score);
-            return c != 0 ? c : a.EntityId.CompareTo(b.EntityId);
-        });
+        Array.Sort(arr, Compare);
         return arr;
+    }
+
+    private static int Compare(VectorSearchResult a, VectorSearchResult b)
+    {
+        int score = b.Score.CompareTo(a.Score);
+        return score != 0 ? score : a.EntityId.CompareTo(b.EntityId);
     }
 
     private void SiftUpMin(int i)
@@ -62,7 +71,7 @@ internal sealed class VectorKnnHeap(int capacity)
         while (i > 0)
         {
             int p = (i - 1) >> 1;
-            if (_items[p].Score <= _items[i].Score) break;
+            if (Compare(_items[p], _items[i]) >= 0) break;
             (_items[p], _items[i]) = (_items[i], _items[p]);
             i = p;
         }
@@ -74,8 +83,8 @@ internal sealed class VectorKnnHeap(int capacity)
         while (true)
         {
             int l = 2 * i + 1, r = 2 * i + 2, m = i;
-            if (l < n && _items[l].Score < _items[m].Score) m = l;
-            if (r < n && _items[r].Score < _items[m].Score) m = r;
+            if (l < n && Compare(_items[l], _items[m]) > 0) m = l;
+            if (r < n && Compare(_items[r], _items[m]) > 0) m = r;
             if (m == i) break;
             (_items[m], _items[i]) = (_items[i], _items[m]);
             i = m;

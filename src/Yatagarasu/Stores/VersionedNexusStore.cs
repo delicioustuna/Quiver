@@ -149,6 +149,9 @@ internal sealed class VersionedNexusStore : INexusStore, ITransactionNexusStore
     public void Delete(NexusId nexusId, TransactionId transactionId)
     {
         long sequence = nexusId.Sequence;
+        if (sequence < 0 || sequence >= _map.Hwm) return;
+        int carriedGeneration = nexusId.Generation;
+        if (carriedGeneration != 0 && carriedGeneration != CurrentGeneration(sequence)) return;
         // xmax != 0 は論理削除済み。incidence には触れず header だけをスタンプする
         // (incidence の可視性は header 経由で消えるため)。
         if (!_heap.TryReadHeadRaw(sequence, out _, out _, out long xmax) || xmax != 0)
@@ -199,25 +202,36 @@ internal sealed class VersionedNexusStore : INexusStore, ITransactionNexusStore
 
     public NexusWriteHandle Write(NexusId nexusId)
     {
-        ItemPointer pointer = _heap.GetHead(nexusId.Sequence);
+        long sequence = nexusId.Sequence;
+        int carriedGeneration = nexusId.Generation;
+        if (sequence < 0
+            || sequence >= _map.Hwm
+            || (carriedGeneration != 0 && carriedGeneration != CurrentGeneration(sequence)))
+        {
+            throw new CorruptionException(
+                $"Write on missing or stale nexus seq={sequence} generation={carriedGeneration}.");
+        }
+        ItemPointer pointer = _heap.GetHead(sequence);
         if (pointer.IsNull)
             throw new CorruptionException(
-                $"Write on missing nexus seq={nexusId.Sequence}.");
+                $"Write on missing nexus seq={sequence}.");
 
         var pageId = new PageId(pointer.PageId);
         var page = _file.PinForWrite(pageId);
-        var slottedPage = new SlottedPage(page.Data);
-        if (!slottedPage.TryGetMutable(pointer.Slot, out Span<byte> record))
+        try
         {
-            _file.Unpin(pageId);
-            throw new CorruptionException(
-                $"Missing version slot for nexus seq={nexusId.Sequence}.");
+            var slottedPage = new SlottedPage(page.Data);
+            if (!slottedPage.TryGetMutable(pointer.Slot, out Span<byte> record))
+                throw new CorruptionException(
+                    $"Missing version slot for nexus seq={sequence}.");
+            Span<byte> fields = record.Slice(HdrSize, PayloadSize);
+            return new NexusWriteHandle(page.Transfer(), fields);
         }
-
-        return new NexusWriteHandle(
-            _file,
-            pageId,
-            record.Slice(HdrSize, PayloadSize));
+        catch
+        {
+            page.ReleaseUnchanged();
+            throw;
+        }
     }
 
     public IEnumerable<NexusId> Scan()
@@ -290,9 +304,9 @@ internal sealed class VersionedNexusStore : INexusStore, ITransactionNexusStore
     }
 
     /// <summary>
-    /// vacuum: live header の inline property 更新 (copy-on-write) で積まれた dead 旧版を prune する。
+    /// 読み取り側の参照可能範囲を外れたヘッダの旧版を回収する。プロパティ版の回収とは独立している。
     /// </summary>
-    internal void PruneDeadInlineVersions(long sequence, long horizonTxId, CommittedTxRegistry committed)
+    internal void PruneDeadHeaderVersions(long sequence, long horizonTxId, CommittedTxRegistry committed)
         => _heap.PruneDeadVersions(sequence,
             (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
 

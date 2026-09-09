@@ -47,7 +47,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         _anyReuse = true;
         var header = _file.PinForWrite(HeaderPageId);
         header.Data[MetaAnyReuse] = 1;
-        _file.UnpinDirty(HeaderPageId, 0);
+        header.Dispose();
     }
 
     public EntityVersionMeta Read(long localId)
@@ -74,7 +74,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         BinaryPrimitives.WriteInt64LittleEndian(record[OffsetXmin..], meta.Xmin);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffsetXmax..], meta.Xmax);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffsetGeneration..], meta.Generation);
-        _file.UnpinDirty(pageId, 0);
+        handle.Dispose();
     }
 
     public void UpdateXmax(long localId, long xmax)
@@ -96,7 +96,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         BinaryPrimitives.WriteInt64LittleEndian(
             handle.Data.Slice(offset + fieldOffset, sizeof(long)),
             value);
-        _file.UnpinDirty(pageId, 0);
+        handle.Dispose();
     }
 
     private static (PageId PageId, int Offset) Location(long localId)
@@ -117,7 +117,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
     {
         var header = _file.PinForWrite(HeaderPageId);
         header.Data[MetaFormatVersion] = SidecarFormatVersion;
-        _file.UnpinDirty(HeaderPageId, 0);
+        header.Dispose();
     }
 
     private void CheckFormatVersion()

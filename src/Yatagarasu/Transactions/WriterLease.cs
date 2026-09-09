@@ -14,13 +14,15 @@ internal sealed class WriterLease : IDisposable
     private readonly bool _failFast;
     private long _ownerTransactionId;
     private bool _disposed;
+    private readonly Action<TransactionId?>? _publishOwner;
 
-    internal WriterLease(TimeSpan timeout, bool failFast)
+    internal WriterLease(TimeSpan timeout, bool failFast, Action<TransactionId?>? publishOwner = null)
     {
         if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
             throw new ArgumentOutOfRangeException(nameof(timeout));
         _timeout = timeout;
         _failFast = failFast;
+        _publishOwner = publishOwner;
     }
 
     internal TransactionId? ActiveWriterId
@@ -40,8 +42,7 @@ internal sealed class WriterLease : IDisposable
         bool acquired = _semaphore.Wait(0);
         if (acquired)
         {
-            Volatile.Write(ref _ownerTransactionId, transactionId.Value);
-            return new WriterLeaseHandle(this, transactionId);
+            return SetOwner(transactionId);
         }
 
         YatagarasuTelemetry.WriterContentionCount.Add(1);
@@ -58,8 +59,32 @@ internal sealed class WriterLease : IDisposable
         if (!acquired)
             throw new WriterBusyException(WriterContentionMode.Wait, _timeout);
 
-        Volatile.Write(ref _ownerTransactionId, transactionId.Value);
-        return new WriterLeaseHandle(this, transactionId);
+        return SetOwner(transactionId);
+    }
+
+    /// <summary>
+    /// 待機せずに書き込み権限を取得します。取得できない場合は例外を送出せず <c>null</c> を返します。
+    /// </summary>
+    internal WriterLeaseHandle? TryAcquire(TransactionId transactionId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_semaphore.Wait(0)) return null;
+        return SetOwner(transactionId);
+    }
+
+    private WriterLeaseHandle SetOwner(TransactionId transactionId)
+    {
+        try
+        {
+            _publishOwner?.Invoke(transactionId);
+            Volatile.Write(ref _ownerTransactionId, transactionId.Value);
+            return new WriterLeaseHandle(this, transactionId);
+        }
+        catch
+        {
+            _semaphore.Release();
+            throw;
+        }
     }
 
     private void Release(TransactionId transactionId)
@@ -71,7 +96,9 @@ internal sealed class WriterLease : IDisposable
         {
             return;
         }
-        _semaphore.Release();
+        // 次の書き込み側が権限を取得する前に、旧所有者の消去を公開する。
+        try { _publishOwner?.Invoke(null); }
+        finally { _semaphore.Release(); }
     }
 
     public void Dispose()

@@ -400,10 +400,14 @@ public sealed class YatagarasuDatabaseTests : IDisposable
         {
             tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
             tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
-            tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
-            tx.SetProperty(raw, "weight", PropertyValue.FromInt64(100));
-            tx.DeleteEdge(stale);
-            tx.DeleteEdge(raw);
+            Action setStale = () => tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
+            Action setRaw = () => tx.SetProperty(raw, "weight", PropertyValue.FromInt64(100));
+            Action deleteStale = () => tx.DeleteEdge(stale);
+            Action deleteRaw = () => tx.DeleteEdge(raw);
+            setStale.Should().Throw<KeyNotFoundException>();
+            setRaw.Should().Throw<KeyNotFoundException>();
+            deleteStale.Should().Throw<KeyNotFoundException>();
+            deleteRaw.Should().Throw<KeyNotFoundException>();
             tx.Commit();
         }
 

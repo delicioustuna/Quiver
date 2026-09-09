@@ -134,6 +134,13 @@ if (args.Length >= 1 && args[0] == "--vector-segment-publish")
     return VectorSegmentPublishRunner.Run(args.Skip(1).ToArray());
 }
 
+// Durable unique scalar constraint correctness and cost.
+// Usage: -- --unique-constraint [operations]
+if (args.Length >= 1 && args[0] == "--unique-constraint")
+{
+    return UniqueConstraintRunner.Run(args.Skip(1).ToArray());
+}
+
 if (args.Length >= 1 && args[0] == "--incidence-traversal")
 {
     IncidenceTraversalBenchmarks.Run();

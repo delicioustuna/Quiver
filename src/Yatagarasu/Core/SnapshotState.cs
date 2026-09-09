@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Yatagarasu.Core;
 
 /// <summary>
@@ -5,7 +7,7 @@ namespace Yatagarasu.Core;
 /// </summary>
 internal readonly struct SnapshotState
 {
-    private static readonly IReadOnlySet<long> NoGaps = new HashSet<long>();
+    private static readonly IReadOnlySet<long> NoGaps = FrozenSet<long>.Empty;
 
     internal SnapshotState(
         long committedHighWater,

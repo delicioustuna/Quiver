@@ -645,7 +645,7 @@ internal sealed class HnswIndex
             int n = Math.Min(Body - intra, src.Length - copied);
             var ph = _file.PinForWrite(pid);
             src.Slice(copied, n).CopyTo(ph.Data.Slice(intra, n));
-            _file.UnpinDirty(pid, 0);
+            ph.Dispose();
             copied += n;
         }
     }

@@ -286,14 +286,14 @@ internal sealed class PagedTokenPersistence : ITokenPersistence
             w.Data.Clear();
             blob.AsSpan(off, n).CopyTo(w.Data);
             off += n;
-            _file.UnpinDirty(new PageId(2 + p), 0);
+            w.Dispose();
         }
 
         // ヘッダを書く
         var wh = _file.PinForWrite(HeaderPage);
         BinaryPrimitives.WriteInt32LittleEndian(wh.Data[HdrFrameCount..], byId.Count);
         BinaryPrimitives.WriteInt64LittleEndian(wh.Data[HdrBlobLen..], byteLen);
-        _file.UnpinDirty(HeaderPage, 0);
+        wh.Dispose();
     }
 
     private void EnsureLogical(long maxLogical)

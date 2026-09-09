@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 
 namespace Yatagarasu.Core;
 
@@ -12,6 +13,13 @@ internal sealed class CommittedTxRegistry
     private long _committedHighWater;
     private long _maxObservedTxId;
     private long _compactedVisibilityHorizon;
+    private readonly Lock _publicationGate = new();
+    private TransactionId? _activeWriterId;
+    private PublishedSnapshot _published = new(SnapshotState.Empty);
+
+    internal sealed record PublishedSnapshot(SnapshotState Snapshot);
+    internal PublishedSnapshot Published => Volatile.Read(ref _published);
+    internal Action? BeforePublishForTest { get; set; }
 
     internal CommittedTxRegistry()
     {
@@ -26,8 +34,12 @@ internal sealed class CommittedTxRegistry
         get => Volatile.Read(ref _compactedVisibilityHorizon);
         set
         {
-            Volatile.Write(ref _compactedVisibilityHorizon, value);
-            AdvanceHighWater(value);
+            lock (_publicationGate)
+            {
+                Volatile.Write(ref _compactedVisibilityHorizon, value);
+                AdvanceHighWater(value);
+                PublishSnapshot();
+            }
         }
     }
 
@@ -48,27 +60,74 @@ internal sealed class CommittedTxRegistry
 
     internal void MarkCommitted(TransactionId txId)
     {
-        _committed[txId.Value] = 0;
-        _aborted.TryRemove(txId.Value, out _);
-        RecordMaxObservedTxId(txId.Value);
-        AdvanceHighWater(txId.Value);
+        lock (_publicationGate)
+        {
+            _committed[txId.Value] = 0;
+            _aborted.TryRemove(txId.Value, out _);
+            RecordMaxObservedTxId(txId.Value);
+            AdvanceHighWater(txId.Value);
+            if (_activeWriterId == txId) _activeWriterId = null;
+            PublishSnapshot();
+        }
     }
 
     internal void MarkAborted(TransactionId txId)
     {
         if (txId.Value <= TransactionId.Bootstrap.Value) return;
-        _aborted[txId.Value] = 0;
-        _committed.TryRemove(txId.Value, out _);
-        RecordMaxObservedTxId(txId.Value);
+        lock (_publicationGate)
+        {
+            _aborted[txId.Value] = 0;
+            _committed.TryRemove(txId.Value, out _);
+            RecordMaxObservedTxId(txId.Value);
+            PublishSnapshot();
+        }
     }
 
-    internal SnapshotState Capture(TransactionId? activeWriterId)
+    internal void SetActiveWriter(TransactionId? transactionId)
     {
+        lock (_publicationGate)
+        {
+            _activeWriterId = transactionId;
+            PublishSnapshot();
+        }
+    }
+
+    // 更新はデータベースの書き込み権限で直列化し、復旧はデータベースを開く際に直列に実行する。
+    // このロックは組の構築と公開だけを保護し、読み取り側は取得しない。
+    private void PublishSnapshot()
+    {
+        System.Diagnostics.Debug.Assert(_publicationGate.IsHeldByCurrentThread);
         long highWater = CommittedHighWater;
-        var gaps = _aborted.Keys
-            .Where(id => id <= highWater)
-            .ToHashSet();
-        return new SnapshotState(highWater, gaps, activeWriterId);
+        IReadOnlySet<long> gaps = _aborted.IsEmpty ? FrozenSet<long>.Empty
+            : _aborted.Keys.Where(id => id <= highWater).ToFrozenSet();
+        BeforePublishForTest?.Invoke();
+        Volatile.Write(ref _published,
+            new PublishedSnapshot(new SnapshotState(highWater, gaps, _activeWriterId)));
+    }
+
+    internal void RestoreRecoveredTransactions(
+        IEnumerable<long> winners, IEnumerable<long> observed, long maxObserved)
+    {
+        lock (_publicationGate)
+        {
+            var committedIds = winners.ToHashSet();
+            foreach (long id in committedIds)
+            {
+                _committed[id] = 0;
+                _aborted.TryRemove(id, out _);
+                AdvanceHighWater(id);
+            }
+            foreach (long id in observed)
+            {
+                if (id > TransactionId.Bootstrap.Value && !committedIds.Contains(id))
+                {
+                    _aborted[id] = 0;
+                    _committed.TryRemove(id, out _);
+                }
+            }
+            RecordMaxObservedTxId(maxObserved);
+            PublishSnapshot();
+        }
     }
 
     internal bool IsCommitted(long txId)
@@ -89,22 +148,27 @@ internal sealed class CommittedTxRegistry
 
     internal int Count => _committed.Count;
 
-    internal int PruneBelow(long horizonTxId)
+    internal int PruneBelow(long horizonTxId, bool dryRun = false)
     {
-        int removed = 0;
-        foreach (long key in _committed.Keys)
+        lock (_publicationGate)
         {
-            if (key == TransactionId.Bootstrap.Value || key >= horizonTxId) continue;
-            if (_committed.TryRemove(key, out _)) removed++;
-        }
+            int removed = 0;
+            foreach (long key in _committed.Keys)
+            {
+                if (key == TransactionId.Bootstrap.Value || key >= horizonTxId) continue;
+                if (dryRun || _committed.TryRemove(key, out _)) removed++;
+            }
 
-        foreach (long key in _aborted.Keys)
-        {
-            if (key < horizonTxId)
-                _aborted.TryRemove(key, out _);
-        }
+            if (dryRun) return removed;
+            foreach (long key in _aborted.Keys)
+            {
+                if (key < horizonTxId)
+                    _aborted.TryRemove(key, out _);
+            }
 
-        return removed;
+            PublishSnapshot();
+            return removed;
+        }
     }
 
     private void AdvanceHighWater(long value)

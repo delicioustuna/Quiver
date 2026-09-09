@@ -87,7 +87,9 @@ public sealed class PropertyOwnershipTests : IDisposable
                     PropertyCardinality.Single,
                     in value,
                     PropertyVersionRef.Invalid);
-                store.ReclaimOverflowChain(original).Should().Be(1);
+                var plan = store.PlanVacuum(FirstOwner, original, true, long.MaxValue, new CommittedTxRegistry());
+                plan.Reclaimed.Count.Should().Be(1);
+                store.ApplyVacuum(plan).Should().Be(PropertyVersionRef.Invalid);
                 store.FinishExternalReclaim();
                 store.Read(FirstOwner, original).InUse.Should().BeFalse();
             }
@@ -117,6 +119,74 @@ public sealed class PropertyOwnershipTests : IDisposable
             foreach (string path in paths)
                 File.Delete(path);
         }
+    }
+
+    [Theory]
+    [InlineData("cycle")]
+    [InlineData("owner")]
+    [InlineData("generation")]
+    [InlineData("range")]
+    public void Vacuum_planning_rejects_corrupt_chains_before_reclaiming_any_slot(string corruption)
+    {
+        var first = Create(FirstOwner, 1, PropertyCardinality.Single, 1, PropertyVersionRef.Invalid);
+        var other = Create(SecondOwner, 2, PropertyCardinality.Single, 2, PropertyVersionRef.Invalid);
+        var head = first;
+        if (corruption == "generation") head = PropertyVersionRef.Create(first.Sequence, first.Generation + 1);
+        else
+        {
+            using var page = _files[0].PinForWrite(new PageId(2));
+            RecordHelpers.WriteInt48(page.Data[22..], corruption switch
+            {
+                "cycle" => first.Sequence,
+                "owner" => other.Sequence,
+                _ => 9999,
+            });
+        }
+        byte[] before;
+        using (var page = _files[0].PinForRead(new PageId(2))) before = page.Raw.ToArray();
+        long freeHead = _store.FreeHead;
+        Action plan = () => _store.PlanVacuum(FirstOwner, head, true, long.MaxValue,
+            new CommittedTxRegistry());
+        plan.Should().Throw<CorruptionException>();
+        _store.FreeHead.Should().Be(freeHead);
+        using var after = _files[0].PinForRead(new PageId(2));
+        after.Raw.ToArray().Should().Equal(before);
+    }
+
+    [Fact]
+    public void Vacuum_rejects_shared_vector_references_before_freeing_either_owner()
+    {
+        PropertyValue value = PropertyValue.FromFloatArray(new float[] { 1, 2, 3 });
+        var first = _store.Create(new PropertyAddress(FirstOwner, new PropertyKeyId(1)),
+            PropertyCardinality.Single, in value, PropertyVersionRef.Invalid);
+        _store.Create(new PropertyAddress(SecondOwner, new PropertyKeyId(1)),
+            PropertyCardinality.Single, in value, PropertyVersionRef.Invalid);
+        byte[] before;
+        using (var page = _files[0].PinForWrite(new PageId(2)))
+        {
+            page.Data.Slice(32, 12).CopyTo(page.Data.Slice(84 + 32, 12));
+            before = page.Data.ToArray();
+        }
+        var plan = _store.PlanVacuum(FirstOwner, first, true, long.MaxValue, new CommittedTxRegistry());
+        Action apply = () => _store.ApplyVacuum(plan);
+        apply.Should().Throw<CorruptionException>().WithMessage("*shared*");
+        using var after = _files[0].PinForRead(new PageId(2));
+        after.Data.ToArray().Should().Equal(before);
+        var vectors = new VectorPayloadStore(_files[2], _files[3]);
+        vectors.Read(new VectorPayloadRef(0, 1)).Should().Equal(1, 2, 3);
+        vectors.Read(new VectorPayloadRef(1, 1)).Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public void Applying_a_reclaim_plan_twice_rejects_the_stale_slot()
+    {
+        var first = Create(FirstOwner, 1, PropertyCardinality.Single, 1, PropertyVersionRef.Invalid);
+        var plan = _store.PlanVacuum(FirstOwner, first, true, long.MaxValue, new CommittedTxRegistry());
+        _store.ApplyVacuum(plan);
+        long freeHead = _store.FreeHead;
+        Action apply = () => _store.ApplyVacuum(plan);
+        apply.Should().Throw<CorruptionException>();
+        _store.FreeHead.Should().Be(freeHead);
     }
 
     public void Dispose()

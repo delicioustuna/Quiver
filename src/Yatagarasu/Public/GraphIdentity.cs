@@ -10,7 +10,7 @@ public readonly struct VertexKey : IEquatable<VertexKey>
     internal VertexKey(VertexId value) => _value = value.Value;
 
     /// <summary>有効な識別子かどうかを返す。</summary>
-    public bool IsValid => _value >= 0;
+    public bool IsValid => _value >= 0 && (_value >> 60) == 0 && EntityRef.UnpackGeneration(_value) > 0;
 
     internal VertexId ToCore() => new(_value);
 
@@ -41,7 +41,7 @@ public readonly struct EdgeKey : IEquatable<EdgeKey>
     internal EdgeKey(EdgeId value) => _value = value.Value;
 
     /// <summary>有効な識別子かどうかを返す。</summary>
-    public bool IsValid => _value >= 0;
+    public bool IsValid => _value >= 0 && (_value >> 60) == 0 && EntityRef.UnpackGeneration(_value) > 0;
 
     internal EdgeId ToCore() => new(_value);
 
@@ -72,7 +72,7 @@ public readonly struct NexusKey : IEquatable<NexusKey>
     internal NexusKey(NexusId value) => _value = value.Value;
 
     /// <summary>有効な識別子かどうかを返す。</summary>
-    public bool IsValid => _value >= 0;
+    public bool IsValid => _value >= 0 && (_value >> 60) == 0 && EntityRef.UnpackGeneration(_value) > 0;
 
     internal NexusId ToCore() => new(_value);
 

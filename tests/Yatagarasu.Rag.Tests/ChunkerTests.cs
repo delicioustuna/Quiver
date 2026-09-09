@@ -9,6 +9,68 @@ namespace Yatagarasu.Rag.Tests;
 /// </summary>
 public sealed class ChunkerTests
 {
+    [Theory]
+    [InlineData(BlockKind.Paragraph, 1, 0)]
+    [InlineData(BlockKind.Paragraph, 2, 0)]
+    [InlineData(BlockKind.Paragraph, 2, 1)]
+    [InlineData(BlockKind.Table, 1, 0)]
+    [InlineData(BlockKind.Code, 1, 0)]
+    public void Small_windows_keep_each_supplementary_scalar_whole(BlockKind kind, int size, int overlap)
+    {
+        var chunks = Chunker.Chunk(new[] { new IngestedBlock(kind, "😀😀") },
+            new ChunkingOptions { TargetSize = size, Overlap = overlap, MaxChunkSize = size });
+        chunks.Select(c => c.Text).Should().Equal("😀", "😀");
+        chunks.Select(c => c.CharStart).Should().Equal(0, 2);
+        chunks.Select(c => c.CharEnd).Should().Equal(2, 4);
+    }
+
+    [Fact]
+    public void Unicode_corpus_preserves_scalars_coverage_and_overlap_bound()
+    {
+        string[] texts = ["", "日本語。\n次の文！", "😀😀", "a😀b😀c", "✈️👨‍👩‍👧‍👦e\u0301", "a\n😀 xyz 👩‍💻 next"];
+        var random = new Random(20260908);
+        string[] alphabet = ["a", "日", "😀", "𝄞", " ", "\n", "\u0301", "\u200d", "\ufe0f"];
+        texts = texts.Concat(Enumerable.Range(0, 40).Select(_ =>
+            string.Concat(Enumerable.Range(0, 25).Select(_ => alphabet[random.Next(alphabet.Length)])))).ToArray();
+        foreach (string text in texts)
+        foreach (BlockKind kind in new[] { BlockKind.Paragraph, BlockKind.Table, BlockKind.Code })
+        for (int size = 1; size <= 6; size++)
+        for (int overlap = 0; overlap < size; overlap++)
+        {
+            var chunks = Chunker.Chunk(new[] { new IngestedBlock(kind, text) },
+                new ChunkingOptions { TargetSize = size, MaxChunkSize = size, Overlap = overlap });
+            int previousStart = -1, covered = 0;
+            foreach (var chunk in chunks)
+            {
+                chunk.CharStart.Should().BeGreaterThan(previousStart);
+                chunk.CharStart.Should().BeLessOrEqualTo(covered);
+                (covered - chunk.CharStart).Should().BeLessOrEqualTo(kind == BlockKind.Paragraph ? overlap : 0);
+                chunk.Text.Should().Be(text[chunk.CharStart..chunk.CharEnd]);
+                chunk.Text.Length.Should().BeInRange(1, Math.Max(size, 2));
+                int position = 0;
+                while (position < chunk.Text.Length)
+                {
+                    System.Text.Rune.DecodeFromUtf16(chunk.Text.AsSpan(position), out _, out int consumed)
+                        .Should().Be(System.Buffers.OperationStatus.Done);
+                    position += consumed;
+                }
+                previousStart = chunk.CharStart;
+                covered = chunk.CharEnd;
+            }
+            covered.Should().Be(text.Length);
+            Reconstruct(chunks).Should().Be(text);
+        }
+    }
+
+    [Fact]
+    public void Malformed_utf16_is_preserved_without_splitting_valid_pairs()
+    {
+        string text = "a\udc00b\ud800c😀\ud800";
+        var chunks = Chunker.Chunk(new[] { Para(text) }, new ChunkingOptions { TargetSize = 1, Overlap = 0 });
+        chunks.Select(c => c.Text).Should().Equal("a", "\udc00", "b", "\ud800", "c", "😀", "\ud800");
+        Reconstruct(chunks).Should().Be(text);
+    }
+
     private static IngestedBlock Para(string text) => new(BlockKind.Paragraph, text);
     private static IngestedBlock Heading(int level, string text) => new(BlockKind.Heading, text, HeadingLevel: level);
 

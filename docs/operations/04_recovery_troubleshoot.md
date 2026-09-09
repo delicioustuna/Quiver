@@ -127,6 +127,7 @@ Console.WriteLine($"除去した orphan = {applied.RemovedCount}, " +
 // まず DryRun でどれだけ回収できるか見る
 var dry = db.Vacuum(new VacuumOptions { Mode = VacuumMode.DryRun });
 Console.WriteLine($"回収可能 Vertex version 数 = {dry.ReclaimedVertices}, horizon={dry.HorizonTxId}");
+Console.WriteLine($"Edge={dry.ReclaimedEdges}, Nexus={dry.ReclaimedNexuses}, property={dry.ReclaimedProperties}");
 
 // 実行。active reader がいても最古 snapshot の horizon より前は回収できる。
 var report = db.Vacuum();
@@ -139,6 +140,14 @@ else
 
 - vacuum は writer lease を取得するが、active reader の終了を待たない。
   最古 snapshot の visibility horizon より前だけを回収し、reader が参照できる version は残す。
+- `DryRun`は回収・再構築・チェックポイントを実行せず、読み取りに伴う変更済みページの退避書き出しも避ける。
+  全文検索のマニフェストの破損を検出した場合は、状態を修復せずエラーを返す。
+  直後の`Full`との予測件数の一致は、書き込みや読み取り終了によって回収境界と候補が変わらず、
+  どちらも時間上限に達しない場合に限る。
+- `MaxDurationMs`が正なら、書き込み権限の取得後の経過時間を、各処理段階の開始前に確認する。
+  期限超過後は次の段階を開始せず、実施済みの件数を報告する。開始済みの処理と、整合性に必要な
+  後処理・チェックポイントは完了させるため、指定時間内に必ず戻る保証はない。残りは次回の`Vacuum`で回収できる。
+
 - `GetSnapshotDiagnostics()` の `OldestAge` が長い場合は、不要な read transaction が開いたままになっていないか確認する。
 - 物理 truncate (ページファイル縮小) にも対応済み (`TruncatedPages` に削減ページ数が出る)。
 - 自動で回したい場合は `YatagarasuDatabaseOptions.AutoVacuum = true` と `AutoVacuumInterval` を設定する。

@@ -130,6 +130,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
 
         _heap.Insert(seq, payload, transactionId.Value);
         _versions.Write(seq, new EntityVersionMeta(transactionId.Value, 0, generation));
+        if (reused)
+            _versions.MarkGenerationReuse();
         _locators?.WriteLive(seq, checked((int)generation), seq, source, target, type);
         AddMergeCandidate(edgeId, source, target, type);
         _inUseCount++;
@@ -226,14 +228,19 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
             throw new CorruptionException($"Write on missing edge seq={seq}");
         var pageId = new PageId(ptr.PageId);
         var ph = _file.PinForWrite(pageId);
-        var sp = new SlottedPage(ph.Data);
-        if (!sp.TryGetMutable(ptr.Slot, out var rec))
+        try
         {
-            _file.Unpin(pageId);
-            throw new CorruptionException($"missing version slot for edge seq={seq}");
+            var sp = new SlottedPage(ph.Data);
+            if (!sp.TryGetMutable(ptr.Slot, out var rec))
+                throw new CorruptionException($"missing version slot for edge seq={seq}");
+            var fields = rec.Slice(HdrSize, PayloadSize);
+            return new EdgeWriteHandle(ph.Transfer(), fields);
         }
-        var fields = rec.Slice(HdrSize, PayloadSize);
-        return new EdgeWriteHandle(_file, pageId, fields);
+        catch
+        {
+            ph.ReleaseUnchanged();
+            throw;
+        }
     }
 
     public EdgeEnumerator EnumerateNeighbors(VertexId vertexId, IVertexStore vertexStore)
@@ -349,7 +356,20 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
     /// <summary>内部 heap PagedFile。</summary>
     internal IPagedFile UnderlyingFile => _file;
 
-    /// <summary>vacuum: 可視性フィルタ無しの head version raw 読み取り。範囲外 / 未登録は default。</summary>
+    /// <summary>保守処理が検証した所有者のプロパティ先頭参照を、削除済みの所有者も含めて更新する。</summary>
+    internal void UpdateFirstPropertyRefRaw(EdgeId edgeId, PropertyVersionRef head)
+    {
+        if (edgeId.Generation != CurrentGeneration(edgeId.Sequence))
+            throw new CorruptionException("Property owner generation changed during maintenance.");
+        var pointer = _heap.GetHead(edgeId.Sequence);
+        if (pointer.IsNull) throw new CorruptionException("Property owner is missing during maintenance.");
+        using var page = _file.PinForWrite(new PageId(pointer.PageId));
+        var slotted = new SlottedPage(page.Data);
+        if (!slotted.TryGetMutable(pointer.Slot, out var record))
+            throw new CorruptionException("Property owner slot is missing during maintenance.");
+        RecordHelpers.WriteInt48(record[(HdrSize + OffFirstProp)..], head.Sequence);
+    }
+
     internal RawEdgeRecord ReadRaw(long seq)
     {
         if (seq < 0 || seq >= _map.Hwm) return default;
@@ -384,7 +404,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         VersionedVertexStore vertexStore,
         long horizonTxId,
         CommittedTxRegistry committed,
-        ICollection<long>? reclaimedSequences)
+        ICollection<long>? reclaimedSequences,
+        bool dryRun = false)
     {
         var reclaimSet = new HashSet<long>();
 
@@ -401,7 +422,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
                 && committed.IsCommitted(raw.Xmax);
 
             RebuildChainForVertex(new VertexId(nid), raw.FirstEdgeId, vertexStore,
-                horizonTxId, committed, reclaimSet, vertexWillBeReclaimed);
+                horizonTxId, committed, reclaimSet, vertexWillBeReclaimed, dryRun);
         }
 
         // Pass 2: 全 edge slot を走査し、まだ reclaim 集合に居ない dead edge を拾う。
@@ -416,7 +437,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
             bool dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
             if (dead)
                 reclaimSet.Add(seq);
-            else if (xmax == 0)
+            else if (!dryRun && xmax == 0)
                 _heap.PruneDeadVersions(seq,
                     (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
         }
@@ -425,6 +446,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         // raw derived entry が残るため、ここで map free list へ Sequence を release してはならない。
         // 再利用解放は base rebuild、delta/epoch reset、locator rebuild、derived durable を完了した
         // maintenance coordinator だけが担う。
+        if (dryRun) return reclaimSet.Count;
         foreach (var seq in reclaimSet)
         {
             _heap.Remove(seq);
@@ -465,7 +487,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
 
     private void RebuildChainForVertex(VertexId vertex, EdgeId head,
         VersionedVertexStore vertexStore, long horizonTxId, CommittedTxRegistry committed,
-        HashSet<long> reclaimSet, bool vertexWillBeReclaimed)
+        HashSet<long> reclaimSet, bool vertexWillBeReclaimed, bool dryRun)
     {
         var entries = new List<(EdgeId Id, bool VertexIsSource, bool Dead)>();
         var cur = head;
@@ -492,7 +514,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
             cur = nextOnThisSide;
         }
 
-        if (vertexWillBeReclaimed)
+        if (dryRun || vertexWillBeReclaimed)
             return; // Vertex自体が消えるので chain head 更新は不要。
 
         // live Vertex: live entries だけ残して chain を再構築。
@@ -531,13 +553,19 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         bool requireLive = false)
     {
         recordSequence = edgeId.Sequence;
+        if (!edgeId.IsValid || edgeId.Sequence >= _map.Hwm)
+            return false;
+
+        int carriedGeneration = edgeId.Generation;
+        if (carriedGeneration != 0 && carriedGeneration != CurrentGeneration(edgeId.Sequence))
+            return false;
+
         if (_locators == null)
-            return edgeId.IsValid;
+            return true;
 
         if (!_locators.TryRead(edgeId.Sequence, out var locator))
             return false;
 
-        int carriedGeneration = edgeId.Generation;
         if (carriedGeneration != 0 && carriedGeneration != locator.Generation)
             return false;
         if (requireLive && !locator.Live)

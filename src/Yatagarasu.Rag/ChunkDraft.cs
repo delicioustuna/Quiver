@@ -4,7 +4,7 @@ namespace Yatagarasu.Rag;
 /// チャンカー (<see cref="Chunker"/>) が出力する 1 チャンクのドラフト。永続化前の純粋な値で、
 /// ストレージ ID を持たない。<see cref="CharStart"/>/<see cref="CharEnd"/> は文書ソーステキスト
 /// (各ブロック本文を <see cref="Chunker.BlockSeparator"/> で連結したもの) 上の半開区間
-/// [start, end) オフセットで、<see cref="Text"/> はその区間のスライスと一致する。
+/// [start, end) のUTF-16コード単位オフセットで、<see cref="Text"/> はその区間のスライスと一致する。
 /// </summary>
 /// <param name="Text">チャンク本文。</param>
 /// <param name="Ordinal">文書内のチャンク順序 (0 起点、出力順に連番)。</param>

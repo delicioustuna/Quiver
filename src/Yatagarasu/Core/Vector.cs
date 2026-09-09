@@ -138,6 +138,9 @@ internal readonly record struct VectorSearchResult(
 /// </summary>
 public sealed class VectorSearchOptions
 {
+    // 数理計算では候補の欠落を正常な疎グラフと解釈できない。
+    internal bool RejectNonFiniteScores { get; init; }
+
     /// <summary>
     /// HNSW の探索ビーム幅。大きいほど再現率が上がりやすい一方、検索時間と一時メモリが増える。
     /// 既定値 200 は従来の固定値と同一。

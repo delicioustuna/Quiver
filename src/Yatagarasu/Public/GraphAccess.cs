@@ -49,14 +49,14 @@ public abstract class GraphReadAccess
     public bool Contains(VertexKey vertex)
     {
         EnsureActive();
-        return Transaction.VertexExists(vertex.ToCore());
+        return vertex.IsValid && Transaction.VertexExists(vertex.ToCore());
     }
 
     /// <summary>指定した Vertex のラベルを返す。存在しない場合は <c>null</c>。</summary>
     public string? GetLabel(VertexKey vertex)
     {
         EnsureActive();
-        return Transaction.GetVertexLabel(vertex.ToCore());
+        return vertex.IsValid ? Transaction.GetVertexLabel(vertex.ToCore()) : null;
     }
 
     /// <summary>Vertex のプロパティを取得する。</summary>
@@ -64,6 +64,11 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!vertex.IsValid)
+        {
+            value = default;
+            return false;
+        }
         if (!Transaction.HasProperty(vertex.ToCore(), property))
         {
             value = default;
@@ -79,6 +84,11 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!edge.IsValid)
+        {
+            value = default;
+            return false;
+        }
         PropertyValue current = Transaction.GetProperty(edge.ToCore(), property);
         if ((byte)current.Type == 0)
         {
@@ -95,6 +105,11 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!nexus.IsValid)
+        {
+            value = default;
+            return false;
+        }
         if (!Transaction.HasProperty(nexus.ToCore(), property))
         {
             value = default;
@@ -125,6 +140,7 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!vertex.IsValid) return Array.Empty<GraphValue>();
         var result = new List<GraphValue>();
         var cursor = Transaction.GetPropertyValues(vertex.ToCore(), property);
         try
@@ -145,6 +161,7 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!edge.IsValid) return Array.Empty<GraphValue>();
         var result = new List<GraphValue>();
         var cursor = Transaction.GetPropertyValues(edge.ToCore(), property);
         try
@@ -164,6 +181,7 @@ public abstract class GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        if (!nexus.IsValid) return Array.Empty<GraphValue>();
         var result = new List<GraphValue>();
         var cursor = Transaction.GetPropertyValues(nexus.ToCore(), property);
         try
@@ -185,8 +203,10 @@ public abstract class GraphReadAccess
         string? type = null)
     {
         EnsureActive();
+        Direction coreDirection = direction.ToCore();
+        if (!vertex.IsValid || !Transaction.VertexExists(vertex.ToCore())) return Array.Empty<GraphEdge>();
         var result = new List<GraphEdge>();
-        var cursor = Transaction.EnumerateEdges(vertex.ToCore(), direction.ToCore(), type);
+        var cursor = Transaction.EnumerateEdges(vertex.ToCore(), coreDirection, type);
         try
         {
             while (cursor.MoveNext())
@@ -225,6 +245,7 @@ public abstract class GraphReadAccess
     public IReadOnlyList<GraphNexusMember> GetMembers(NexusKey nexus, string? role = null)
     {
         EnsureActive();
+        if (!nexus.IsValid) return Array.Empty<GraphNexusMember>();
         var result = new List<GraphNexusMember>();
         var cursor = Transaction.GetMembers(nexus.ToCore(), role);
         try
@@ -244,6 +265,7 @@ public abstract class GraphReadAccess
     public IReadOnlyList<NexusKey> GetNexuses(VertexKey vertex, string? type = null, string? role = null)
     {
         EnsureActive();
+        if (!vertex.IsValid || !Transaction.VertexExists(vertex.ToCore())) return Array.Empty<NexusKey>();
         var result = new List<NexusKey>();
         var cursor = Transaction.GetNexuses(vertex.ToCore(), type, role);
         try
@@ -291,21 +313,21 @@ public abstract class GraphWriteAccess : GraphReadAccess
     public void Delete(VertexKey vertex)
     {
         EnsureActive();
-        WriteTransaction.DeleteVertex(vertex.ToCore());
+        WriteTransaction.DeleteVertex(RequireVertex(vertex));
     }
 
     /// <summary>Edge を削除する。</summary>
     public void Delete(EdgeKey edge)
     {
         EnsureActive();
-        WriteTransaction.DeleteEdge(edge.ToCore());
+        WriteTransaction.DeleteEdge(RequireEdge(edge));
     }
 
     /// <summary>Nexus を削除する。</summary>
     public void Delete(NexusKey nexus)
     {
         EnsureActive();
-        WriteTransaction.DeleteNexus(nexus.ToCore());
+        WriteTransaction.DeleteNexus(RequireNexus(nexus));
     }
 
     /// <summary>Vertex のプロパティを設定する。</summary>
@@ -313,8 +335,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        VertexId id = RequireVertex(vertex);
         PropertyValue core = value.ToCore();
-        WriteTransaction.SetProperty(vertex.ToCore(), property, in core);
+        WriteTransaction.SetProperty(id, property, in core);
     }
 
     /// <summary>Edge のプロパティを設定する。</summary>
@@ -322,8 +345,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        EdgeId id = RequireEdge(edge);
         PropertyValue core = value.ToCore();
-        WriteTransaction.SetProperty(edge.ToCore(), property, in core);
+        WriteTransaction.SetProperty(id, property, in core);
     }
 
     /// <summary>Nexus のプロパティを設定する。</summary>
@@ -331,29 +355,33 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        NexusId id = RequireNexus(nexus);
         PropertyValue core = value.ToCore();
-        WriteTransaction.SetProperty(nexus.ToCore(), property, in core);
+        WriteTransaction.SetProperty(id, property, in core);
     }
 
     /// <summary>Vertex のプロパティを削除する。</summary>
     public void Remove(VertexKey vertex, string property)
     {
         EnsureActive();
-        WriteTransaction.RemoveProperty(vertex.ToCore(), property);
+        ArgumentException.ThrowIfNullOrEmpty(property);
+        WriteTransaction.RemoveProperty(RequireVertex(vertex), property);
     }
 
     /// <summary>Edge のプロパティを削除する。</summary>
     public void Remove(EdgeKey edge, string property)
     {
         EnsureActive();
-        WriteTransaction.RemoveProperty(edge.ToCore(), property);
+        ArgumentException.ThrowIfNullOrEmpty(property);
+        WriteTransaction.RemoveProperty(RequireEdge(edge), property);
     }
 
     /// <summary>Nexus のプロパティを削除する。</summary>
     public void Remove(NexusKey nexus, string property)
     {
         EnsureActive();
-        WriteTransaction.RemoveProperty(nexus.ToCore(), property);
+        ArgumentException.ThrowIfNullOrEmpty(property);
+        WriteTransaction.RemoveProperty(RequireNexus(nexus), property);
     }
 
     /// <summary>Vertex の Set cardinality プロパティへ値を追加する。</summary>
@@ -361,8 +389,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        VertexId id = RequireVertex(vertex);
         PropertyValue core = value.ToCore();
-        WriteTransaction.AddPropertyValue(vertex.ToCore(), property, in core);
+        WriteTransaction.AddPropertyValue(id, property, in core);
     }
 
     /// <summary>Vertex の Set cardinality プロパティから値を削除する。</summary>
@@ -370,8 +399,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        VertexId id = RequireVertex(vertex);
         PropertyValue core = value.ToCore();
-        WriteTransaction.RemovePropertyValue(vertex.ToCore(), property, in core);
+        WriteTransaction.RemovePropertyValue(id, property, in core);
     }
 
     /// <summary>Edge の Set cardinality プロパティへ値を追加する。</summary>
@@ -379,8 +409,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        EdgeId id = RequireEdge(edge);
         PropertyValue core = value.ToCore();
-        WriteTransaction.AddPropertyValue(edge.ToCore(), property, in core);
+        WriteTransaction.AddPropertyValue(id, property, in core);
     }
 
     /// <summary>Edge の Set cardinality プロパティから値を削除する。</summary>
@@ -388,8 +419,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        EdgeId id = RequireEdge(edge);
         PropertyValue core = value.ToCore();
-        WriteTransaction.RemovePropertyValue(edge.ToCore(), property, in core);
+        WriteTransaction.RemovePropertyValue(id, property, in core);
     }
 
     /// <summary>Nexus の Set cardinality プロパティへ値を追加する。</summary>
@@ -397,8 +429,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        NexusId id = RequireNexus(nexus);
         PropertyValue core = value.ToCore();
-        WriteTransaction.AddPropertyValue(nexus.ToCore(), property, in core);
+        WriteTransaction.AddPropertyValue(id, property, in core);
     }
 
     /// <summary>Nexus の Set cardinality プロパティから値を削除する。</summary>
@@ -406,8 +439,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
+        NexusId id = RequireNexus(nexus);
         PropertyValue core = value.ToCore();
-        WriteTransaction.RemovePropertyValue(nexus.ToCore(), property, in core);
+        WriteTransaction.RemovePropertyValue(id, property, in core);
     }
 
     /// <summary>二つの Vertex を Edge で接続する。</summary>
@@ -415,7 +449,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(type);
-        return new EdgeKey(WriteTransaction.CreateEdge(source.ToCore(), target.ToCore(), type));
+        VertexId sourceId = RequireVertex(source);
+        VertexId targetId = RequireVertex(target);
+        return new EdgeKey(WriteTransaction.CreateEdge(sourceId, targetId, type));
     }
 
     /// <summary>指定した型とメンバーで Nexus を作成する。</summary>
@@ -426,7 +462,9 @@ public abstract class GraphWriteAccess : GraphReadAccess
         ArgumentNullException.ThrowIfNull(members);
         var converted = new NexusMember[members.Count];
         for (int i = 0; i < members.Count; i++)
-            converted[i] = new NexusMember(members[i].Role, members[i].Vertex.ToCore());
+            ArgumentException.ThrowIfNullOrEmpty(members[i].Role);
+        for (int i = 0; i < members.Count; i++)
+            converted[i] = new NexusMember(members[i].Role, RequireVertex(members[i].Vertex));
         return new NexusKey(WriteTransaction.CreateNexus(type, converted));
     }
 
@@ -435,7 +473,31 @@ public abstract class GraphWriteAccess : GraphReadAccess
     {
         EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(property);
-        WriteTransaction.SetVectorProperty(EntityRef.From(vertex.ToCore()), property, vector);
+        WriteTransaction.SetVectorProperty(EntityRef.From(RequireVertex(vertex)), property, vector);
+    }
+
+    private VertexId RequireVertex(VertexKey vertex)
+    {
+        VertexId id = vertex.ToCore();
+        if (!vertex.IsValid || !Transaction.VertexExists(id))
+            throw new KeyNotFoundException($"Vertex {vertex} は現在の snapshot に存在しません。");
+        return id;
+    }
+
+    private EdgeId RequireEdge(EdgeKey edge)
+    {
+        EdgeId id = edge.ToCore();
+        if (!edge.IsValid || !Transaction.TryGetEdge(id, out _))
+            throw new KeyNotFoundException($"Edge {edge} は現在の snapshot に存在しません。");
+        return id;
+    }
+
+    private NexusId RequireNexus(NexusKey nexus)
+    {
+        NexusId id = nexus.ToCore();
+        if (!nexus.IsValid || Transaction.GetNexusType(id) is null)
+            throw new KeyNotFoundException($"Nexus {nexus} は現在の snapshot に存在しません。");
+        return id;
     }
 }
 

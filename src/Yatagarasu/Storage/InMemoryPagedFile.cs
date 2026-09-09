@@ -106,7 +106,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
             pageLock.EnterReadLock();
         }
 
-        return new PageReadHandle(this, pageId, page);
+        return new PageReadHandle(this, new ReadPageLease(pageId, checked((int)pageId.Value), 1), page);
     }
 
     public PageWriteHandle PinForWrite(PageId pageId)
@@ -129,7 +129,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
                 _wal?.ActiveWriteSet?.CaptureBeforeImage(fileKind, pageId.Value, page);
             }
 
-            return new PageWriteHandle(this, pageId, page);
+            return new PageWriteHandle(this, new WritePageLease(pageId, checked((int)pageId.Value), 1), page);
         }
         catch
         {
@@ -138,18 +138,40 @@ internal sealed class InMemoryPagedFile : IPagedFile
         }
     }
 
-    public void Unpin(PageId pageId)
-        => _pageLocks[(int)pageId.Value].ExitReadLock();
-
-    public void UnpinDirty(PageId pageId, long lsn)
+    public void ReleaseRead(ReadPageLease lease)
     {
-        var pageLock = _pageLocks[(int)pageId.Value];
+        if (lease.Generation != 1 || lease.FrameIndex != lease.PageId.Value)
+            throw new InvalidOperationException("Invalid in-memory read page lease.");
+        var pageLock = _pageLocks[lease.FrameIndex];
+        if (!pageLock.IsReadLockHeld)
+            throw new InvalidOperationException("Read page lease is not held by this thread.");
+        lease.ClaimRelease();
+        pageLock.ExitReadLock();
+    }
+
+    private ReaderWriterLockSlim ClaimWriteRelease(WritePageLease lease)
+    {
+        if (lease.Generation != 1 || lease.FrameIndex != lease.PageId.Value)
+            throw new InvalidOperationException("Invalid in-memory write page lease.");
+        var pageLock = _pageLocks[lease.FrameIndex];
+        if (!pageLock.IsWriteLockHeld)
+            throw new InvalidOperationException("Write page lease is not held by this thread.");
+        lease.ClaimRelease();
+        return pageLock;
+    }
+
+    public void ReleaseWriteUnchanged(WritePageLease lease)
+        => ClaimWriteRelease(lease).ExitWriteLock();
+
+    public void ReleaseWriteDirty(WritePageLease lease, long lsn)
+    {
+        var pageLock = ClaimWriteRelease(lease);
         try
         {
-            var page = _pages[(int)pageId.Value];
+            var page = _pages[lease.FrameIndex];
             PageHeader.UpdateLsnAndChecksum(page, lsn);
             if (_walFileKind is byte fileKind)
-                _wal?.ActiveWriteSet?.LogPageImage(fileKind, pageId.Value, page);
+                _wal?.ActiveWriteSet?.LogPageImage(fileKind, lease.PageId.Value, page);
         }
         finally
         {

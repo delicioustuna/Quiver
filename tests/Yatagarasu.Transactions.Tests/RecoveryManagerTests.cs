@@ -127,7 +127,7 @@ public class RecoveryManagerTests : IDisposable
             // フェーズ 3: 復旧したページ内の sentinel を確認する。
             var rh = dstFile.PinForRead(dataPage);
             byte[] body = rh.Data[..9].ToArray();
-            dstFile.Unpin(dataPage);
+            rh.Dispose();
 
             System.Text.Encoding.UTF8.GetString(body).Should().Be("RECOVERED");
         }

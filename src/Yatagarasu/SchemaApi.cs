@@ -258,6 +258,9 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     {
         if (_vectorDefinitions is null)
             throw new NotSupportedException("このbackendはvector indexをサポートしていません。");
+        using var lease = owner is { } ownedTransaction
+            ? AcquireMutationLease(ownedTransaction)
+            : AcquireMutationLease();
         if (_vectorDefinitions.TryGet(
                 definition.Name,
                 out VectorIndexDescriptor? existing))
@@ -269,6 +272,16 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                 $"Index definition '{definition.Name}' already exists with a different target or options.");
         }
 
+        foreach (var candidate in _vectorDefinitions.List())
+        {
+            var current = ToDefinition(candidate);
+            if (current.Target.OwnerKind == definition.Target.OwnerKind
+                && current.Target.PropertyKey == definition.Target.PropertyKey
+                && (current.Target.Scope is null || definition.Target.Scope is null
+                    || current.Target.Scope == definition.Target.Scope)
+                && current.Dimensions != definition.Dimensions)
+                throw new ConstraintException($"Vector index '{definition.Name}' overlaps '{current.Name}' with different dimensions.");
+        }
         PropertyKeyId propertyKey = owner is { } transactionId
             ? GetOrCreatePropertyKey(definition.Target.PropertyKey, transactionId)
             : GetOrCreatePropertyKey(definition.Target.PropertyKey);
@@ -285,9 +298,6 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             definition.HnswMaxLayers,
             definition.HnswEfConstruction,
             definition.SegmentPolicy);
-        using var lease = owner is { } ownedTransaction
-            ? AcquireMutationLease(ownedTransaction)
-            : AcquireMutationLease();
         _vectorDefinitions.Create(descriptor);
         return true;
     }

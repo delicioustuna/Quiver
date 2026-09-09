@@ -10,6 +10,9 @@ namespace Yatagarasu.Rag;
 /// </summary>
 /// <remarks>
 /// 計算量は文書長 N に対し O(N)。スレッドセーフ (状態は呼び出しローカル)。
+/// サイズとオフセットはUTF-16コード単位単位。分割は有効なサロゲートペアを保持し、
+/// サイズ1でもペアは長さ2の単独チャンクにする。結合文字やZWJ列の一体性は保証しない。
+/// 不正なUTF-16入力の孤立サロゲートは置換せず保持する。
 /// </remarks>
 public static class Chunker
 {
@@ -69,10 +72,12 @@ public static class Chunker
             bufLo = -1;
         }
 
-        // 分割境界 b がサロゲートペアを割らないよう手前へ丸める (low surrogate の直前は high surrogate)。
-        // ブロック端 (b == e) や非サロゲート位置はそのまま返す。
+        bool SplitsPair(int b)
+            => b > 0 && b < source.Length
+                && char.IsHighSurrogate(source[b - 1]) && char.IsLowSurrogate(source[b]);
+
         int AvoidSplit(int b)
-            => (b > 0 && b < source.Length && char.IsLowSurrogate(source[b])) ? b - 1 : b;
+            => SplitsPair(b) ? b - 1 : b;
 
         // 末尾 hi を (lo, hi] の範囲で語境界 (空白の直後) へ後退させ、語の途中で切るのを避ける。
         // 既に境界 (hi が空白の前後)、または窓内に空白が無い (語が窓より長い・CJK・記号列) ときは hi を保つ。
@@ -97,12 +102,11 @@ public static class Chunker
             return w < limit ? w + 1 : start; // 空白の直後 = 次の語頭。無ければ start。
         }
 
-        // 切り出し末尾 hardHi を「語境界 → サロゲート保護」の順で丸める。丸めて lo 以下へ潰れる
-        // 病的ケース (窓 1 でペア収容不能等) は hardHi をそのまま使う。呼び出し側は hardHi < e を保証する。
+        // 窓に1つのスカラー値も収まらない場合だけ上限よりペア保持を優先する。
         int RoundCut(int lo, int hardHi)
         {
             int hi = AvoidSplit(RoundEndToWord(lo, hardHi));
-            return hi > lo ? hi : hardHi;
+            return hi > lo ? hi : hardHi + 1;
         }
 
         // [s, e) を window=TargetSize / overlap=Overlap で分割して出力する。語境界を尊重し、
@@ -119,7 +123,9 @@ public static class Chunker
                 Emit(p, hi, heading, page);
                 if (hi >= e) break;
                 int rawNext = hi - overlap;
-                int next = rawNext > p ? AvoidSplit(RoundStartToWord(rawNext, hi)) : hi;
+                int next = rawNext > p ? RoundStartToWord(rawNext, hi) : hi;
+                // 手前へ丸めると設定された重なり幅を超えるため、開始境界は前進させる。
+                if (SplitsPair(next)) next++;
                 p = next > p ? next : hi; // overlap >= window への安全弁 (通常 Validate で排除)
             }
         }

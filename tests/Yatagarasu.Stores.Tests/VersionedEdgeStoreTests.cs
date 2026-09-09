@@ -140,6 +140,26 @@ public class VersionedEdgeStoreTests : IDisposable
     }
 
     [Fact]
+    public void Stale_generation_cannot_delete_or_write_current_edge()
+    {
+        VertexId source = _vertices.Allocate(new LabelId(1));
+        VertexId target = _vertices.Allocate(new LabelId(1));
+        EdgeId current = _edges.Create(_vertices, source, target, new EdgeTypeId(0));
+        EdgeId stale = EdgeId.Create(current.Sequence, current.Generation + 1);
+
+        _edges.Delete(_vertices, stale);
+        using (EdgeReadHandle live = _edges.Read(current))
+            live.InUse.Should().BeTrue();
+
+        Action write = () =>
+        {
+            EdgeWriteHandle handle = _edges.Write(stale);
+            handle.Dispose();
+        };
+        write.Should().Throw<CorruptionException>();
+    }
+
+    [Fact]
     public void Scan_returns_only_live_edges()
     {
         var a = _vertices.Allocate(new LabelId(1));

@@ -145,7 +145,16 @@ internal sealed class IncidenceStore : IIncidenceStore
             throw new CorruptionException($"Write on missing incidence seq={sequence}.");
 
         var page = _file.PinForWrite(pageId);
-        return new IncidenceWriteHandle(_file, pageId, page.Data.Slice(offset, SlotSize));
+        try
+        {
+            Span<byte> fields = page.Data.Slice(offset, SlotSize);
+            return new IncidenceWriteHandle(page.Transfer(), fields);
+        }
+        catch
+        {
+            page.ReleaseUnchanged();
+            throw;
+        }
     }
 
     /// <summary>

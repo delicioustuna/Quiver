@@ -87,11 +87,12 @@ public sealed class NexusCrudTests : IDisposable
     }
 
     [Fact]
-    public void DeleteNexus_nonexistent_is_noop()
+    public void DeleteNexus_nonexistent_throws()
     {
         using var db = YatagarasuDatabase.Open(_path);
         using var tx = db.BeginWriteTransaction();
-        tx.DeleteNexus(new NexusId(99999));
+        Action act = () => tx.DeleteNexus(new NexusId(99999));
+        act.Should().Throw<KeyNotFoundException>();
     }
 
     // ── 入力検証 ──────────────────────────────────────────
@@ -150,7 +151,7 @@ public sealed class NexusCrudTests : IDisposable
         var a = tx.CreateVertex("A");
 
         var act = () => tx.CreateNexus("T", [new("R1", a), new("R2", new VertexId(99999))]);
-        act.Should().Throw<ArgumentException>().WithMessage("*does not exist*");
+        act.Should().Throw<KeyNotFoundException>().WithMessage("*does not exist*");
     }
 
     [Fact]

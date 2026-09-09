@@ -405,7 +405,8 @@ internal static class PersistenceH0Algorithms
         ReadOnlyMemory<float>[] queries = materialization.Vectors
             .Select(static vector => new ReadOnlyMemory<float>(vector))
             .ToArray();
-        IReadOnlyList<VectorSearchCursor> cursors = transaction.KnnSearchBatch(indexName, queries, k);
+        IReadOnlyList<VectorSearchCursor> cursors = transaction.KnnSearchBatch(
+            indexName, queries, k, new VectorSearchOptions { RejectNonFiniteScores = true });
         if (cursors.Count != pointCount)
         {
             foreach (VectorSearchCursor cursor in cursors)

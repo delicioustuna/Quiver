@@ -76,7 +76,7 @@ IReadOnlyList<Person> known = graph.Read(read =>
 The `Yatagarasu` package includes the model attributes and source generator.
 Projects with `ImplicitUsings` enabled receive the `Yatagarasu` and `Yatagarasu.Api` namespaces automatically.
 
-The public version is currently `0.7.0` and remains pre-1.0.
+This source tree targets `0.8.0` and remains pre-1.0. See the [release notes](docs/releases/0.8.0.md).
 
 ## Name
 
